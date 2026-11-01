@@ -28,11 +28,14 @@ credentials remain in the host's credential store, outside plugin data and promp
 
 ## First project
 
-1. Drop files/archives or choose a folder in **Materials / Projects**.
-2. Inspect the directory preview. Split projects by top folder, leaf folder, chosen
-   depth, individual files, or one project. Rename projects before importing.
-3. Conversion starts on import. Open a project to read files or add supporting data.
-4. Create a **Space** using the desired schema and extraction instructions.
+1. Click **New project** in **Materials / Projects**, name it (or pick an existing
+   project) and add files, a folder or archives. Everything goes into that one project.
+2. Conversion starts on import. Open a project to read files, add more files, remove
+   selected files, or delete the project. Removing files marks results that used them
+   out of date; **Re-extract** refreshes them.
+3. The built-in **Knowledge graph** Space is maintained by the developers and is
+   read-only. Create your own Space for other schemas or instructions.
+4. Create a custom **Space** using the desired schema and extraction instructions.
 5. Select projects and run the Space. Open **Results** to view data, evidence,
    history, an optional review or custom post-processing.
 

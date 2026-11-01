@@ -354,7 +354,7 @@ def test_experiment_schemas_and_projection_spaces_have_separate_contracts(card):
     space = run(card, spaces.space_manage, operation="create", name="Report table", kind="table",
                 definition=SCHEMA, system_prompt="Extract a report.")["space"]
     assert [item["name"] for item in run(card, actions.schemas)["schemas"]] == ["Synthesis run"]
-    assert [item["name"] for item in run(card, spaces.spaces)["spaces"]] == ["Report table"]
+    assert [item["name"] for item in run(card, spaces.spaces)["spaces"]] == ["Knowledge graph", "Report table"]
     with pytest.raises(KnowledgeError):
         _bundle(card, space)
     with pytest.raises(ValueError):
@@ -397,6 +397,8 @@ def test_a_name_query_returns_every_relation_touching_the_concept_with_names_and
     assert computes["statement"] == "DPA-SSE computes the Li+ hopping barrier of the electrolyte."
     assert computes["evidence_level"] == 2 and computes["snippet"] == "the hopping barrier computed with DPA-SSE"
     assert computes["source_ids"] == [first] and computes["properties"]["description"] == computes["statement"]
+    # The compact view spends its budget on statements and filenames, not UUIDs.
+    assert all("source_ids" not in r for r in run(card, actions.graph, names=["dpa sse"])["relations"])
 
     # Two names, one by alias: the relation between them comes back.
     both = run(card, actions.graph, names=["DPA-SSE", "nudged elastic band"])
@@ -418,11 +420,48 @@ def test_a_name_query_returns_every_relation_touching_the_concept_with_names_and
     everything = run(card, actions.graph, layer="literature")
     assert everything["matched"] is None and len(everything["entities"]) == 4 and len(everything["relations"]) == 3
     assert all("matched" not in item for item in everything["entities"])
-    # Traversal reads the same way.
+    # Traversal by id (the UI) and by name (the agent) read the same way, hop by hop.
     start = found["entities"][0]["id"]
-    walked = run(card, actions.graph, operation="traverse", entity_id=start)
+    walked = run(card, actions.graph, operation="traverse", entity_id=start, full=True)
     assert {r["source_name"] for r in walked["relations"]} == {"DPA-SSE", "NEB"}
     assert next(item for item in walked["entities"] if item["id"] == start)["matched"] is True
+    hops = run(card, actions.graph, operation="traverse", names=["dpa sse"], max_depth=2)
+    assert hops["start"]["name"] == "DPA-SSE" and hops["degree"] == 2
+    assert [hop["depth"] for hop in hops["hops"]] == [1, 2]
+    assert {(r["source_name"], r["predicate"], r["target_name"]) for r in hops["hops"][0]["relations"]} == {
+        ("DPA-SSE", "computes", "Hopping barrier"), ("NEB", "used_with", "DPA-SSE")}
+    assert [(r["source_name"], r["target_name"]) for r in hops["hops"][1]["relations"]] == [("Li7La3Zr2O12", "Hopping barrier")]
+    assert {e["name"] for e in hops["entities"]} == {"Hopping barrier", "NEB", "Li7La3Zr2O12"}
+    assert run(card, actions.graph, operation="traverse", names=["graphene"])["unresolved"] == "graphene"
+
+
+def test_the_agent_can_follow_an_indirect_link_through_a_shared_concept(card):
+    """CrystalGAN is a GAN; DDPM is contrasted with GANs. Asked about both, the agent
+    must see the two-step path with each step's statement, and be able to expand GAN."""
+    kb = client.open_client(card.node_id, card.storage_path)
+    kb.graph.extract({"entities": [{"type": "model", "name": name} for name in ("CrystalGAN", "GAN", "DDPM", "DDIM", "PdH")],
+        "relations": [{"source": "CrystalGAN", "target": "GAN", "type": "is_a", "properties": {"description": "CrystalGAN is a novel GAN."}},
+                      {"source": "DDPM", "target": "GAN", "type": "is_related_to", "properties": {"snippet": "DDPMs are contrasted with GANs."}},
+                      {"source": "DDIM", "target": "DDPM", "type": "generalizes", "properties": {}},
+                      {"source": "CrystalGAN", "target": "PdH", "type": "uses_input", "properties": {}}]},
+        extractor=lambda value: value)
+
+    both = run(card, actions.graph, names=["CrystalGAN", "DDPM"])
+    assert [e["name"] for e in both["entities"] if e["matched"]] == ["CrystalGAN", "DDPM"]
+    assert both["connections"] == [{"from": "CrystalGAN", "to": "DDPM", "length": 2,
+                                    "steps": ["CrystalGAN —is_a→ GAN", "DDPM —is_related_to→ GAN"]}]
+    # The path's relations come first, each with its statement, and no UUID evidence.
+    assert [(r["source_name"], r["target_name"], r.get("statement")) for r in both["relations"][:2]] == [
+        ("CrystalGAN", "GAN", "CrystalGAN is a novel GAN."), ("DDPM", "GAN", "DDPMs are contrasted with GANs.")]
+    assert all("source_ids" not in r for r in both["relations"])
+    # Every matched concept tells the agent where a hop would lead.
+    crystal = next(e for e in both["entities"] if e["name"] == "CrystalGAN")
+    assert crystal["neighbours"] == ["GAN", "PdH"] and crystal["degree"] == 2
+
+    gan = run(card, actions.graph, operation="traverse", names=["GAN"], max_depth=2)
+    assert [hop["depth"] for hop in gan["hops"]] == [1, 2]
+    assert {r["source_name"] for r in gan["hops"][0]["relations"]} == {"CrystalGAN", "DDPM"}
+    assert {(r["source_name"], r["target_name"]) for r in gan["hops"][1]["relations"]} == {("DDIM", "DDPM"), ("CrystalGAN", "PdH")}
 
 
 def _hub_graph(card):

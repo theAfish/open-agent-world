@@ -22,10 +22,12 @@ a report and its appendices, an experiment with measurements and notes, or any o
 set of related original files. Selecting a checkbox never creates another project
 or extraction result.
 
-File, folder and ZIP/TAR input share one import preview. Choose top folder, leaf
-folder, a depth, one project, or individual files. The preview shows the actual
-files under each project and permits names to be changed. Adding supporting files
-from an existing project keeps them in that project. Relative paths are retained.
+**New project** is the one way in. Name a new project or pick an existing one, then add
+files, a folder or ZIP/TAR archives; they all join that project and relative paths are
+retained. Files can be removed from a project individually, and a project can be
+deleted with its results (the knowledge graph is rebuilt). Removal is soft: the
+original bytes stay as evidence, and results that used a removed file are marked out of
+date rather than deleted.
 
 Import starts conversion automatically. Each file reports pending, converting,
 converted or failed; project readiness summarizes those states. Unsupported formats
@@ -39,8 +41,9 @@ results. Conversion outputs are reused across Spaces.
 ### Spaces
 
 A Space holds extraction instructions, JSON Schema, output kind and configuration
-version. Choose a table/custom-JSON or graph starting point and edit the definition
-for the desired domain. A Space consumes all converted original files in each
+version. The built-in Knowledge graph Space is maintained by the developers and is
+read-only. For other needs choose a table/custom-JSON or graph starting point and edit
+the definition for the desired domain. A Space consumes all converted original files in each
 selected project directly. No Knowledge Frame or fixed research-literature schema
 is inserted before projection.
 

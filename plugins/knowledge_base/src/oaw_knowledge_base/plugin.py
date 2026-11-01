@@ -54,6 +54,8 @@ DEPLOYMENT_FIELDS = {
     'jobs': frozenset(['events', 'job', 'jobs']),
     'projects': frozenset(['offset', 'project', 'projects', 'has_more', 'next_offset']),
     'project_manage': frozenset(['project']),
+    'project_file_remove': frozenset(['project', 'removed', 'status', 'reasons', 'message']),
+    'project_delete': frozenset(['deleted', 'project_id', 'status', 'reasons', 'message']),
     'project_import_preview': frozenset(['depth', 'files', 'grouping', 'projects', 'token']),
     'project_import_commit': frozenset(['jobs', 'projects', 'reused', 'source_ids']),
     'project_process': frozenset(['jobs']),
@@ -76,7 +78,7 @@ def _surface(*names, config_fields=frozenset()):
 
 def _deployment():
     project_actions = ("overview", "projects", "project_manage", "project_import_preview",
-        "project_import_commit", "project_process", "sources", "markdown", "search", "jobs")
+        "project_import_commit", "project_file_remove", "project_delete", "project_process", "sources", "markdown", "search", "jobs")
     result_actions = ("overview", "projects", "spaces", "projections", "projection_prepare",
         "projection_prompt", "projection_save", "projection_fail", "projection_review_prompt", "projection_revise", "markdown")
     return NodeDeploymentDefinition(

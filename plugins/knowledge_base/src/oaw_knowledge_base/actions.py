@@ -97,6 +97,12 @@ def _scope(group, all_groups):
     return None if all_groups or group is None else group.id
 
 
+def project_removed(collection):
+    """Deleted projects keep their collection (MKB cannot delete a non-empty one) but
+    are tombstoned in its metadata and left out of every project listing."""
+    return bool((collection.metadata or {}).get("removed"))
+
+
 def _bounded(payload):
     # Round-trip through JSON so timestamps and UUIDs leave as plain strings and an
     # oversized result is rejected here rather than halfway through the response.
@@ -137,11 +143,11 @@ def overview(context, arguments):
     jobs = kb.jobs.list(limit=50)
     counts = kb.oaw_graph_store.counts(group_id=scope)
     default_group_id = str(group.id) if group else ""
-    project_items = kb.collections.list(limit=500)
+    project_items = [item for item in kb.collections.list(limit=500) if not project_removed(item)]
     projection_items = kb.oaw_projections.list(project_id=str(scope) if scope else None, limit=500)
     return _bounded({
         "collection": {"id": str(group.id) if group else "", "name": group.name if group else settings["collection_name"]},
-        "groups": [_group_json(item, default_group_id) for item in kb.collections.list(limit=500)],
+        "groups": [_group_json(item, default_group_id) for item in project_items],
         "settings": settings,
         "engines": available_engines(settings["mineru_base_url"] or None,
                                      resolve_secret=getattr(context, "resolve_secret", None),
@@ -1001,6 +1007,7 @@ class GraphQuery(Request):
     # acronym anywhere in it, and relations are ranked by how well they fit — by
     # words and, when the card has an embedding model, by meaning.
     query: str | None = Field(default=None, max_length=500)
+    # For traverse: the concept to expand, by id or (through ``names``/``query``) by name.
     entity_id: str | None = None
     # The fields below are for the graph map and the CLI; the agent only sees ``query``
     # and ``names``, so there is no lexical-only knob for it to pick by mistake.
@@ -1076,9 +1083,22 @@ def _clip(text, limit):
     return text if not isinstance(text, str) or len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-def _compact_entity(entity, matched):
+NEIGHBOUR_NAMES = 20
+
+
+def _neighbour_names(adjacency, identifier, by_id):
+    """The concepts one hop away, by name: the hint that tells the agent where a
+    traverse would lead without spending the budget on those relations."""
+    names = {by_id[other].name for _, other in adjacency.get(identifier, ()) if other in by_id}
+    return sorted(names, key=str.casefold)
+
+
+def _compact_entity(entity, matched, *, neighbours=None):
     properties = entity.properties or {}
     item = {"name": entity.name, "type": entity.type, "matched": matched}
+    if neighbours:
+        item["degree"] = len(neighbours)
+        item["neighbours"] = neighbours[:NEIGHBOUR_NAMES]
     if matched:
         # Only a matched concept's id (for traverse) and aliases are worth the space.
         item["id"] = str(entity.id)
@@ -1104,15 +1124,14 @@ def _compact_relation(relation, names):
     if statement:
         item["statement"] = _clip(statement, STATEMENT_CHARS)
     if snippets:
-        item["snippets"] = [_clip(value, STATEMENT_CHARS) for value in snippets[:2]]
+        item["snippets"] = [_clip(snippets[0], STATEMENT_CHARS)]
     if isinstance(properties.get("evidence_level"), int):
         item["evidence_level"] = properties["evidence_level"]
+    # Evidence by filename: ids stay in the store and the full view; here they would
+    # only eat the budget.
     files = [v for v in properties.get("source_files") or [] if isinstance(v, str)]
     if files:
         item["source_files"] = files
-    sources = [v for v in properties.get("source_ids") or [] if isinstance(v, str)]
-    if sources:
-        item["source_ids"] = sources
     return item
 
 
@@ -1186,7 +1205,12 @@ def _ranked_query(request, entities, relations, by_id, needles=(), semantic=None
     it names two or more concepts — the shortest paths between them."""
     entity_scores, relation_scores = graph_search.search(
         entities, relations, request.search_text(), needles=needles, semantic=semantic)
-    top = sorted(entity_scores, key=lambda identifier: -entity_scores[identifier])
+    def named_first(identifier):
+        # Equal scores keep the caller's order: names=[X, Y] answers X then Y.
+        hits = [index for index, needle in enumerate(needles)
+                if graph_search.name_score(by_id[identifier], needle) >= graph_search.STRONG]
+        return (-entity_scores[identifier], hits[0] if hits else len(needles))
+    top = sorted(entity_scores, key=named_first)
     top = top[:min(request.limit, max(QUERY_ENTITIES, len(needles)))]
     by_relation = {r.id: r for r in relations}
     best = sorted(relation_scores, key=lambda identifier: -relation_scores[identifier])
@@ -1200,8 +1224,12 @@ def _ranked_query(request, entities, relations, by_id, needles=(), semantic=None
             for second in named[index + 1:]:
                 paths += [(first, second, path) for path in graph_search.shortest_paths(
                     adjacency, first, second, max_depth=request.max_depth or CONNECT_DEPTH, max_paths=2)]
+    # The relations that make up a path carry the answer to "how are X and Y related":
+    # show them (with their statements) before the merely well-ranked ones.
+    rank = {identifier: position for position, identifier in enumerate(best)}
+    on_paths = sorted(dict.fromkeys(r.id for _, _, path in paths for r in path), key=lambda i: rank.get(i, len(rank)))
+    shown = [by_relation[i] for i in on_paths] + [r for r in shown if r.id not in set(on_paths)]
     ids = list(top) + [i for r in shown for i in (r.source_id, r.target_id)]
-    ids += [r.source_id for _, _, path in paths for r in path] + [r.target_id for _, _, path in paths for r in path]
     names = {str(identifier): by_id[identifier].name for identifier in ids if identifier in by_id}
     if request.full:
         result = _graph_result(ids, by_id, shown, set(top), matched=len(top),
@@ -1209,14 +1237,81 @@ def _ranked_query(request, entities, relations, by_id, needles=(), semantic=None
         result["connections"] = [_path_json(first, second, path, names) for first, second, path in paths]
         return result
     top, shown = top[:COMPACT_ENTITIES], shown[:COMPACT_RELATIONS]
+    strong = {i for i in top if entity_scores[i] >= graph_search.MATCHED}
     ordered = [i for i in dict.fromkeys(ids) if i in by_id]
     others = sorted((i for i in ordered if i not in set(top)), key=lambda i: by_id[i].name.casefold())
+    adjacency = graph_search.adjacency(relations)
     return _fit(_bounded({
-        "entities": [_compact_entity(by_id[i], i in set(top)) for i in list(top) + others],
+        "entities": [_compact_entity(by_id[i], i in strong, neighbours=_neighbour_names(adjacency, i, by_id) if i in strong else None)
+                     for i in list(top) + others],
         "relations": [_compact_relation(r, names) for r in shown],
         "connections": [_compact_path(first, second, path, names) for first, second, path in paths],
         "matched": len(top), "truncated": len(best) > len(shown),
     }))
+
+
+def _traverse(request, entities, relations, by_id):
+    """Expand one concept's neighbourhood hop by hop: the agent names it (or passes its
+    id), and gets the relations at depth 1, then 2, … up to ``max_depth``. Farther hops
+    are dropped first when the result is trimmed, so the near neighbourhood survives."""
+    if request.entity_id:
+        start = by_id.get(_uuid(request.entity_id, "entity_id"))
+        if start is None:
+            raise KnowledgeError("entity_id is not in this graph scope")
+    else:
+        name = request.names[0] if request.names else (request.query or request.name_contains or "")
+        found = graph_search.resolve(entities, name)
+        if not found:
+            return {"start": None, "unresolved": name, "hops": [], "entities": []}
+        start = found[0]
+    depth = request.max_depth or 1
+    adjacency = graph_search.adjacency(relations)
+    visited, frontier, hops, seen = {start.id}, [start.id], [], set()
+    for level in range(1, depth + 1):
+        step, next_frontier = [], []
+        for identifier in frontier:
+            for relation, other in adjacency.get(identifier, ()):
+                if request.direction == "out" and relation.source_id != identifier:
+                    continue
+                if request.direction == "in" and relation.target_id != identifier:
+                    continue
+                if relation.id in seen:
+                    continue
+                seen.add(relation.id)
+                step.append(relation)
+                if other not in visited:
+                    visited.add(other)
+                    next_frontier.append(other)
+        if not step:
+            break
+        hops.append({"depth": level, "relations": step})
+        frontier = next_frontier
+    names = {str(identifier): by_id[identifier].name for identifier in visited if identifier in by_id}
+    if request.full:
+        shown = [r for hop in hops for r in hop["relations"]]
+        return _graph_result(list(visited), by_id, shown, {start.id}, start=_entity_json(start, matched=True),
+                             hops=[{"depth": hop["depth"], "relations": [_relation_json(r, names) for r in hop["relations"]]} for hop in hops])
+    result = {"start": _compact_entity(start, True), "degree": len(adjacency.get(start.id, ())),
+              "hops": [{"depth": hop["depth"], "relations": [_compact_relation(r, names) for r in hop["relations"]]} for hop in hops],
+              "entities": [_compact_entity(by_id[i], False) for i in visited if i != start.id and i in by_id]}
+    return _fit_hops(_bounded(result))
+
+
+def _fit_hops(result, budget=COMPACT_BYTES):
+    """Trim the farthest hop's relations first, then the entity list, until the JSON fits."""
+    def size():
+        return len(json.dumps(result, ensure_ascii=False, default=str).encode("utf-8"))
+    while size() > budget and result["hops"]:
+        last = result["hops"][-1]
+        if len(last["relations"]) > 1 and (len(result["hops"]) == 1 or len(last["relations"]) > 3):
+            last["relations"].pop()
+        else:
+            result["hops"].pop()
+        result["truncated"] = True
+    while size() > budget and result["entities"]:
+        result["entities"].pop()
+        result["truncated"] = True
+    return result
 
 
 def _connect(request, entities, relations, by_id):
@@ -1269,29 +1364,6 @@ def graph(context, arguments):
     scope = _any_group(request.group_id)
     store = kb.oaw_graph_store
 
-    if request.operation == "traverse":
-        if not request.entity_id:
-            raise KnowledgeError("entity_id is required to traverse")
-        start = _uuid(request.entity_id, "entity_id")
-        result = kb.graph.traverse(start, max_depth=request.max_depth or 1, direction=request.direction)
-        all_entities, all_relations = list(result.entities), list(result.relations)
-        if scope is not None or request.layer is not None:
-            # kb.graph.traverse walks the whole store; group and layer are tags on
-            # published elements (see graph_store.py), so narrow after the walk.
-            in_scope = {item.id for item in store.list_relations(group_id=scope, layer=request.layer)}
-            all_relations = [item for item in all_relations if item.id in in_scope]
-            kept_ids = {item.source_id for item in all_relations} | {item.target_id for item in all_relations} | {start}
-            all_entities = [item for item in all_entities if item.id in kept_ids]
-        entities = all_entities[:request.limit]
-        kept = {str(entity.id) for entity in entities}
-        names = {str(entity.id): entity.name for entity in entities}
-        return _bounded({
-            "entities": [_entity_json(e, matched=str(e.id) == str(start)) for e in entities],
-            "relations": [_relation_json(r, names) for r in all_relations
-                          if str(r.source_id) in kept and str(r.target_id) in kept][:request.limit * 5],
-            "truncated": len(all_entities) > len(entities),
-        })
-
     needles = [graph_search.phrase(value) for value in request.names]
     if request.name_contains:
         needles.append(graph_search.phrase(request.name_contains))
@@ -1304,6 +1376,8 @@ def graph(context, arguments):
 
     if request.operation == "connect":
         return _connect(request, all_entities, all_relations, by_id)
+    if request.operation == "traverse":
+        return _traverse(request, all_entities, all_relations, by_id)
 
     # One search path. Whatever the caller typed — a question, concept names, a word
     # from a statement — is searched by words and (when the card has an embedding

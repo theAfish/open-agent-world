@@ -214,7 +214,7 @@ export function InsightsSection({
   const expand = (id: string) => {
     setEntity(id);
     void perform(async () => {
-      const result = await call("graph", { operation: "traverse", entity_id: id, max_depth: 2, layer: "experiment", ...groupFilter() });
+      const result = await call("graph", { operation: "traverse", entity_id: id, max_depth: 2, layer: "experiment", full: true, ...groupFilter() });
       setGraph(result as unknown as Graph);
     });
   };

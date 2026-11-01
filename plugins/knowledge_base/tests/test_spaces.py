@@ -8,7 +8,7 @@ import uuid
 import pytest
 from sqlalchemy import create_engine
 
-from oaw_knowledge_base import actions, client, projects, spaces
+from oaw_knowledge_base import actions, client, operations, projects, spaces
 from oaw_knowledge_base.context import KnowledgeContext, MemorySettings
 from oaw_knowledge_base.errors import KnowledgeError
 from oaw_knowledge_base.experiment_store import ConflictingRevision
@@ -183,7 +183,9 @@ def test_graph_relations_reach_the_agent_with_their_text_and_files(card):
         relation = actions.graph(card, arguments)["relations"][0]
         assert relation["statement"].startswith("Uni-3DAR compresses") and len(relation["statement"]) <= 240
         assert relation["snippets"] == ["Octrees are used by Uni-3DAR."]
-        assert relation["source_files"] == ["report.md"] and len(relation["source_ids"]) == 2
+        assert relation["source_files"] == ["report.md"] and "source_ids" not in relation
+    full = actions.graph(card, {"names": ["Uni-3DAR"], "full": True})["relations"][0]
+    assert len(full["source_ids"]) == 2
     neighbour = [item for item in actions.graph(card, {"names": ["octree"]})["entities"] if not item["matched"]]
     assert neighbour and neighbour[0]["description"] == "A 3D model"
 
@@ -212,6 +214,85 @@ def test_saved_graph_results_are_the_one_queryable_knowledge_graph(card):
     assert revised["generation"] == 2
     names = {item["name"] for item in actions.graph(card, {"query": "Uni-3DAR"})["entities"]}
     assert "Langevin dynamics" not in names and "octree" in names
+
+
+def test_removing_files_hides_them_and_marks_results_stale(card):
+    project = make_project(card)
+    extra = add_file(card, project, "notes.md", "# Notes\nExtra context")
+    space = make_space(card)
+    run = prepare(card, space, project["id"])[0]
+    save(card, run)
+    assert not spaces.projections(card, {})["projections"][0]["stale"]
+
+    arguments = {"project_id": project["id"], "source_ids": [extra]}
+    assert projects.project_file_remove(card, arguments)["status"] == "confirmation_required"
+    assert extra in projects.project_source_ids(kb_for(card), project["id"])
+    confirmed = replace(card, confirmed=True)
+    assert projects.project_file_remove(confirmed, arguments)["removed"] == 1
+    assert projects.project_file_remove(confirmed, arguments)["removed"] == 0
+
+    assert [item["relative_path"] for item in projects.projects(card, {"project_id": project["id"]})["project"]["files"]] == ["report.md"]
+    assert not actions.search(card, {"query": "Extra context", "all_groups": True})["results"]
+    result = spaces.projections(card, {})["projections"][0]
+    assert result["stale"] and "files changed" in result["stale_reason"]
+    assert prepare(card, space, project["id"])[0]["disposition"] == "created"
+
+
+def test_deleting_a_project_removes_its_results_and_graph_and_frees_the_name(card):
+    keep, doomed = make_project(card, "Keep"), make_project(card, "Doomed")
+    space = make_space(card, kind="graph", definition=spaces.GRAPH_SCHEMA)
+    for project, name in ((keep, "Octree"), (doomed, "Langevin")):
+        run = prepare(card, space, project["id"])[0]
+        save(card, run, {"entities": [{"id": "a", "name": name}], "relations": []})
+    assert actions.graph(card, {"names": ["Langevin"]})["matched"] == 1
+
+    assert projects.project_delete(card, {"project_id": doomed["id"]})["status"] == "confirmation_required"
+    assert projects.project_delete(replace(card, confirmed=True), {"project_id": doomed["id"]})["deleted"]
+
+    assert [item["name"] for item in projects.projects(card, {})["projects"]] == ["Keep"]
+    assert [item["project_name"] for item in spaces.projections(card, {"include_history": True})["projections"]] == ["Keep"]
+    assert actions.graph(card, {"names": ["Langevin"]})["matched"] == 0
+    assert actions.graph(card, {"names": ["Octree"]})["matched"] == 1
+    assert actions.overview(card, {"all_groups": True})["counts"]["projects"] == 1
+    with pytest.raises(KnowledgeError, match="deleted"):
+        projects.project_file_remove(replace(card, confirmed=True), {"project_id": doomed["id"], "source_ids": [str(uuid.uuid4())]})
+    assert projects.project_manage(card, {"operation": "create", "name": "Doomed"})["project"]["name"] == "Doomed"
+    # Removal is a human action: no agent tool exists for either operation.
+    assert not {"project_file_remove", "project_delete"} & {item.name for item in operations.AGENT_OPERATIONS}
+
+
+def test_builtin_graph_space_is_seeded_read_only_and_kept_in_step_with_the_code(card):
+    kb = kb_for(card)
+    listed = spaces.spaces(card, {})["spaces"]
+    builtin = [item for item in listed if item["builtin"]]
+    assert [item["name"] for item in builtin] == ["Knowledge graph"] and builtin[0]["kind"] == "graph"
+    assert builtin[0]["definition"] == spaces.GRAPH_SCHEMA
+
+    with pytest.raises(KnowledgeError, match="Built-in"):
+        spaces.space_manage(card, {"operation": "update", "space_id": builtin[0]["id"], "name": "Mine"})
+    with pytest.raises(KnowledgeError, match="reserved"):
+        spaces.space_manage(card, {"operation": "create", "name": "Fake", "domain": "builtin",
+                                   "definition": TABLE, "system_prompt": "x"})
+
+    spaces.ensure_builtin_spaces(kb)
+    assert spaces.spaces(card, {})["spaces"][0]["version"] == builtin[0]["version"]
+    kb.schemas.update(builtin[0]["id"], definition=TABLE)
+    spaces.ensure_builtin_spaces(kb)
+    restored = spaces.spaces(card, {"operation": "get", "space_id": builtin[0]["id"]})["space"]
+    assert restored["definition"] == spaces.GRAPH_SCHEMA and restored["version"] > builtin[0]["version"]
+
+
+def test_an_existing_space_with_the_builtin_name_is_locked_not_rewritten(card, tmp_path):
+    kb = kb_for(card)
+    kb.schemas.delete(next(item.id for item in kb.schemas.list(limit=500) if item.domain == "builtin"))
+    mine = spaces.space_manage(card, {"operation": "create", "name": "knowledge graph", "kind": "graph",
+                                      "definition": TABLE, "system_prompt": "My own wording."})["space"]
+    spaces.ensure_builtin_spaces(kb)
+    kept = spaces.spaces(card, {"operation": "get", "space_id": mine["id"]})["space"]
+    assert kept["builtin"] and kept["version"] == mine["version"]
+    assert (kept["definition"], kept["system_prompt"]) == (TABLE, "My own wording.")
+    with pytest.raises(KnowledgeError, match="Built-in"):
+        spaces.space_manage(card, {"operation": "update", "space_id": mine["id"], "name": "Mine"})
 
 
 def test_independent_clients_claim_one_run_concurrently(card):
