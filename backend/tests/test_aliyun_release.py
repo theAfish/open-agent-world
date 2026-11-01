@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 import tarfile
 from types import SimpleNamespace
 from uuid import uuid4
@@ -172,6 +173,13 @@ def installation(tmp_path, monkeypatch):
                'release': '20261026T010000Z-' + 'b' * 12 + '-12345678', 'archive_sha256': 'f' * 64}
     monkeypatch.setattr(remote, 'paths', lambda _: (app, hosting, releases))
     monkeypatch.setattr(remote, 'lock', lambda _, **kw: nullcontext())
+    # These transaction tests model an independently approved manual release.
+    # Actual operator ownership and allowlist rejection are exercised separately.
+    monkeypatch.setattr(remote, 'authorize', lambda request, **kw: {
+        'archive_sha256': kw.get('archive_sha256', request.get('archive_sha256')),
+        'source_commit': kw.get('source_commit') or request.get('source_commit') or 'b' * 40})
+    monkeypatch.setattr(remote, 'trusted_operator', lambda: Path(remote.__file__))
+    monkeypatch.setattr(remote, 'trusted_worker', lambda: ROOT / 'deploy/aliyun/release_worker.py')
     b = remote.release_dir(request)
     stage = b / 'stage'
     (stage / 'backend').mkdir(parents=True)
@@ -194,7 +202,6 @@ def installation(tmp_path, monkeypatch):
         '[Unit]\nAfter=network.target\n[Service]\nUser=oaw-user\nProtectSystem=strict\n'
         'BindReadOnlyPaths=/profile\nEnvironmentFile=/private.env\nExecStart=/old-command\nRestart=always\n')
     monkeypatch.setattr(remote, 'UNITS', units)
-    monkeypatch.setattr(remote, 'MAINTENANCE', tmp_path / 'maintenance')
     monkeypatch.setattr(remote.subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=0, stdout='', stderr=''))
     commands = []
     def run(*args, **kwargs):
@@ -347,14 +354,15 @@ def test_git_merge_leaves_developer_branch_and_dirty_files_untouched(tmp_path, m
     before = client.git(repo, 'rev-parse', 'HEAD')
     tree = repo / '.tmp/build'
     cfg = {'repository': str(repo), 'worktree': str(tree), 'branch': 'ali'}
-    monkeypatch.setattr(client, 'build', lambda *a: 'built')
     args = SimpleNamespace(merge='origin/dev', resolved=False)
     if conflict:
         with pytest.raises(RuntimeError, match='Merge stopped'):
-            client.prepare(cfg, args)
+            client.sync(cfg, args)
         assert client.git(tree, 'diff', '--name-only', '--diff-filter=U') == 'shared'
     else:
-        assert client.prepare(cfg, args) == 'built'
+        commit = client.sync(cfg, args)
+        assert client.git(repo, 'rev-parse', 'ali') == commit
+        assert client.git(repo, 'rev-parse', 'origin/ali') == commit
         assert (tree / 'shared').read_text() == 'dev edit'
     assert client.git(repo, 'branch', '--show-current') == 'dev'
     assert client.git(repo, 'rev-parse', 'HEAD') == before
@@ -490,3 +498,142 @@ def test_npm_cache_is_invalidated_by_lockfile_or_node_change(tmp_path, monkeypat
     monkeypatch.setattr(client, 'run', lambda *args, **kw: 'v24')
     client.prepare_npm(tmp_path)
     assert len(calls) == 3
+
+
+@pytest.fixture
+def portable_build(tmp_path, monkeypatch):
+    """Real Git and archives; only npm execution is replaced by generated output."""
+    repo = tmp_path / 'checkout'
+    repo.mkdir()
+    client.git(repo, 'init', '-b', 'feature')
+    client.git(repo, 'config', 'user.email', 'test@example.invalid')
+    client.git(repo, 'config', 'user.name', 'Build test')
+    (repo / '.gitignore').write_text('frontend/dist/\n.tmp/\n')
+    (repo / 'main.py').write_text('reviewed source\n')
+    (repo / 'frontend').mkdir()
+    client.git(repo, 'add', '.')
+    client.git(repo, 'commit', '-m', 'source')
+    plan = tmp_path / 'checks.json'
+    client.write(plan, {'backend': [], 'frontend': []})
+    operations = []
+    original_git = client.git
+    def git(path, *args, **kwargs):
+        operations.append(args)
+        assert args[0] not in {'merge', 'fetch', 'push', 'update-ref'}, 'A build must not synchronize Git'
+        return original_git(path, *args, **kwargs)
+    monkeypatch.setattr(client, 'git', git)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Offline build must not read deployment configuration or contact a server')
+    monkeypatch.setattr(client, 'remote', forbidden)
+    monkeypatch.setattr(client, 'config', forbidden)
+    monkeypatch.setattr(client, 'target_id', forbidden)
+    monkeypatch.setattr(client, 'prepare_npm', lambda _: None)
+    def npm(tree, *args):
+        assert args == ('run', 'build')
+        dist = tree / 'frontend/dist'
+        dist.mkdir(parents=True)
+        (dist / 'index.html').write_text('<p>compiled frontend</p>')
+    monkeypatch.setattr(client, 'npm', npm)
+    output = tmp_path / 'artifacts'
+    client.main(['build', '--source', str(repo), '--output', str(output), '--python', sys.executable,
+                 '--test-plan', str(plan)])
+    record = client.read(output / 'latest.json')
+    directory = output / record['release']
+    return SimpleNamespace(repo=repo, output=output, directory=directory, record=record,
+                           operations=operations, original_git=original_git)
+
+
+def test_portable_build_is_offline_target_free_and_git_read_only(portable_build, tmp_path):
+    f = portable_build
+    manifest = client.verify_artifact(f.directory, f.record)
+    assert manifest['version'] == 2 and manifest['kind'] == 'oaw-build'
+    assert manifest['source_commit'] == f.original_git(f.repo, 'rev-parse', 'HEAD')
+    assert {'main.py', 'frontend/dist/index.html'} <= manifest['files'].keys()
+    assert not {'operator_files', 'baseline_commit', 'baseline_receipt', 'target'} & manifest.keys()
+    assert not {'target', 'uploaded', 'baseline_receipt'} & f.record.keys()
+    assert not any(name.startswith('operator/') for name in manifest['files'])
+    assert f.original_git(f.repo, 'branch', '--show-current') == 'feature'
+    assert f.original_git(f.repo, 'status', '--porcelain') == ''
+
+
+def test_prepare_preserves_dirty_developer_checkout_in_detached_worktree(portable_build, monkeypatch):
+    f = portable_build
+    source = f.repo / 'main.py'
+    source.write_text('unfinished developer edit')
+    tree = f.repo / '.tmp/build'
+    cfg = {'repository': str(f.repo), 'worktree': str(tree), 'branch': 'feature'}
+    def build(settings, checkout, args):
+        assert checkout == tree and client.git(checkout, 'branch', '--show-current') == ''
+        assert (checkout / 'main.py').read_text() == 'reviewed source\n'
+        return 'fixed artifact'
+    monkeypatch.setattr(client, 'build', build)
+    assert client.prepare(cfg, SimpleNamespace()) == 'fixed artifact'
+    assert source.read_text() == 'unfinished developer edit'
+    assert f.original_git(f.repo, 'branch', '--show-current') == 'feature'
+
+
+def test_artifact_corruption_is_rejected_before_any_deployment_call(portable_build, monkeypatch):
+    f = portable_build
+    (f.directory / 'bundle.tar.gz').write_bytes(b'altered download')
+    calls = []
+    monkeypatch.setattr(client, 'remote', lambda *a, **k: calls.append(a))
+    with pytest.raises(ValueError, match='archive changed'):
+        client.deploy({'output': str(f.output)}, SimpleNamespace(release=None, artifact=f.directory, check=True))
+    assert calls == []
+    assert not (f.directory / 'deployment.json').exists()
+
+
+def test_deploy_binds_verified_artifact_once_without_rebuilding(portable_build, monkeypatch):
+    f = portable_build
+    original_record = (f.directory / 'release.json').read_bytes()
+    original_archive = client.sha(f.directory / 'bundle.tar.gz')
+    cfg = {'output': str(f.output), 'app': '/opt/app', 'hosting': '/srv/hosting', 'releases': '/opt/releases',
+           'service': 'oaw-hosted', 'ssh_target': 'root@example.invalid', 'identity_file': 'test-key'}
+    monkeypatch.setattr(client, 'target_id', lambda value: json.dumps(client.target(value), sort_keys=True))
+    calls, uploads = [], []
+    uploaded = False
+    def remote(cfg, action, release=None, **kwargs):
+        nonlocal uploaded
+        calls.append((action, release, kwargs))
+        if action == 'status' and release is None:
+            return {'commit': 'a' * 40, 'receipt': 'c' * 64}
+        if action == 'stage':
+            uploaded = True
+        return {'phase': {'init': 'staged' if uploaded else 'uploading', 'stage': 'staged',
+                          'status': 'staged', 'check': 'ready'}[action], 'unit_active': False}
+    monkeypatch.setattr(client, 'remote', remote)
+    monkeypatch.setattr(client, 'run', lambda argv, **kw: uploads.append(argv))
+    def no_build(*args, **kwargs):
+        raise AssertionError('Deployment must not build, merge or inspect source Git')
+    monkeypatch.setattr(client, 'build', no_build)
+    monkeypatch.setattr(client, 'git', no_build)
+    args = SimpleNamespace(release=None, artifact=f.directory, check=True)
+    client.deploy(cfg, args)
+    binding = client.read(f.directory / 'deployment.json')
+    assert binding['baseline_commit'] == 'a' * 40 and binding['baseline_receipt'] == 'c' * 64
+    assert calls[0] == ('status', None, {})
+    assert next(item for item in calls if item[0] == 'init')[2]['source_commit'] == f.record['commit']
+    assert len(uploads) == 1 and uploads[0][0] == 'scp'
+    calls.clear()
+    client.deploy(cfg, args)
+    assert calls[0][0] == 'init' and calls[0][2]['archive_sha256'] == original_archive
+    assert not any(release is None for _, release, _ in calls)
+    assert len(uploads) == 1
+    assert (f.directory / 'release.json').read_bytes() == original_record
+    assert client.sha(f.directory / 'bundle.tar.gz') == original_archive
+    calls.clear()
+    with pytest.raises(ValueError, match='binding differs'):
+        client.deploy({**cfg, 'app': '/opt/other-app'}, args)
+    assert calls == []
+
+
+def test_remote_transport_sends_only_data_to_an_installed_controller(monkeypatch):
+    calls = []
+    monkeypatch.setattr(client, 'run', lambda argv, **kwargs: calls.append((argv, kwargs)) or '{"phase":"ready"}')
+    cfg = {'app': '/opt/app', 'hosting': '/srv/hosting', 'releases': '/opt/releases', 'service': 'oaw-hosted',
+           'ssh_target': 'root@example.invalid', 'identity_file': '/private/key'}
+    assert client.remote(cfg, 'status')['phase'] == 'ready'
+    argv, kwargs = calls[0]
+    assert argv[-1] == '/usr/bin/python3 -I /opt/oaw-release-operator/release_remote.py'
+    assert json.loads(kwargs['input']) == {**client.target(cfg), 'action': 'status', 'purpose': 'trusted_manual'}
+    assert 'exec(' not in kwargs['input'] and 'payload' not in kwargs['input']

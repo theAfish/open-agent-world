@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
+import re
 import runpy
+import shlex
 import shutil
 import tomllib
 
@@ -198,3 +200,59 @@ def test_release_builds_depend_on_quality_and_pin_source():
         required = workflow["jobs"]["required"]
         assert required["if"] == "always()"
     assert "continue-on-error" not in (ROOT / ".github/workflows/desktop-release.yml").read_text()
+
+
+@pytest.mark.parametrize("filename", ["ci.yml", "desktop-check.yml", "docs.yml"])
+def test_aliyun_target_runs_existing_pr_checks_for_every_change(filename):
+    # BaseLoader preserves GitHub's `on` key instead of YAML 1.1's boolean True.
+    workflow = yaml.load((ROOT / ".github/workflows" / filename).read_text(), Loader=yaml.BaseLoader)
+    events = workflow["on"]
+    assert set(events["pull_request"]["branches"]) == {"dev", "main", "feat/aliyun-agentcore-poc"}
+    assert not {"paths", "paths-ignore", "branches-ignore"} & events["pull_request"].keys()
+    assert set(events["push"]["branches"]) == {"dev", "main"}
+    assert not {"pull_request_target", "workflow_run"} & events.keys()
+
+
+@pytest.mark.parametrize("filename", ["ci.yml", "desktop-check.yml", "docs.yml"])
+def test_pr_checks_keep_credentials_and_deployment_out_of_untrusted_jobs(filename):
+    workflow = yaml.load((ROOT / ".github/workflows" / filename).read_text(), Loader=yaml.BaseLoader)
+    assert workflow["permissions"] == {"contents": "read"}
+    assert "secrets." not in json.dumps(workflow)
+    docs_publish_guard = (
+        "github.repository == 'theAfish/open-agent-world' && "
+        "github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'"
+    )
+    for name, job in workflow["jobs"].items():
+        if filename == "docs.yml" and name == "deploy":
+            assert job["if"] == docs_publish_guard
+            continue
+        assert job.get("permissions", workflow["permissions"]) == {"contents": "read"}
+        assert "environment" not in job
+        runner = job["runs-on"]
+        if runner == "${{ matrix.os }}":
+            runners = job["strategy"]["matrix"]["os"]
+        elif runner == "${{ matrix.runner }}":
+            runners = [target["runner"] for target in job["strategy"]["matrix"]["include"]]
+        else:
+            runners = [runner]
+        assert all(re.fullmatch(r"(?:ubuntu|windows|macos)-(?:latest|\d+(?:\.\d+)?(?:-intel)?)", value)
+                   for value in runners)
+        for step in job["steps"]:
+            action = step.get("uses", "")
+            if action.startswith("actions/checkout@"):
+                assert step["with"]["persist-credentials"] == "false"
+            if action.startswith(("actions/configure-pages@", "actions/upload-pages-artifact@")):
+                assert step["if"] == docs_publish_guard
+
+
+def test_backend_ci_includes_aliyun_tests_in_existing_file_shards():
+    workflow = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
+    backend = workflow["jobs"]["backend"]
+    assert "if" not in backend
+    suite = next(step for step in backend["steps"] if ".github/run-backend-tests.py" in step.get("run", ""))
+    assert "if" not in suite
+    arguments = shlex.split(suite["run"])
+    assert arguments[:5] == ["backend/.venv/bin/python", ".github/run-backend-tests.py",
+                             "tests", "backend/tests", "packs/codex/tests"]
+    assert suite["run"].split("--shard ")[1].startswith("${{ matrix.shard }}/4 ")
+    assert backend["strategy"]["matrix"]["shard"] == ["1", "2", "3", "4"]
