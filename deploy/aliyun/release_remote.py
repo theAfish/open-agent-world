@@ -23,8 +23,11 @@ import traceback
 from uuid import UUID, uuid4
 
 UNITS = Path('/etc/systemd/system')
-OPERATOR = Path('/opt/oaw-release-operator')
+OPERATOR = (Path('/opt/oaw-release-operator-preview')
+            if Path(__file__).absolute().parent == Path('/opt/oaw-release-operator-preview')
+            else Path('/opt/oaw-release-operator'))
 TARGET_KEYS = ('app', 'hosting', 'releases', 'service')
+PROTOCOL_VERSION = 2
 
 def require(condition, message):
     if not condition:
@@ -70,6 +73,272 @@ def trusted_operator():
 
 def trusted_worker():
     return trusted_file(OPERATOR / 'release_worker.py')
+
+
+def trusted_verifier():
+    return trusted_file(OPERATOR / 'release_verify.py')
+
+
+def execution_config(request):
+    """This installation registration is independent of artifacts and requests."""
+    value = read(trusted_file(OPERATOR / 'execution.json', private=True))
+    require(isinstance(value, dict) and type(value.get('version')) is int and value['version'] == 1
+            and set(value) == {'version', 'environment', 'target', 'sandbox_root', 'python', 'build_user', 'verify_user'}
+            and value.get('environment') in {'production', 'preview'}, 'Invalid operator execution registration')
+    require(value['target'] == {key: request[key] for key in TARGET_KEYS},
+            'Execution registration belongs to another installation')
+    for key in ('build_user', 'verify_user'):
+        require(isinstance(value[key], str) and re.fullmatch(r'oaw-[a-z0-9-]{1,27}', value[key]),
+                'Release execution requires dedicated nonroot identities')
+    require(value['build_user'] != value['verify_user'], 'Build and verification identities must differ')
+    root = Path(value['sandbox_root'])
+    require(re.fullmatch(r'/(?:opt|srv)/[A-Za-z0-9_./-]+', str(root)) and root.resolve(strict=True) == root
+            and '..' not in root.parts, 'Use an independently prepared real release sandbox root')
+    for path in (root, *root.parents):
+        trusted_metadata(path.lstat(), directory=True)
+    require(not any(root.is_relative_to(path) or path.is_relative_to(root)
+                    for path in (*paths(request), OPERATOR)), 'Release sandbox must be outside installation and operator paths')
+    python = PurePosixPath(value['python'])
+    require(re.fullmatch(r'/[A-Za-z0-9_./-]+', str(python)) and str(python) == value['python']
+            and '..' not in python.parts, 'Invalid sandbox Python path')
+    trusted_file(root / str(python).lstrip('/'))
+    import pwd
+    accounts = [pwd.getpwnam(value[key]) for key in ('build_user', 'verify_user')]
+    require(all(account.pw_uid > 0 and account.pw_gid > 0 for account in accounts)
+            and accounts[0].pw_uid != accounts[1].pw_uid
+            and accounts[0].pw_gid != accounts[1].pw_gid,
+            'Build and verification identities must have distinct nonroot UIDs and groups')
+    return value
+
+
+def require_execution(request, *, deploying=False):
+    config = execution_config(request)
+    if deploying:
+        # The current production provisioner imports the application as root.
+        # A digest or a boolean approval does not close that transitive boundary.
+        require(config['environment'] == 'preview',
+                'Production deployment is blocked until the root provisioner and its complete import closure '
+                'are replaced by an independently installed trusted broker')
+        for suffix in ('.timer', '.service'):
+            unit = request['service'] + '-provisioner' + suffix
+            state = run('systemctl', 'show', unit,
+                        '--property=LoadState', '--value').strip()
+            require(state in {'masked', 'not-found'}, 'Preview application provisioner must be absent or masked')
+            active = run('systemctl', 'show', unit, '--property=ActiveState', '--value').strip()
+            require(active in {'inactive', 'failed'}, 'Preview application provisioner must not be running')
+    return config
+
+
+def sandbox_command(request, config, mode, *, writable=None, readonly=()):
+    """Root submits a fixed systemd boundary; only the child executes application code."""
+    require(mode in {'prepare', 'verify'}, 'Unsupported release sandbox operation')
+    user = config['build_user' if mode == 'prepare' else 'verify_user']
+    unit = f'oaw-release-{request["service"]}-{request["release"][-8:]}-{mode}'
+    helper = trusted_worker() if mode == 'prepare' else trusted_verifier()
+    properties = ['Type=oneshot', f'User={user}', f'Group={user}', f'RootDirectory={config["sandbox_root"]}',
+        'WorkingDirectory=/workspace', 'MountAPIVFS=yes', 'ProtectSystem=strict', 'ProtectHome=yes',
+        'PrivateTmp=yes', 'PrivateDevices=yes', 'PrivateNetwork=yes', 'PrivateIPC=yes',
+        'NoNewPrivileges=yes', 'CapabilityBoundingSet=', 'AmbientCapabilities=', 'RestrictSUIDSGID=yes',
+        'ProtectKernelTunables=yes', 'ProtectKernelModules=yes', 'ProtectControlGroups=yes',
+        'ProtectProc=invisible', 'ProcSubset=pid', 'LockPersonality=yes', 'RestrictAddressFamilies=AF_UNIX',
+        'UMask=0077', 'MemoryMax=' + ('1G' if mode == 'prepare' else '256M'), 'MemorySwapMax=0',
+        'CPUQuota=100%', 'TasksMax=128', 'KillMode=control-group', 'TimeoutStartSec=3600',
+        'Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp PATH=/usr/local/bin:/usr/bin:/bin',
+        f'BindReadOnlyPaths={helper}:/workspace/{helper.name}']
+    properties.extend(f'BindReadOnlyPaths={source}:{target}' for source, target in readonly)
+    if writable:
+        properties.extend([f'BindPaths={writable}:/workspace/scratch', 'ReadWritePaths=/workspace/scratch'])
+    command = ['systemd-run', '--quiet', '--wait', '--pipe', '--collect', '--unit=' + unit,
+               *['--property=' + value for value in properties], config['python'], '-I',
+               *(['-S'] if mode == 'verify' else []),
+               '/workspace/' + helper.name, *(['prepare'] if mode == 'prepare' else [])]
+    return unit + '.service', command
+
+
+def run_sandbox(request, config, mode, arguments, *, writable=None, readonly=(), log):
+    unit, command = sandbox_command(request, config, mode, writable=writable, readonly=readonly)
+    try:
+        run(*command, *arguments, log=log, timeout=3630)
+    finally:
+        # Wait for cgroup teardown before root inspects or promotes writable output.
+        run('systemctl', 'stop', unit, timeout=60)
+
+
+def bundle_tree(root, *, immutable=False):
+    require(root.is_absolute() and root.resolve(strict=True) == root, 'Runtime bundle cannot traverse links')
+    plain_tree(root)
+    result, size = [], 0
+    for parent, directories, files in os.walk(root, followlinks=False):
+        for path in [Path(parent), *[Path(parent) / name for name in files]]:
+            metadata = path.lstat()
+            if immutable:
+                trusted_metadata(metadata, directory=path.is_dir())
+            size += metadata.st_size if path.is_file() else 0
+            result.append(path)
+            require(len(result) <= 200000 and size <= 4 * 1024**3, 'Prepared runtime bundle exceeds limits')
+    return result
+
+
+def prepare_bundle(request, config):
+    import pwd
+    app, _, _ = paths(request)
+    b = release_dir(request)
+    current = app / 'backend/.venv/oaw-runtime-bundle'
+    require(current.is_dir(), 'Prepare and review the initial immutable runtime bundle before release checks')
+    bundle_tree(current, immutable=True)
+    scratch = b / ('prepare-' + uuid4().hex)
+    scratch.mkdir(mode=0o700)
+    bundle = scratch / 'bundle'
+    shutil.copytree(current, bundle)
+    account = pwd.getpwnam(config['build_user'])
+    for path in [scratch, *bundle_tree(bundle)]:
+        os.chown(path, account.pw_uid, account.pw_gid, follow_symlinks=False)
+        path.chmod(0o700 if path.is_dir() else 0o600 | (path.stat().st_mode & 0o100))
+    # Previous declarations are sufficient for offline wheel reuse. Never expose
+    # the previous application's environment files, data or site-packages.
+    previous = b / ('previous-' + uuid4().hex)
+    previous.mkdir(mode=0o755)
+    for declaration in sorted((app / 'plugins').glob('*/oaw.pack.toml')):
+        target = previous / declaration.relative_to(app)
+        public_parents(target.parent, previous)
+        shutil.copyfile(declaration, target)
+        target.chmod(0o644)
+    try:
+        run_sandbox(request, config, 'prepare', ['--source', '/workspace/source', '--previous', '/workspace/previous',
+            '--scratch', '/workspace/scratch', '--bundle', '/workspace/scratch/bundle',
+            '--environment', config['environment']], writable=scratch,
+            readonly=((b / 'stage', '/workspace/source'), (previous, '/workspace/previous')), log=b / 'prepare.log')
+        tree = bundle_tree(bundle)
+        for path in tree:
+            os.chown(path, 0, 0, follow_symlinks=False)
+            path.chmod(0o755 if path.is_dir() or path.stat().st_mode & 0o111 else 0o644)
+        prepared = b / 'prepared-runtime-bundle'
+        if prepared.exists():
+            bundle_tree(prepared, immutable=True)
+            shutil.rmtree(prepared)
+        bundle.replace(prepared)
+    finally:
+        # A rejected child output may contain arbitrary links: unlink rather
+        # than traverse them. shutil.rmtree does not follow directory symlinks.
+        shutil.rmtree(scratch)
+        shutil.rmtree(previous)
+
+
+def install_bundle(request, b):
+    bundle = paths(request)[0] / 'backend/.venv/oaw-runtime-bundle'
+    prepared = b / 'prepared-runtime-bundle'
+    require(prepared.is_dir(), 'Run isolated runtime preparation before deployment')
+    bundle_tree(prepared, immutable=True)
+    previous = b / 'previous-runtime-bundle'
+    require(not previous.exists(), 'Release already has a runtime bundle backup')
+    inventory = bundle_inventory(bundle)
+    authority = read(b / 'backup.json')
+    require('runtime-bundle.json' not in authority, 'Release already has a runtime bundle inventory')
+    write(b / 'runtime-bundle.json', inventory)
+    write(b / 'backup.json', {**authority, 'runtime-bundle.json': digest(b / 'runtime-bundle.json')})
+    bundle.replace(previous)
+    prepared.replace(bundle)
+
+
+def bundle_inventory(root):
+    result = {}
+    for path in bundle_tree(root, immutable=True):
+        metadata = path.lstat()
+        result[path.relative_to(root).as_posix()] = {'mode': stat.S_IMODE(metadata.st_mode),
+            **({'sha256': digest(path)} if path.is_file() else {'directory': True})}
+    return result
+
+
+def restore_bundle(request, b):
+    previous = b / 'previous-runtime-bundle'
+    if previous.exists():
+        authority = read(b / 'backup.json')
+        require('runtime-bundle.json' in authority
+                and digest(b / 'runtime-bundle.json') == authority['runtime-bundle.json'],
+                'Runtime bundle backup inventory integrity check failed')
+        require(bundle_inventory(previous) == read(b / 'runtime-bundle.json'),
+                'Runtime bundle backup integrity check failed')
+        bundle = paths(request)[0] / 'backend/.venv/oaw-runtime-bundle'
+        if bundle.exists():
+            bundle_tree(bundle, immutable=True)
+            bundle.replace(b / ('replaced-runtime-bundle-' + str(time.time_ns())))
+        previous.replace(bundle)
+
+
+def seed(request):
+    """Install the first approved Preview source into a runtime-only directory."""
+    config = require_execution(request, deploying=True)
+    require(config['environment'] == 'preview', 'Initial source seeding is supported only for Preview')
+    app, _, _ = paths(request)
+    b = release_dir(request)
+    require(read(b / 'state.json')['phase'] == 'uploading', 'Initial seed is not awaiting an approved upload')
+    pinned = read(b / 'request.json')
+    approval = authorize(pinned, archive_sha256=pinned['archive_sha256'], source_commit=pinned.get('source_commit'))
+    require(digest(b / 'bundle.tar.gz') == approval['archive_sha256'], 'Uploaded archive checksum differs')
+    backend, runtime = app / 'backend', app / 'backend/.venv'
+    require(app.is_dir() and backend.is_dir() and runtime.is_dir()
+            and set(app.iterdir()) == {backend} and set(backend.iterdir()) == {runtime},
+            'Initial Preview application must contain only its separately prepared backend/.venv runtime')
+    for directory in (app, backend, *app.parents):
+        require(directory.resolve(strict=True) == directory, 'Initial Preview application cannot traverse links')
+        trusted_metadata(directory.lstat(), directory=True)
+    bundle_tree(runtime, immutable=True)
+    require((runtime / 'bin/python').is_file() and (runtime / 'bin/python').stat().st_mode & 0o111
+            and (runtime / 'oaw-runtime-bundle').is_dir(),
+            'Prepare the independent immutable Python and runtime bundle before initial seeding')
+    stage = b / 'stage'
+    manifest = extract_bundle(b / 'bundle.tar.gz', stage, source_commit=approval['source_commit'])
+    require(manifest['version'] == 2, 'Initial seeding requires a portable version-two build')
+    save(b, 'seed-installing')
+    for name in sorted(manifest['files']):
+        target = destination(app, name)
+        require(not target.exists(), 'Initial seeding cannot overwrite application files')
+        public_parents(target.parent, app)
+        shutil.copyfile(stage / name, target)
+        target.chmod(0o755 if (stage / name).stat().st_mode & 0o111 else 0o644)
+    verify_files(app, manifest['files'])
+    write(app / '.oaw-deployment.json', {'source_commit': manifest['source_commit'], 'source_files': manifest['files'],
+        'release_id': request['release'], 'archive_sha256': approval['archive_sha256'], 'environment': 'preview',
+        'operator_protocol': PROTOCOL_VERSION, 'operator_sha256': digest(trusted_operator()), 'seed': True})
+    return save(b, 'seeded', commit=manifest['source_commit'])
+
+
+def verify_release(request, config, *, entries_only=False):
+    import pwd
+    _, hosting, _ = paths(request)
+    b = release_dir(request)
+    rows = read(hosting / 'control/hosting.json')['profiles']
+    require(isinstance(rows, list) and 0 < len(rows) <= 5000, 'Invalid verification profile inventory')
+    choices = {}
+    if entries_only:
+        with contextlib.closing(sqlite3.connect(f'file:{hosting}/control/deployments.sqlite3?mode=ro', uri=True)) as db:
+            choices = dict(db.execute('SELECT user_id,profile_id FROM hosting_entries'))
+    selected = {}
+    for row in rows:
+        for key in ('profile_id', 'user_id'):
+            require(str(UUID(row[key])) == row[key], 'Invalid verification identity')
+        require(row['mode'] in {'builder', 'runtime'} and re.fullmatch(r'(?:[0-9a-fA-F]{2}){32,64}', row['secret'])
+                and row['upstream'] == f'unix:///run/{request["service"]}/{row["profile_id"]}.sock',
+                'Release verification requires exact installation-owned private sockets')
+        if not entries_only:
+            selected[row['profile_id']] = row
+        elif row['user_id'] not in choices:
+            selected.setdefault(row['user_id'], row)
+        elif choices[row['user_id']] == row['profile_id']:
+            selected[row['user_id']] = row
+    require(selected, 'No login entries available for release verification')
+    snapshot = b / 'verification-input.json'
+    write(snapshot, {'profiles': [{key: row[key] for key in ('profile_id', 'user_id', 'mode', 'secret')}
+                                 for row in selected.values()]})
+    account = pwd.getpwnam(config['verify_user'])
+    os.chown(snapshot, 0, account.pw_gid, follow_symlinks=False)
+    snapshot.chmod(0o640)
+    try:
+        run_sandbox(request, config, 'verify', ['--snapshot', '/workspace/verification.json'],
+            readonly=((snapshot, '/workspace/verification.json'),
+                      (Path('/run') / request['service'], '/workspace/sockets')), log=b / 'verification.log')
+    finally:
+        snapshot.unlink()
 
 
 def authorize(request, *, archive_sha256=None, source_commit=None):
@@ -403,17 +672,39 @@ def plan(request):
             'contracts': 'Refresh existing published Pack surfaces; retain core permissions and saved layouts'}
 
 
-def worker_unit(original, app, helper, service):
-    require('ProtectSystem=strict' in original and 'BindReadOnlyPaths=' in original and 'User=oaw-' in original,
+def checked_worker_identity(original):
+    import pwd
+    users = [line.removeprefix('User=') for line in original.splitlines() if line.startswith('User=')]
+    require(len(users) == 1 and re.fullmatch(r'oaw-[a-z0-9-]+', users[0]), 'Expected one dedicated worker identity')
+    account = pwd.getpwnam(users[0])
+    require(account.pw_uid > 0 and account.pw_gid > 0, 'Worker migration identity must have a nonroot UID and group')
+    return users[0]
+
+
+def worker_unit(original, app, helper, service, *, preview=False):
+    lines = original.splitlines()
+    root_directories = [line for line in lines if line.startswith('RootDirectory=')]
+    users = [line for line in lines if line.startswith('User=')]
+    require(len(users) == 1 and re.fullmatch(r'User=oaw-[a-z0-9-]+', users[0])
+            and [line for line in lines if line.startswith('ProtectSystem=')] == ['ProtectSystem=strict']
+            and any(line.startswith('BindReadOnlyPaths=') and line.removeprefix('BindReadOnlyPaths=') for line in lines)
+            and not any(line.startswith(('ExecStartPre=', 'ExecStartPost=', 'ExecStop=', 'ExecStopPost=',
+                                         'ExecReload=', 'ExecCondition=', 'PermissionsStartOnly=')) for line in lines),
             'Worker unit differs from the hardened hosted deployment')
+    require(len(root_directories) <= 1, 'Worker unit has ambiguous filesystem isolation')
+    mapped_helper = '/workspace/release_worker.py' if root_directories else str(helper)
     result = []
     for line in original.splitlines():
         if line.startswith(('Requires=', 'After=', 'RestartSec=', 'Sockets=', 'Type=', 'TimeoutStartSec=')):
             continue
         if line == '[Service]':
             result.extend([line, 'Type=oneshot', 'TimeoutStartSec=300'])
+            if root_directories:
+                result.append(f'BindReadOnlyPaths={helper}:{mapped_helper}')
         elif line.startswith('ExecStart='):
-            result.append(f'ExecStart={app}/backend/.venv/bin/python -I {helper} migrate --source {app} --config /var/lib/{service}-profile/worker.json')
+            result.append(f'ExecStart={app}/backend/.venv/bin/python -I {mapped_helper} migrate --source {app} '
+                          f'--config /var/lib/{service}-profile/worker.json'
+                          + (' --environment preview' if preview else ' --environment production'))
         elif line.startswith('Restart='):
             result.append('Restart=no')
         else:
@@ -430,22 +721,26 @@ def public_parents(path, root):
     path.chmod(0o755)
 
 
-def stop(request):
+def stop(request, *, config=None):
     _, hosting, _ = paths(request)
     name = request['service']
-    units = [name + '-gateway.service', *[f'{name}-worker-{p}{suffix}' for p, _ in profiles(hosting)
+    units = [name + '-gateway.service', name + '-gateway.socket', *[f'{name}-worker-{p}{suffix}' for p, _ in profiles(hosting)
                                          for suffix in ('.service', '.socket')]]
-    run('systemctl', 'stop', name + '-provisioner.timer', name + '-provisioner.service')
+    config = config or require_execution(request, deploying=True)
+    if config['environment'] != 'preview':
+        run('systemctl', 'stop', name + '-provisioner.timer', name + '-provisioner.service')
     run('systemctl', 'stop', name + '.target', *units)
 
 
-def resume(request, *, gateway=True):
+def resume(request, *, gateway=True, config=None):
     _, hosting, _ = paths(request)
     name = request['service']
+    config = config or require_execution(request, deploying=True)
     # Socket activation avoids restarting every historical workspace concurrently.
     run('systemctl', 'start', *[f'{name}-worker-{p}.socket' for p, _ in profiles(hosting)])
     if gateway:
-        run('systemctl', 'start', name + '-gateway.service', name + '-provisioner.timer')
+        run('systemctl', 'start', name + '-gateway.socket', name + '-gateway.service')
+        require(config['environment'] == 'preview', 'Production provisioner broker is not installed')
 
 
 def backup(request, b, manifest):
@@ -468,6 +763,7 @@ def restore(request, b):
     app, hosting, _ = paths(request)
     hashes = read(b / 'backup.json')
     require(all(digest(b / name) == value for name, value in hashes.items()), 'Backup integrity check failed')
+    restore_bundle(request, b)
     manifest = read(b / 'stage/release-manifest.json')
     with tarfile.open(b / 'application.tar.gz') as tar:
         names = {m.name for m in tar.getmembers()}
@@ -497,6 +793,16 @@ def transaction(request, *, rollback=False):
     changed = stopped = False
     with lock(releases, wait=True):
         try:
+            config = require_execution(request, deploying=True)
+            migrations = {}
+            for identifier, _ in profiles(hosting):
+                original = (UNITS / f'{request["service"]}-worker-{identifier}.service').read_text()
+                checked_worker_identity(original)
+                require([line for line in original.splitlines() if line.startswith('RootDirectory=')]
+                        == [f'RootDirectory={config["sandbox_root"]}'],
+                        'Preview workers must use the independently prepared registered filesystem boundary')
+                migrations[identifier] = worker_unit(original, app, helper, request['service'],
+                                                     preview=config['environment'] == 'preview')
             if rollback:
                 current, fingerprint = receipt(app)
                 manifest = read(b / 'stage/release-manifest.json')
@@ -506,7 +812,7 @@ def transaction(request, *, rollback=False):
                         'Only the currently installed release can be rolled back')
                 idle(hosting)
                 stopped = True
-                stop(request)
+                stop(request, config=config)
                 for name in read(b / 'state.json').get('helpers', []):
                     require(re.fullmatch(r'oaw-release-[a-f0-9]{8}-[a-f0-9-]{36}\.service', name), 'Invalid recovery unit')
                     if (UNITS / name).exists():
@@ -514,11 +820,11 @@ def transaction(request, *, rollback=False):
                         run('systemctl', 'stop', name)
                 save(b, 'rolling-back')
                 restore(request, b)
-                resume(request)
+                resume(request, config=config)
                 return save(b, 'rolled-back')
             plan(request)
             stopped = True
-            stop(request)
+            stop(request, config=config)
             save(b, 'stopped')
             idle(hosting)
             manifest = read(b / 'stage/release-manifest.json')
@@ -527,6 +833,7 @@ def transaction(request, *, rollback=False):
             old, _ = receipt(app)
             changed = True
             save(b, 'installing')
+            install_bundle(request, b)
             for name in sorted(manifest['files'], key=lambda p: p == 'frontend/dist/index.html'):
                 target = destination(app, name)
                 public_parents(target.parent, app)
@@ -537,11 +844,10 @@ def transaction(request, *, rollback=False):
                     destination(app, name).unlink(missing_ok=True)
             units = UNITS
             for identifier, _ in ([] if manifest.get('routine') else profiles(hosting)):
-                original = (units / f"{request['service']}-worker-{identifier}.service").read_text()
                 name = f'oaw-release-{request["release"][-8:]}-{identifier}.service'
                 target = units / name
                 require(not target.exists(), 'Migration unit already exists')
-                target.write_text(worker_unit(original, app, helper, request['service']))
+                target.write_text(migrations[identifier])
                 target.chmod(0o644)
                 helpers.append(name)
             if helpers:
@@ -555,15 +861,15 @@ def transaction(request, *, rollback=False):
                         stream.write(run('journalctl', '-u', name, '--no-pager', '-o', 'cat'))
                 save(b, 'migrating', migrated_profiles=index + 1)
             verify_files(app, manifest['files'])
-            resume(request, gateway=False)
+            resume(request, gateway=False, config=config)
             save(b, 'verifying')
-            run(str(app / 'backend/.venv/bin/python'), '-I', str(helper), 'verify', '--source', str(app), '--hosting', str(hosting),
-                *(['--entries-only'] if manifest.get('routine') else []),
-                log=b / 'verification.log', timeout=3600)
+            verify_release(request, config, entries_only=bool(manifest.get('routine')))
             new = {'source_commit': manifest['source_commit'], 'source_files': manifest['files'],
-                   'release_id': request['release'], 'previous_source_commit': old['source_commit'], 'backup': str(b)}
+                   'release_id': request['release'], 'previous_source_commit': old['source_commit'], 'backup': str(b),
+                   'archive_sha256': pinned['archive_sha256'], 'environment': config['environment'],
+                   'operator_protocol': PROTOCOL_VERSION, 'operator_sha256': digest(trusted_operator())}
             write(app / '.oaw-deployment.json', new)
-            resume(request)
+            resume(request, config=config)
             run('systemctl', 'is-active', '--quiet', request['service'] + '-gateway.service')
             return save(b, 'complete', commit=manifest['source_commit'],
                         verification=('login entry workers' if manifest.get('routine') else 'all workers') + ' bootstrap and authorization checks passed')
@@ -574,17 +880,17 @@ def transaction(request, *, rollback=False):
                 try:
                     for name in helpers:
                         run('systemctl', 'stop', name)
-                    stop(request)
+                    stop(request, config=config)
                     save(b, 'rolling-back')
                     restore(request, b)
-                    resume(request)
+                    resume(request, config=config)
                     return save(b, 'failed-rolled-back', error='Deployment failed; previous code and data restored', log=str(b / 'failure.log'))
                 except BaseException:
                     with (b / 'failure.log').open('a') as stream:
                         traceback.print_exc(file=stream)
                     return save(b, 'recovery-required', error='Automatic recovery failed; services remain stopped', log=str(b / 'failure.log'))
             if not rollback and stopped:
-                resume(request)
+                resume(request, config=config)
             if rollback and stopped:
                 return save(b, 'recovery-required', error='Recovery failed; services remain stopped', log=str(b / 'failure.log'))
             return save(b, 'failed', error=str(error), log=str(b / 'failure.log'))
@@ -604,7 +910,9 @@ def dispatch(request):
     if action == 'status' and not request.get('release'):
         value, fingerprint = receipt(app)
         return {'commit': value['source_commit'], 'receipt': fingerprint, 'release': value.get('release_id'),
-                'profiles': len(list(profiles(hosting)))}
+                'profiles': len(list(profiles(hosting))), 'archive_sha256': value.get('archive_sha256'),
+                'environment': value.get('environment'), 'operator_protocol': PROTOCOL_VERSION,
+                'operator_sha256': digest(trusted_operator())}
     b = release_dir(request)
     if action == 'init':
         approval = authorize(request, archive_sha256=request['archive_sha256'], source_commit=request.get('source_commit'))
@@ -622,6 +930,9 @@ def dispatch(request):
     if action == 'init':
         require(request['archive_sha256'] == pinned['archive_sha256'], 'Release ID belongs to another archive')
         return read(b / 'state.json')
+    if action == 'seed':
+        with lock(releases):
+            return seed(request)
     if action == 'stage':
         require(read(b / 'state.json')['phase'] == 'uploading', 'Release is not awaiting an upload')
         require(request['archive_sha256'] == pinned['archive_sha256'], 'Release upload differs from its pinned archive')
@@ -639,14 +950,7 @@ def dispatch(request):
         with lock(releases):
             require(read(b / 'state.json')['phase'] in {'staged', 'ready'}, 'Release is not ready for checks')
             result = plan(request)
-            helper = trusted_worker()
-            env = os.environ.copy()
-            os.environ['PATH'] = '/opt/oaw-tools/bin:' + env.get('PATH', '')
-            try:
-                run(str(app / 'backend/.venv/bin/python'), '-I', str(helper), 'prepare', '--source', str(b / 'stage'),
-                    '--previous', str(app), '--scratch', str(b / 'dependencies'), log=b / 'prepare.log', timeout=3600)
-            finally:
-                os.environ['PATH'] = env.get('PATH', '')
+            prepare_bundle(request, require_execution(request))
             return save(b, 'ready', plan=result)
     if action == 'status':
         state = read(b / 'state.json')
@@ -675,6 +979,7 @@ def start_job(request):
     manifest = read(b / 'stage/release-manifest.json')
     payload_files(manifest)
     approved_release(request, manifest)
+    require_execution(request, deploying=True)
     action = request['action']
     unit = 'oaw-release-' + request['release']
     active = unit_state(unit + '.service')
@@ -693,7 +998,7 @@ def start_job(request):
     # The caller still owns the submission lock. Waiting for oneshot startup here
     # deadlocks with transaction(), which must acquire that lock before proceeding.
     run('systemd-run', '--no-block', '--unit=' + unit, '--collect', '--property=Type=oneshot', '--property=UMask=0077',
-        '--property=TimeoutStartSec=infinity', sys.executable, '-I', str(operator),
+        '--property=TimeoutStartSec=infinity', sys.executable, '-I', '-S', str(operator),
         str(b / 'transaction.json'))
     return {'phase': 'queued', 'release': request['release']}
 
@@ -702,6 +1007,7 @@ if __name__ == '__main__':
     try:
         request = read(sys.argv[1]) if len(sys.argv) > 1 else json.load(sys.stdin)
         require(os.geteuid() == 0, 'Release operations require the deployment operator root account')
+        require(sys.flags.isolated and sys.flags.no_site, 'Run the trusted operator with Python -I -S')
         print(json.dumps(dispatch(request)), flush=True)
     except Exception as error:
         print(json.dumps({'error': str(error)}), flush=True)

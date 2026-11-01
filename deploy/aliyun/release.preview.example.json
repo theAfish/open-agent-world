@@ -1,0 +1,15 @@
+{
+  "environment": "preview",
+  "repository": "D:/AI/open-agent-world",
+  "worktree": "D:/AI/open-agent-world/.tmp/aliyun-preview-build",
+  "output": "D:/AI/open-agent-world/.tmp/aliyun-preview-artifacts",
+  "python": "D:/AI/open-agent-world/backend/.venv/Scripts/python.exe",
+  "identity_file": "C:/Users/your-name/.ssh/server.pem",
+  "ssh_target": "root@your-server",
+  "branch": "feat/aliyun-agentcore-poc",
+  "app": "/opt/oaw-preview-app",
+  "hosting": "/srv/oaw-preview-hosting",
+  "releases": "/opt/oaw-preview-releases",
+  "service": "oaw-preview",
+  "public_origin": "https://preview.example.invalid"
+}

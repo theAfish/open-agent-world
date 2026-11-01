@@ -174,8 +174,7 @@ def main(argv=None):
         command.add_argument("--host", default="127.0.0.1")
         command.add_argument("--port", type=int, default=8080 if name == "gateway" else 8000)
         command.add_argument("--frontend", type=Path, default=Path(__file__).resolve().parents[2] / "frontend/dist")
-        if name == "worker":
-            command.add_argument("--fd", type=int, help="Inherited systemd Unix socket (native hosted deployment)")
+        command.add_argument("--fd", type=int, help="Inherited systemd Unix socket (native hosted deployment)")
     args = parser.parse_args(argv)
     if hasattr(args, "port") and not 1 <= args.port <= 65535:
         parser.error("Port must be 1-65535")

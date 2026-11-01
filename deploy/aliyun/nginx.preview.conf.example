@@ -1,0 +1,39 @@
+# Review and install outside the application release. Replace every REPLACE_*
+# value from the approved hostname/certificate and root-owned installed receipt.
+# This example does not configure DNS, acquire a certificate, or reload nginx.
+upstream oaw_preview {
+    server unix:/run/oaw-preview/gateway.sock;
+}
+
+server {
+    listen 443 ssl;
+    server_name REPLACE_APPROVED_PREVIEW_HOSTNAME;
+    ssl_certificate /etc/ssl/oaw-preview/REPLACE_FULLCHAIN.pem;
+    ssl_certificate_key /etc/ssl/oaw-preview/REPLACE_PRIVATE_KEY.pem;
+
+    add_header X-OAW-Environment preview always;
+    add_header X-OAW-Source-Commit REPLACE_ROOT_RECEIPT_SOURCE_COMMIT always;
+    add_header X-OAW-Release REPLACE_ROOT_RECEIPT_RELEASE_ID always;
+    add_header X-OAW-Operator-Protocol REPLACE_REVIEWED_OPERATOR_PROTOCOL always;
+    add_header Cache-Control "no-store, private" always;
+
+    # Never expose the full receipt, configuration, source inventory, or secrets.
+    # This manually reviewed public projection is root-owned and outside the app.
+    location = /__preview {
+        alias /var/lib/oaw-preview-status/status.json;
+        default_type application/json;
+    }
+
+    location / {
+        proxy_pass http://oaw_preview;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_hide_header X-OAW-Environment;
+        proxy_hide_header X-OAW-Source-Commit;
+        proxy_hide_header X-OAW-Release;
+        proxy_hide_header X-OAW-Operator-Protocol;
+        proxy_read_timeout 3600s;
+    }
+}

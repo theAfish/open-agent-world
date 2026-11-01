@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OPERATOR = ROOT / 'deploy/aliyun'
 DEFAULT_CONFIG = Path.home() / '.config/oaw/aliyun-release.json'
 TRUSTED_OPERATOR = '/opt/oaw-release-operator/release_remote.py'
+PREVIEW_OPERATOR = '/opt/oaw-release-operator-preview/release_remote.py'
 BACKEND_TESTS = ['backend/tests/test_aliyun_release.py', 'backend/tests/test_aliyun_hosted.py',
     'backend/tests/test_aliyun_release_security.py',
     'backend/tests/test_aliyun_sandbox.py', 'backend/tests/test_hosted_gateway.py',
@@ -75,7 +76,15 @@ def config(path):
     value['identity_file'] = str(Path(value['identity_file']).expanduser().resolve())
     if not value['public_origin'].startswith('https://'):
         raise ValueError('Public verification requires HTTPS')
+    operator(value)
     return value
+
+
+def operator(cfg):
+    environment = cfg.get('environment', 'production')
+    if environment not in {'production', 'preview'}:
+        raise ValueError('environment must be production or preview')
+    return PREVIEW_OPERATOR if environment == 'preview' else TRUSTED_OPERATOR
 
 
 def ssh_options(cfg):
@@ -88,7 +97,12 @@ def target(cfg):
 
 
 def target_id(cfg):
-    return hashlib.sha256(json.dumps({**target(cfg), 'host': cfg['ssh_target']}, sort_keys=True).encode()).hexdigest()
+    binding = {**target(cfg), 'host': cfg['ssh_target']}
+    # Preserve existing production artifact bindings; Preview has a distinct
+    # independently installed controller and must never reuse that binding.
+    if operator(cfg) == PREVIEW_OPERATOR:
+        binding['environment'] = 'preview'
+    return hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
 
 
 def remote(cfg, action, release=None, **extra):
@@ -97,7 +111,7 @@ def remote(cfg, action, release=None, **extra):
         request['release'] = release
     # The server controller is independently installed and reviewed. Neither the
     # caller checkout nor the build archive supplies privileged Python source.
-    command = '/usr/bin/python3 -I ' + TRUSTED_OPERATOR
+    command = '/usr/bin/python3 -I -S ' + operator(cfg)
     output = run(['ssh', *ssh_options(cfg), cfg['ssh_target'], command], capture=True,
                  input=json.dumps(request), timeout=3900)
     return json.loads(output.splitlines()[-1])
@@ -416,6 +430,25 @@ def deploy(cfg, args):
     print(json.dumps({'deployed': result, 'public_https': True}), flush=True)
 
 
+def seed(cfg, args):
+    """Install the initial Preview artifact; never start it or create user data."""
+    if operator(cfg) != PREVIEW_OPERATOR:
+        raise ValueError('Initial seeding is only supported for Preview')
+    directory, artifact = selected(cfg, None, args.artifact)
+    manifest = verify_artifact(directory, artifact)
+    if manifest['version'] != 2:
+        raise ValueError('Preview seeding requires a portable v2 build artifact')
+    pinned = {'source_commit': artifact['commit'], 'archive_sha256': artifact['archive_sha256']}
+    identifier = artifact['release']
+    state = remote(cfg, 'init', identifier, **pinned)
+    if state['phase'] != 'uploading':
+        raise ValueError('Seed is not awaiting upload; inspect its receipt/state before retrying')
+    remote_path = cfg['releases'] + '/' + identifier + '/bundle.tar.gz'
+    run(['scp', *ssh_options(cfg), str(directory / 'bundle.tar.gz'), cfg['ssh_target'] + ':' + remote_path])
+    result = remote(cfg, 'seed', identifier, **pinned)
+    print(json.dumps({'seeded': result, 'services_started': False}), flush=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=DEFAULT_CONFIG)
@@ -438,6 +471,8 @@ def main(argv=None):
     deploy_parser.add_argument('--release')
     deploy_parser.add_argument('--artifact', type=Path, help='Directory containing a fixed release.json and bundle.tar.gz')
     deploy_parser.add_argument('--check', action='store_true', help='Stage and prepare dependencies; do not restart services or migrate user data')
+    seed_parser = commands.add_parser('seed', help='Seed a new Preview from an approved artifact; never start services')
+    seed_parser.add_argument('--artifact', type=Path, required=True)
     status_parser = commands.add_parser('status')
     status_parser.add_argument('--release')
     rollback_parser = commands.add_parser('rollback')
@@ -457,7 +492,9 @@ def main(argv=None):
             prepare(cfg, args)
         return
     cfg = config(args.config)
-    if args.command == 'deploy':
+    if args.command == 'seed':
+        seed(cfg, args)
+    elif args.command == 'deploy':
         deploy(cfg, args)
     elif args.command == 'status':
         print(json.dumps(remote(cfg, 'status', args.release)), flush=True)

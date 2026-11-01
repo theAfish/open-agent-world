@@ -1,4 +1,4 @@
-"""Release-time checks; migration runs inside each existing worker's systemd boundary."""
+"""Unprivileged release checks; migrations retain each hosted worker's boundary."""
 from __future__ import annotations
 
 import argparse
@@ -10,13 +10,19 @@ from pathlib import Path
 import sys
 
 
-def prepare(source, previous, scratch):
+def prepare(source, previous, scratch, bundle, *, preview=False):
+    if preview:
+        from backend.plugins.loader import load_plugin_registry
+        registry = load_plugin_registry(data_root=scratch / 'probe', core_only=True,
+                                        load_installed=False, load_entry_points=False)
+        if registry.load_failures:
+            raise ValueError(f'Preview Core preparation failed: {registry.load_failures}')
+        return {'prepared_packs': [], 'composition': 'preview-core'}
     from backend.packs.adapters import (activate_source_adapter, prepare_source_adapter,
         _source_adapter_location, prepared_adapter_paths)
     from backend.packs.planning import environment_status, prepare_declared
     from backend.packs.spec import read_source_pack
     from backend.cloud.aliyun.app import approved_plugins
-    bundle = Path(sys.prefix) / 'oaw-runtime-bundle'
     report = []
     for declaration in sorted((source / 'plugins').glob('*/oaw.pack.toml')):
         spec = read_source_pack(declaration.parent)
@@ -55,14 +61,17 @@ def prepare(source, previous, scratch):
     return {'prepared_packs': report}
 
 
-async def migrate(config_path):
+async def migrate(config_path, *, preview=False):
     from backend.hosting.upgrades import migrate_profile
     from backend.hosting.worker import WorkerConfig, create_worker_services
     value = json.loads(config_path.read_text())
     value['data_root'] = config_path.parent / value['data_root']
     config = WorkerConfig(**value)
     factory = create_worker_services
-    if name := os.environ.get('OAW_HOSTED_SERVICES_FACTORY'):
+    if preview:
+        from backend.hosting.preview import create_preview_services
+        factory = create_preview_services
+    elif name := os.environ.get('OAW_HOSTED_SERVICES_FACTORY'):
         module, function = name.split(':', 1)
         factory = getattr(importlib.import_module(module), function)
     return await migrate_profile(config, services_factory=factory)
@@ -79,59 +88,25 @@ def entry_profiles(profiles, choices):
     return tuple(entries.values())
 
 
-def verify(hosting, *, entries_only=False):
-    import httpx
-    from backend.hosting.configuration import read_gateway_settings, unix_socket_path
-    from backend.hosting.worker import mint_worker_token
-    settings = read_gateway_settings(hosting / 'control/hosting.json')
-    selected = settings.profiles
-    if entries_only:
-        import contextlib
-        import sqlite3
-        with contextlib.closing(sqlite3.connect(f'file:{hosting}/control/deployments.sqlite3?mode=ro', uri=True)) as db:
-            choices = dict(db.execute('SELECT user_id,profile_id FROM hosting_entries'))
-        selected = entry_profiles(selected, choices)
-        if not selected:
-            raise ValueError('No login entries available for release verification')
-    results = []
-    for profile in selected:
-        socket = unix_socket_path(profile.upstream)
-        if not socket:
-            raise ValueError('Release verification requires the existing private Unix sockets')
-        with httpx.Client(transport=httpx.HTTPTransport(uds=socket), base_url='http://localhost', timeout=120) as client:
-            # The first unauthenticated call also exercises cold socket activation.
-            if client.get('/api/deployment').status_code != 401:
-                raise ValueError('Worker admitted a request without gateway identity')
-            client.headers['Authorization'] = 'Bearer ' + mint_worker_token(profile.secret, profile.profile_id, profile.user_id)
-            response = client.get('/api/deployment')
-            if response.status_code != 200 or response.json()['mode'] != profile.mode:
-                raise ValueError('Worker startup or deployment mode check failed')
-            route = '/api/runtime-app' if profile.mode == 'runtime' else '/api/card-library'
-            if client.get(route).status_code != 200:
-                raise ValueError('Worker application bootstrap failed')
-            if profile.mode == 'runtime' and client.get('/api/world').status_code != 404:
-                raise ValueError('Runtime exposed its engineering canvas')
-        results.append({'profile': profile.profile_id, 'mode': profile.mode, 'ready': True})
-    return {'verified_profiles': results}
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('prepare', 'migrate', 'verify'))
+    parser.add_argument('mode', choices=('prepare', 'migrate'))
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--previous', type=Path)
     parser.add_argument('--scratch', type=Path)
+    parser.add_argument('--bundle', type=Path)
     parser.add_argument('--config', type=Path)
-    parser.add_argument('--hosting', type=Path)
-    parser.add_argument('--entries-only', action='store_true')
+    parser.add_argument('--environment', choices=('production', 'preview'), default='production')
     args = parser.parse_args()
+    if os.geteuid() == 0:
+        raise ValueError('Application release checks cannot run as root')
     sys.path.insert(0, str(args.source))
     if args.mode == 'prepare':
-        result = prepare(args.source, args.previous, args.scratch)
+        if any(value is None for value in (args.previous, args.scratch, args.bundle)):
+            parser.error('--previous, --scratch and --bundle are required for preparation')
+        result = prepare(args.source, args.previous, args.scratch, args.bundle, preview=args.environment == 'preview')
     elif args.mode == 'migrate':
-        result = asyncio.run(migrate(args.config))
-    else:
-        result = verify(args.hosting, entries_only=args.entries_only)
+        result = asyncio.run(migrate(args.config, preview=args.environment == 'preview'))
     print(json.dumps(result), flush=True)
 
 

@@ -186,17 +186,19 @@ def test_payload_hashes_are_checked_before_extraction(tmp_path):
     assert not output.exists()
 
 
-def test_prepare_uses_installed_helper_in_isolated_python(authority, monkeypatch):
+def test_prepare_dispatch_requires_registered_isolated_execution(authority, monkeypatch):
     f = authority
     initialize(f)
     remote.save(f.b, 'staged')
     monkeypatch.setattr(remote, 'plan', lambda request: {})
     from contextlib import nullcontext
     monkeypatch.setattr(remote, 'lock', lambda *args, **kwargs: nullcontext())
-    calls = []
-    monkeypatch.setattr(remote, 'run', lambda *args, **kwargs: calls.append(args))
+    config = {'environment': 'preview'}
+    checks, calls = [], []
+    monkeypatch.setattr(remote, 'require_execution', lambda request: checks.append(request) or config)
+    monkeypatch.setattr(remote, 'prepare_bundle', lambda request, registration: calls.append((request, registration)))
     assert remote.dispatch({**f.request, 'action': 'check'})['phase'] == 'ready'
-    assert calls[0][1:4] == ('-I', str(f.operator / 'release_worker.py'), 'prepare')
+    assert len(checks) == 1 and calls == [(checks[0], config)]
 
 
 def test_background_job_uses_installed_controller_not_legacy_payload(authority, monkeypatch):
@@ -208,13 +210,17 @@ def test_background_job_uses_installed_controller_not_legacy_payload(authority, 
     remote.save(f.b, 'ready')
     monkeypatch.setattr(remote, 'unit_state', lambda unit: 'inactive')
     monkeypatch.setattr(remote, 'plan', lambda request: {'already_current': False})
+    checked = []
+    monkeypatch.setattr(remote, 'require_execution', lambda request, deploying=False:
+                        checked.append(deploying) or {'environment': 'preview'})
     calls = []
     monkeypatch.setattr(remote, 'run', lambda *args, **kwargs: calls.append(args))
     assert remote.start_job({**f.request, 'action': 'start'})['phase'] == 'queued'
     command = calls[0]
     assert command[0] == 'systemd-run' and '--no-block' in command
-    assert command[-3:] == ('-I', str(f.operator / 'release_remote.py'), str(f.b / 'transaction.json'))
+    assert command[-4:] == ('-I', '-S', str(f.operator / 'release_remote.py'), str(f.b / 'transaction.json'))
     assert not any('stage/operator' in argument for argument in command)
+    assert checked == [True]
 
 
 def test_revoked_approval_blocks_transaction_before_stopping_services(authority):
