@@ -58,8 +58,12 @@ violations are rejected before files reach the project inventory.
 5. Optional `knowledge_projection_review_prompt` / `knowledge_projection_revise`
    verifies or transforms an existing result with an expected revision and note.
 
-There is no Knowledge Frame. Project results and graph views are readable directly;
-publication of experiment records and Insights is a separate human decision.
+There is no Knowledge Frame. Project results are readable directly with
+`knowledge_projections`. Saving or revising a graph-kind result also rebuilds its
+concepts and relations in the card's one knowledge graph (merged across projects by
+name, evidence kept per file), so `knowledge_graph` search, traversal and the optional
+semantic index cover them. Publication of experiment records and Insights is a separate
+human decision.
 
 ## Persistence and failure behavior
 

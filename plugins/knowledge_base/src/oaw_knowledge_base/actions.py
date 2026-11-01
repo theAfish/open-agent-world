@@ -1023,7 +1023,7 @@ class GraphQuery(Request):
     direction: Literal["both", "out", "in"] = "both"
     limit: int = Field(default=200, ge=1, le=1000)
     group_id: str | None = None
-    # "literature": facts an approved draft published. "experiment": insights
+    # "literature": concepts and relations from saved project graph results. "experiment": insights
     # published from experiment records and the record/field nodes they cite.
     # Omitted: the whole graph, both layers.
     layer: Literal["literature", "experiment"] | None = None
@@ -1052,10 +1052,12 @@ def _relation_json(relation, names):
     return {"id": str(relation.id), "type": relation.type, "predicate": relation.type,
             "source_id": str(relation.source_id), "source_name": names.get(str(relation.source_id)),
             "target_id": str(relation.target_id), "target_name": names.get(str(relation.target_id)),
-            "statement": properties.get("description") if isinstance(properties.get("description"), str) else None,
+            "statement": properties.get("description") if isinstance(properties.get("description"), str) else (
+                properties.get("snippet") if isinstance(properties.get("snippet"), str) else None),
             "evidence_level": properties.get("evidence_level") if isinstance(properties.get("evidence_level"), int) else None,
             "snippet": properties.get("snippet") if isinstance(properties.get("snippet"), str) else None,
             "source_ids": [v for v in properties.get("source_ids") or [] if isinstance(v, str)],
+            "source_files": [v for v in properties.get("source_files") or [] if isinstance(v, str)],
             "properties": properties}
 
 
@@ -1067,6 +1069,7 @@ COMPACT_ENTITIES = 8
 COMPACT_RELATIONS = 12
 COMPACT_BYTES = 7000
 STATEMENT_CHARS = 240
+NEIGHBOUR_CHARS = 100
 
 
 def _clip(text, limit):
@@ -1077,13 +1080,13 @@ def _compact_entity(entity, matched):
     properties = entity.properties or {}
     item = {"name": entity.name, "type": entity.type, "matched": matched}
     if matched:
-        # Only a matched concept's background and id (for traverse) are worth the space.
+        # Only a matched concept's id (for traverse) and aliases are worth the space.
         item["id"] = str(entity.id)
         aliases = [a for a in properties.get("aliases") or [] if isinstance(a, str)]
         if aliases:
             item["aliases"] = aliases
-        if isinstance(properties.get("description"), str):
-            item["description"] = _clip(properties["description"], STATEMENT_CHARS)
+    if isinstance(properties.get("description"), str):
+        item["description"] = _clip(properties["description"], STATEMENT_CHARS if matched else NEIGHBOUR_CHARS)
     return item
 
 
@@ -1091,10 +1094,22 @@ def _compact_relation(relation, names):
     properties = relation.properties or {}
     item = {"source_name": names.get(str(relation.source_id)), "predicate": relation.type,
             "target_name": names.get(str(relation.target_id))}
-    if isinstance(properties.get("description"), str):
-        item["statement"] = _clip(properties["description"], STATEMENT_CHARS)
+    description = properties.get("description") if isinstance(properties.get("description"), str) else None
+    snippets = [v for v in properties.get("snippets") or [] if isinstance(v, str)]
+    if isinstance(properties.get("snippet"), str):
+        snippets.insert(0, properties["snippet"])
+    snippets = list(dict.fromkeys(snippets))
+    # Extraction often yields only the supporting sentence: it is the statement then.
+    statement = description or (snippets.pop(0) if snippets else None)
+    if statement:
+        item["statement"] = _clip(statement, STATEMENT_CHARS)
+    if snippets:
+        item["snippets"] = [_clip(value, STATEMENT_CHARS) for value in snippets[:2]]
     if isinstance(properties.get("evidence_level"), int):
         item["evidence_level"] = properties["evidence_level"]
+    files = [v for v in properties.get("source_files") or [] if isinstance(v, str)]
+    if files:
+        item["source_files"] = files
     sources = [v for v in properties.get("source_ids") or [] if isinstance(v, str)]
     if sources:
         item["source_ids"] = sources

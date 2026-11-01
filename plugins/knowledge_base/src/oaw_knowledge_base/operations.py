@@ -83,7 +83,7 @@ OPERATIONS: tuple[Operation, ...] = (
         tool_name="knowledge_insight_update",
         description="Edit one draft insight's kind, title, statement, fields, confidence, evidence or note, when a person asks for the change. Refuses published insights. Never publishes: that is the person's click."),
     Operation("graph", actions.graph, actions.GraphQuery, tool_name="knowledge_graph",
-        description="Search the published experiment Insight graph, including record and field evidence. Use knowledge_projections for generic project Space graph/table outputs, and knowledge_document_search for original material. Query by words, names, or relation paths. Returned relations are published claims; concept descriptions alone are not claims. Semantic search is used only when an embedding model is configured; inspect semantic_error when it is unavailable."),
+        description="Search the knowledge graph: concepts and relations from saved project graph results (merged across projects by name), plus published experiment Insights with record and field evidence. Use knowledge_projections for one project's full graph or table results, and knowledge_document_search for original material. Query by words, names, or relation paths. Returned relations are claims with source evidence; concept descriptions alone are not claims. Semantic search is used only when an embedding model is configured; inspect semantic_error when it is unavailable."),
     Operation("graph_index", actions.graph_index, actions.GraphIndexStatus, tool_name="knowledge_graph_index",
         description="Read the semantic index status: which embedding model the card uses (enabled=false when none), how many graph elements are embedded, pending or stale, and the last error. Call this when asked whether meaning-based search is available or why a search said semantic=false. Building the index requires knowledge_graph_index_build."),
     Operation("jobs", actions.jobs, actions.Jobs, tool_name="knowledge_jobs",
@@ -98,7 +98,7 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Create or update an experiment upload's name, notes and schema. For create, choose an experiment schema with knowledge_schemas or knowledge_schema_manage and give a name; an equivalent unpublished upload is reused. Import its files next, wait for conversion, then use knowledge_experiment_extract_prompt and knowledge_experiment_save. Updates refuse uploads with published records. This cannot delete, publish or change extraction run state."),
     Operation("graph_index_build", actions.graph_index_build, actions.GraphIndexBuild,
         tool_name="knowledge_graph_index_build",
-        description="Build missing or stale embeddings for the published graph using the configured embedding model. Does not change the model or publish knowledge. Read knowledge_graph_index first to check availability and progress."),
+        description="Build missing or stale embeddings for the knowledge graph using the configured embedding model. Does not change the model or publish knowledge. Read knowledge_graph_index first to check availability and progress."),
     # No tool_name below this line: human-only, on every transport.
     Operation("settings", actions.update_settings, actions.Settings,
         description="Read or change this knowledge base's collection name, PDF engine and MinerU base URL."),

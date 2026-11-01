@@ -62,8 +62,9 @@ Experiment record and Insight publication remain human actions. Do not publish,
 unpublish, delete approved data, alter settings or change model connections.
 
 Read knowledge_overview for actual inventory; knowledge_projections for project outputs;
-knowledge_graph for published experiment insight claims; document search for original
-evidence. An empty graph does not mean the knowledge base is empty. For connected
+knowledge_graph to search and traverse the knowledge graph (saved project graph results and
+published experiment insights); document search for original evidence. An empty graph does
+not mean the knowledge base is empty. For connected
 databases use inspect_database then bounded query_database SELECT with bound values.
 Use authorized target selectors; do not guess database paths or read private KB tables.
 Only claim capabilities and permissions present in the live tool list.
@@ -115,4 +116,4 @@ def definition():
     )
     return LegionPresetDefinition(id="knowledge.base.research", name="Lab Manager",
         description="Process project materials with Spaces and turn experimental records into evidence-linked insights.",
-        revision=5, nodes=nodes, edges=edges)
+        revision=6, nodes=nodes, edges=edges)

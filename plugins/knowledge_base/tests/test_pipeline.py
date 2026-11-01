@@ -737,10 +737,12 @@ def test_the_agent_gets_a_compact_result_that_fits_the_host_window_however_big_t
     assert (first["source_name"], first["predicate"], first["target_name"]) == ("PFD-kit", "fine_tunes", "DPA-2")
     assert first["statement"].endswith("…") and len(first["statement"]) <= actions.STATEMENT_CHARS
     assert compact["connections"][0]["steps"] == ["PFD-kit —fine_tunes→ DPA-2"]
-    # Compact means no duplicated property blobs, no snippets, no ids on neighbours.
+    # Compact means no duplicated property blobs and no ids on neighbours, whose
+    # descriptions are clipped short.
     assert all("properties" not in item and "snippet" not in item for item in compact["relations"])
     assert all("id" in e for e in compact["entities"] if e["matched"])
-    assert all("id" not in e and "description" not in e for e in compact["entities"] if not e["matched"])
+    assert all("id" not in e and len(e.get("description", "")) <= actions.NEIGHBOUR_CHARS
+               for e in compact["entities"] if not e["matched"])
 
     # The UI asks for the full view and gets properties back, uncapped by the window.
     full = run(card, actions.graph, query="Can I use PFD kit with DPA-2 model?", full=True)

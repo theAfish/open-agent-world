@@ -112,6 +112,18 @@ class ProjectionStore:
                 query.order_by(RUNS.c.updated_at.desc(), RUNS.c.id).limit(limit).offset(offset),
             ).mappings()]
 
+    def latest_completed(self, kind):
+        """The newest completed result of each project/Space pair, so a running or failed
+        rerun leaves the last good result in place."""
+        ranked = select(RUNS.c.id, func.row_number().over(
+            partition_by=(RUNS.c.project_id, RUNS.c.space_id),
+            order_by=RUNS.c.generation.desc(),
+        ).label("position")).where(RUNS.c.kind == kind, RUNS.c.status == "completed").subquery()
+        query = select(RUNS).join(ranked, ranked.c.id == RUNS.c.id).where(ranked.c.position == 1)
+        with self.engine.connect() as connection:
+            return [_row(row) for row in connection.execute(
+                query.order_by(RUNS.c.created_at, RUNS.c.id)).mappings()]
+
     def prepare(self, *, project_id, project_name, space, sources, fingerprint, actor, rerun=False):
         with self._write() as connection:
             current = self._latest(connection, project_id, space["id"])

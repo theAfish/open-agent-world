@@ -168,6 +168,52 @@ def test_graph_rejects_foreign_evidence_and_unknown_endpoints(card):
     assert save(card, run, data)["data"] == data
 
 
+def test_graph_relations_reach_the_agent_with_their_text_and_files(card):
+    first, second = make_project(card, "First"), make_project(card, "Second")
+    space = make_space(card, kind="graph", definition=spaces.GRAPH_SCHEMA)
+    runs = prepare(card, space, first["id"], second["id"])
+    for run, snippet in zip(runs, ("Uni-3DAR compresses space with an octree. " * 20, "Octrees are used by Uni-3DAR.")):
+        source = str(projects.project_sources(kb_for(card), run["project_id"])[0].id)
+        save(card, run, {"entities": [{"id": "a", "name": "Uni-3DAR", "description": "A 3D model"},
+                                      {"id": "b", "name": "octree"}],
+                         "relations": [{"source": "a", "target": "b", "predicate": "uses", "snippet": snippet,
+                                        "source_ids": [source]}]})
+
+    for arguments in ({"names": ["Uni-3DAR"]}, {"operation": "connect", "names": ["Uni-3DAR", "octree"]}):
+        relation = actions.graph(card, arguments)["relations"][0]
+        assert relation["statement"].startswith("Uni-3DAR compresses") and len(relation["statement"]) <= 240
+        assert relation["snippets"] == ["Octrees are used by Uni-3DAR."]
+        assert relation["source_files"] == ["report.md"] and len(relation["source_ids"]) == 2
+    neighbour = [item for item in actions.graph(card, {"names": ["octree"]})["entities"] if not item["matched"]]
+    assert neighbour and neighbour[0]["description"] == "A 3D model"
+
+
+def test_saved_graph_results_are_the_one_queryable_knowledge_graph(card):
+    first, second = make_project(card, "First"), make_project(card, "Second")
+    space = make_space(card, kind="graph", definition=spaces.GRAPH_SCHEMA)
+    runs = prepare(card, space, first["id"], second["id"])
+    sources = {run["project_id"]: str(projects.project_sources(kb_for(card), run["project_id"])[0].id) for run in runs}
+
+    def graph(run, entities, predicate="uses"):
+        ids = [item["id"] for item in entities]
+        return {"entities": [{**item, "source_ids": [sources[run["project_id"]]]} for item in entities],
+                "relations": [{"source": ids[0], "target": ids[1], "predicate": predicate,
+                               "source_ids": [sources[run["project_id"]]]}]}
+
+    save(card, runs[0], graph(runs[0], [{"id": "a", "name": "Uni-3DAR"}, {"id": "b", "name": "octree"}]))
+    save(card, runs[1], graph(runs[1], [{"id": "x", "name": "uni 3dar"}, {"id": "y", "name": "Langevin dynamics"}]))
+
+    found = actions.graph(card, {"names": ["Uni-3DAR"]})
+    assert [item["name"] for item in found["entities"] if item["matched"]] == ["Uni-3DAR"]
+    assert {item["name"] for item in found["entities"]} == {"Uni-3DAR", "octree", "Langevin dynamics"}
+
+    revised = spaces.projection_revise(card, {"projection_id": runs[1]["id"], "note": "drop", "expected_revision": 2,
+        "data": {"entities": [{"id": "z", "name": "Solo"}], "relations": []}})["projection"]
+    assert revised["generation"] == 2
+    names = {item["name"] for item in actions.graph(card, {"query": "Uni-3DAR"})["entities"]}
+    assert "Langevin dynamics" not in names and "octree" in names
+
+
 def test_independent_clients_claim_one_run_concurrently(card):
     project, space = make_project(card), make_space(card)
     _, sources, fingerprint = spaces._snapshot(kb_for(card), project["id"])
