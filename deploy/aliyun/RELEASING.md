@@ -1,5 +1,11 @@
 # ECS 发布与 PR CI 边界
 
+> **Phase 2:** See [PREVIEW.md](PREVIEW.md) for the current trusted bootstrap,
+> first Preview installation, and acceptance gates. The new operator requires
+> independent execution registration and blocks production deployment while the
+> root provisioner imports application code. The Phase 1 commands below are
+> historical context, not an instruction to upgrade or restart the live service.
+
 `scripts/aliyun_release.py` 用于已经按照 [ECS.md](ECS.md) 安装的原生多用户服务。
 它复用现有账号、systemd worker 隔离、卡包准备机制和阿里 Sandbox；不创建云资源，也不修改个人版入口。
 

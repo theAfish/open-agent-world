@@ -180,6 +180,15 @@ def installation(tmp_path, monkeypatch):
         'source_commit': kw.get('source_commit') or request.get('source_commit') or 'b' * 40})
     monkeypatch.setattr(remote, 'trusted_operator', lambda: Path(remote.__file__))
     monkeypatch.setattr(remote, 'trusted_worker', lambda: ROOT / 'deploy/aliyun/release_worker.py')
+    # Model the registered nonroot execution boundary here. The concrete unit,
+    # identity, bundle and verifier restrictions have separate security tests.
+    monkeypatch.setattr(remote, 'require_execution', lambda request, **kw:
+                        {'environment': 'preview', 'sandbox_root': '/reviewed-execution-root'})
+    monkeypatch.setattr(remote, 'install_bundle', lambda request, directory: None)
+    monkeypatch.setattr(remote, 'restore_bundle', lambda request, directory: None)
+    monkeypatch.setattr(remote, 'checked_worker_identity', lambda original: 'oaw-user')
+    monkeypatch.setattr(remote, 'verify_release', lambda request, config, entries_only=False:
+                        remote.run('verify', *(['--entries-only'] if entries_only else [])))
     b = remote.release_dir(request)
     stage = b / 'stage'
     (stage / 'backend').mkdir(parents=True)
@@ -199,7 +208,7 @@ def installation(tmp_path, monkeypatch):
     units = tmp_path / 'units'
     units.mkdir()
     (units / f'oaw-hosted-worker-{identifier}.service').write_text(
-        '[Unit]\nAfter=network.target\n[Service]\nUser=oaw-user\nProtectSystem=strict\n'
+        '[Unit]\nAfter=network.target\n[Service]\nUser=oaw-user\nProtectSystem=strict\nRootDirectory=/reviewed-execution-root\n'
         'BindReadOnlyPaths=/profile\nEnvironmentFile=/private.env\nExecStart=/old-command\nRestart=always\n')
     monkeypatch.setattr(remote, 'UNITS', units)
     monkeypatch.setattr(remote.subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=0, stdout='', stderr=''))
@@ -627,13 +636,58 @@ def test_deploy_binds_verified_artifact_once_without_rebuilding(portable_build, 
     assert calls == []
 
 
-def test_remote_transport_sends_only_data_to_an_installed_controller(monkeypatch):
+@pytest.mark.parametrize('environment,path', [
+    ('production', client.TRUSTED_OPERATOR), ('preview', client.PREVIEW_OPERATOR)])
+def test_remote_transport_sends_only_data_to_an_installed_controller(monkeypatch, environment, path):
     calls = []
     monkeypatch.setattr(client, 'run', lambda argv, **kwargs: calls.append((argv, kwargs)) or '{"phase":"ready"}')
     cfg = {'app': '/opt/app', 'hosting': '/srv/hosting', 'releases': '/opt/releases', 'service': 'oaw-hosted',
-           'ssh_target': 'root@example.invalid', 'identity_file': '/private/key'}
+           'ssh_target': 'root@example.invalid', 'identity_file': '/private/key', 'environment': environment}
     assert client.remote(cfg, 'status')['phase'] == 'ready'
     argv, kwargs = calls[0]
-    assert argv[-1] == '/usr/bin/python3 -I /opt/oaw-release-operator/release_remote.py'
+    assert argv[-1] == '/usr/bin/python3 -I -S ' + path
     assert json.loads(kwargs['input']) == {**client.target(cfg), 'action': 'status', 'purpose': 'trusted_manual'}
     assert 'exec(' not in kwargs['input'] and 'payload' not in kwargs['input']
+
+
+def test_client_rejects_unregistered_operator_before_ssh(monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail('An invalid operator selection reached SSH')
+    monkeypatch.setattr(client, 'run', unexpected)
+    cfg = {'app': '/opt/app', 'hosting': '/srv/hosting', 'releases': '/opt/releases', 'service': 'oaw-hosted',
+           'ssh_target': 'root@example.invalid', 'identity_file': '/private/key',
+           'environment': '/tmp/pr-controller.py'}
+    with pytest.raises(ValueError, match='environment'):
+        client.remote(cfg, 'status')
+    cfg.pop('environment')
+    assert client.target_id(cfg) == client.target_id({**cfg, 'environment': 'production'})
+    assert client.target_id(cfg) != client.target_id({**cfg, 'environment': 'preview'})
+
+
+def test_seed_uses_fixed_artifact_without_baseline_or_service_start(portable_build, monkeypatch):
+    f = portable_build
+    cfg = {'environment': 'preview', 'app': '/opt/preview', 'hosting': '/srv/preview',
+           'releases': '/opt/preview-releases', 'service': 'oaw-preview',
+           'ssh_target': 'root@example.invalid', 'identity_file': 'test-key'}
+    record = client.read(f.directory / 'release.json')
+    calls, uploads = [], []
+    def remote(cfg, action, release=None, **pinned):
+        calls.append((action, release, pinned))
+        return {'phase': 'uploading' if action == 'init' else 'seeded'}
+    monkeypatch.setattr(client, 'remote', remote)
+    monkeypatch.setattr(client, 'run', lambda argv, **kwargs: uploads.append(argv))
+    monkeypatch.setattr(client, 'build', lambda *a, **k: pytest.fail('Seed attempted to rebuild'))
+    client.seed(cfg, SimpleNamespace(artifact=f.directory))
+    assert [call[0] for call in calls] == ['init', 'seed']
+    assert all(call[1:] == (record['release'], {'source_commit': record['commit'],
+               'archive_sha256': record['archive_sha256']}) for call in calls)
+    assert len(uploads) == 1 and uploads[0][0] == 'scp'
+    assert client.sha(f.directory / 'bundle.tar.gz') == record['archive_sha256']
+    assert not (f.directory / 'deployment.json').exists()
+    calls.clear()
+    with pytest.raises(ValueError, match='only supported for Preview'):
+        client.seed({**cfg, 'environment': 'production'}, SimpleNamespace(artifact=f.directory))
+    (f.directory / 'bundle.tar.gz').write_bytes(b'tampered')
+    with pytest.raises(ValueError, match='archive changed'):
+        client.seed(cfg, SimpleNamespace(artifact=f.directory))
+    assert calls == []

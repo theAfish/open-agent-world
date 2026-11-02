@@ -85,6 +85,22 @@ def test_worker_rejects_spoofed_socket_activation(monkeypatch):
         activated_socket(4)
 
 
+def test_gateway_cli_reuses_validated_socket_activation(tmp_path, monkeypatch):
+    import uvicorn
+    from backend.hosting import cli, gateway, systemd
+
+    application = object()
+    checked, started = [], []
+    monkeypatch.setattr(cli, 'read_gateway_settings', lambda path: object())
+    monkeypatch.setattr(gateway, 'create_gateway', lambda *args, **kwargs: application)
+    monkeypatch.setattr(systemd, 'activated_socket', checked.append)
+    monkeypatch.setattr(uvicorn, 'run', lambda app, **kwargs: started.append((app, kwargs)))
+    cli.main(['gateway', '--config', str(tmp_path / 'hosting.json'), '--fd', '3'])
+    assert checked == [3]
+    assert started[0][0] is application and started[0][1]['fd'] == 3
+    assert started[0][1]['proxy_headers'] is False
+
+
 def test_installation_refuses_a_host_that_ignores_network_filter(monkeypatch):
     from backend.hosting import systemd
     original = systemd._run

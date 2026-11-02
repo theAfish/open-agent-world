@@ -1,0 +1,17 @@
+{
+  "environment": "preview",
+  "acceptance": "not_verified",
+  "application_version": "REPLACE_INDEPENDENTLY_REVIEWED_VERSION",
+  "source_commit": "REPLACE_ROOT_RECEIPT_SOURCE_COMMIT",
+  "release_id": "REPLACE_ROOT_RECEIPT_RELEASE_ID",
+  "archive_sha256": "REPLACE_APPROVED_ARCHIVE_SHA256",
+  "operator_protocol": "REPLACE_REVIEWED_OPERATOR_PROTOCOL",
+  "provenance": "manual_trusted_artifact",
+  "pr": null,
+  "head_commit": null,
+  "base_commit": null,
+  "merge_commit": null,
+  "run_id": null,
+  "paid_models": false,
+  "cloud_sandbox": false
+}

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "operator": "/opt/oaw-release-operator-preview",
+  "source_directory": "/opt/oaw-operator-review-v1",
+  "operator_files": {
+    "bootstrap.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256",
+    "release_remote.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256",
+    "release_worker.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256",
+    "release_verify.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256"
+  },
+  "production_origin": "https://118.31.119.91",
+  "production_target": {
+    "app": "/opt/open-agent-world",
+    "hosting": "/srv/oaw-hosting",
+    "releases": "/opt/oaw-releases",
+    "service": "oaw-hosted"
+  },
+  "execution": {
+    "version": 1,
+    "environment": "preview",
+    "target": {
+      "app": "/opt/oaw-preview-app",
+      "hosting": "/srv/oaw-preview-hosting",
+      "releases": "/opt/oaw-preview-releases",
+      "service": "oaw-preview"
+    },
+    "sandbox_root": "/opt/oaw-preview-execution",
+    "python": "/usr/bin/python3.12",
+    "build_user": "oaw-preview-build",
+    "verify_user": "oaw-preview-verify"
+  },
+  "approved_artifacts": [],
+  "preview": {
+    "public_origin": "https://preview.example.invalid",
+    "setup_user": "oaw-preview-setup"
+  }
+}
