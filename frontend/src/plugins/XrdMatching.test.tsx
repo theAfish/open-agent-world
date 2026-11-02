@@ -2,10 +2,23 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import xrd from "../../../plugins/xrd/frontend";
+import { FocusLayer } from '../../../plugins/xrd/frontend/MatchControls';
 import type { PluginViewProps } from "./sdk";
 import { TEST_CATALOG } from "../state/catalog.fixture";
 
 afterEach(cleanup);
+it('keeps an open picker attached when its trigger is replaced during refresh', () => {
+  const root = document.createElement('div');root.className = 'xrd-match-ui';
+  const anchor = document.createElement('button');root.append(anchor);document.body.append(root);
+  const close = vi.fn();
+  const view = render(<FocusLayer anchor={anchor} kind="elements" onClose={close}><button>Li</button></FocusLayer>);
+  try {
+    anchor.remove();
+    view.rerender(<FocusLayer anchor={anchor} kind="elements" onClose={close}><button>Li selected</button></FocusLayer>);
+    expect(screen.getByRole('dialog', { name: '选择元素' }).textContent).toContain('Li selected');
+    expect(close).not.toHaveBeenCalled();
+  } finally { view.unmount();root.remove(); }
+});
 beforeEach(()=>{vi.stubGlobal('ResizeObserver',class{observe(){} disconnect(){}});vi.stubGlobal('matchMedia',(media:string)=>Object.assign(new EventTarget(),{matches:true,media,onchange:null,addListener(){},removeListener(){}}));});
 
 const candidate = {
@@ -36,6 +49,27 @@ function mount(result?: Record<string, unknown>, level: PluginViewProps["level"]
   }} />);
   return host;
 }
+
+it("persists the bounded cell scale setting and explains QualX recall limits", async () => {
+  const host=mount();
+  const field=screen.getByRole('spinbutton',{name:'晶胞缩放范围 ± / %'});
+  fireEvent.change(field,{target:{value:'1.5'}});fireEvent.blur(field);
+  await waitFor(()=>expect(host.updateConfig).toHaveBeenCalledWith({cell_scale_percent:1.5}));
+  expect(screen.getByRole('combobox',{name:'谱库检索方式'}).title).toContain('尺度搜索仅用于初筛候选');
+});
+
+it("shows the shared scale and original versus aligned residuals", async () => {
+  mount({...baseResult,candidates:[{...candidate,alignment:{cell_scale:.993,cell_change_percent:-.7,
+    at_limit:false,unscaled_score:.17,unscaled_match_count:3,unscaled_mean_abs_delta:.12},
+    matches:[{...candidate.matches[0],original_reference:19.84,reference:20.02,delta:.02,raw_delta:.2}]}]});
+  const cell=await screen.findByRole('cell',{name:'-0.700'});
+  expect(cell.title).toContain('尺度因子 0.993000');
+  expect(cell.title).toContain('未缩放得分 17.0');
+  const summary=screen.getByText('匹配峰与偏差（1）');fireEvent.click(summary);
+  const table=summary.closest('details')!;
+  expect(table.textContent).toContain('19.840');expect(table.textContent).toContain('20.020');
+  expect(table.textContent).toContain('0.2000');expect(table.textContent).toContain('0.0200');
+});
 
 it("defaults to QualX3 and persists switching to the native engine", async () => {
   const host = mount();

@@ -25,6 +25,34 @@ Docs 的发布步骤仍只用于非 PR 的 dev，桌面 release workflow 未接�
 archive digest 和提交。缺失策略或未知产物会拒绝；本阶段不替现有服务器安装 operator 或写入批准策略。
 旧 v1 固定产物仍须通过同一外部策略。该机制仅面向可信人工发布，不能代替 GitHub 审阅和 PR 来源验证。
 
+## XRD 参考谱库与工作台
+
+XRD 算法、谱库槽位管理和工作区交互的通用修改先提交到 `dev`；阿里云集成分支通过独立 PR 引入相同提交。
+不要将阿里分支的整段历史合入 `dev`，也不要直接向受保护分支推送。代码合并和生产发布继续遵守本文的可信操作者流程。
+
+谱库数据独立于应用产物保存。管理员将主库及补充库解压到 worker 可读的只读目录；每个 `.sq` 与其
+`.sq.info`、`.sq.infostat`、`.sq.search` 文件保持原名并放在同一目录。共享库与目录文件由管理员管理，
+runtime 用户只能在已批准的目录条目中选择，不能指定任意后端文件。
+
+在 worker 环境文件中设置 `OAW_XRD_LIBRARY_CATALOG=/srv/oaw-reference-libraries/catalog.json`，例如：
+
+```json
+{
+  "cod": {"label": "COD 主库", "path": "/srv/oaw-reference-libraries/cod/cod.sq"},
+  "supplemental-pdf": {"label": "补充 PDF 卡片", "path": "/srv/oaw-reference-libraries/supplemental-pdf/supplemental_pdf_cards_qualx.sq"}
+}
+```
+
+目录内路径按实际安装位置填写，确保原 worker 的文件系统隔离规则允许读取；不向 Git、构建包或日志写入谱库及用户实验数据。
+应用重启后，谱库槽位选择目录条目并确认挂载；引擎选择 QualX 对应“快速检索”。重复确认原槽位复用已有挂载。
+可卸载主库并单独测试补充库；卸载只修改槽位，不删除共享文件。QualX 的晶胞缩放只作用于其召回候选，
+需要在全库候选中执行尺度匹配时使用“遍历检索”。
+
+新建 XRD 工作台默认只在右侧放置检索与比对、结果讨论两个标签。已有用户布局不会因更新 Pack 自动替换。
+需要更新现有工作区时，由管理员在源工作台的布局编辑器移除 reviewer 与 Jev 的标签位置，保留 Agent 节点及连接，
+再通过既有的显式工作区模板更新发布。遇到用户自定义布局冲突应停止处理冲突，不直接重写用户数据库。
+发布后检查谱库目录、已保存参数、连续元素选择和单行导航；保留已有实验谱、历史运行及各用户当前挂载组合。
+
 ## 一次性配置
 
 将 [release.example.json](release.example.json) 复制到本机

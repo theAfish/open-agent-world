@@ -38,21 +38,28 @@
 .xrd-workflow-actions > .xrd-run-history:first-child { margin-right:auto; }
 .xrd-workflow-actions > .xrd-run-history:has(+ .xrd-results-discussion) { margin-right:0; }
 .xrd-workflow-actions > .xrd-results-discussion { margin-right:auto; }
-.xrd-workflow-actions > .xrd-results-discussion:has(+ .xrd-mode-hint) { margin-right:0; }
 .xrd-pipeline .xrd-candidate-grid { grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:6px; padding:8px 0; }
 .xrd-pipeline .xrd-candidate-choice { gap:7px; padding:8px; }
 .xrd-pipeline .xrd-candidate-choice > span:last-child { gap:2px; }
-.xrd-workflow-navigation { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:6px 18px;min-width:0;padding:2px 0; }
-.xrd-workflow-route { display:grid;grid-template-columns:30px repeat(2,minmax(0,1fr));align-items:start;gap:6px;min-width:0; }
-.xrd-route-label { padding:7px 0;color:var(--ink-faint);font-size:11px;line-height:20px; }
-.xrd-workflow-step { display:flex;flex-direction:column;align-items:flex-start;min-width:0; }
-.xrd-workflow-navigation button { border:0;border-radius:var(--radius-control);background:transparent;padding:7px 8px;min-height:34px;max-width:100%;color:var(--ink-soft);font-size:12px;line-height:20px;text-align:left;overflow-wrap:anywhere; }
-.xrd-workflow-navigation button[aria-current=step] { background:var(--accent-soft);color:var(--accent-strong);font-weight:600; }
-.xrd-step-status { padding:0 8px;font-size:10px;line-height:16px;color:var(--ink-faint); }
+.xrd-workflow-navigation { display:flex;gap:12px;min-width:0;max-width:100%;overflow-x:auto;padding:8px;border:1px solid var(--xrd-line);border-radius:var(--radius-control);background:var(--surface-soft); }
+.xrd-workflow-route { position:relative;display:grid;grid-template-columns:28px repeat(2,minmax(max-content,1fr));align-items:center;gap:14px;flex:1 0 auto;padding-right:12px;border-right:1px solid var(--xrd-line); }
+.xrd-workflow-route:last-child { padding-right:0;border-right:0; }
+.xrd-route-label { color:var(--ink-soft);font-size:11px;font-weight:600;line-height:20px; }
+.xrd-workflow-step { position:relative;display:flex;flex-direction:column;align-self:stretch;justify-content:center;min-width:0; }
+.xrd-workflow-step:has(+ .xrd-workflow-step)::after { content:'›';position:absolute;right:-11px;top:9px;color:var(--ink-faint);font-size:16px; }
+.xrd-workflow-navigation button { display:flex;align-items:center;gap:6px;width:100%;border:1px solid transparent;border-radius:var(--radius-control);background:transparent;padding:8px;min-height:38px;color:var(--ink-soft);font-size:12px;line-height:20px;text-align:left;white-space:nowrap; }
+.xrd-workflow-navigation button:hover:not(:disabled) { border-color:var(--accent-strong);color:var(--accent-strong); }
+.xrd-workflow-navigation button[aria-current=step] { border-color:var(--accent-strong);background:var(--accent-soft);color:var(--accent-strong);font-weight:600; }
+.xrd-route-number { flex:0 0 auto;font-size:10px;font-variant-numeric:tabular-nums;opacity:.7; }
+.xrd-step-status { position:absolute;right:5px;top:50%;transform:translateY(-50%);font-size:0;line-height:16px;color:var(--ink-faint);pointer-events:none; }
+.xrd-workflow-step:has(.xrd-step-status:is([data-state=completed],[data-state=succeeded],[data-state=failed],[data-state=running])) > button { padding-right:20px; }
+.xrd-step-status:is([data-state=completed],[data-state=succeeded])::after { content:'✓';font-size:11px; }
+.xrd-step-status[data-state=running]::after { content:'●';font-size:8px; }
+.xrd-step-status[data-state=failed]::after { content:'!';font-size:11px; }
 .xrd-step-status[data-state=running] { color:var(--accent-strong); }
 .xrd-step-status[data-state=completed],.xrd-step-status[data-state=succeeded] { color:var(--success); }
 .xrd-step-status[data-state=failed] { color:var(--danger); }
-.xrd-mode-hint { color:var(--xrd-muted);font-size:12px;margin-right:auto; }
+.xrd-pipeline .xrd-workflow-actions > .xrd-primary-action { flex:0 0 auto;width:auto;gap:7px;padding:0 12px;font-size:12px; }
 
 .xrd-run-timer { font-variant-numeric:tabular-nums; white-space:nowrap; margin-right:8px; opacity:.8; }
 

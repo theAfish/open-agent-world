@@ -54,7 +54,7 @@ def test_documents_clear_machine_mounts_and_inputs(client):
         assert not captured.get('path') and not captured.get('slots') and not captured.get('source_base64')
 
 
-def test_inputs_are_owned_by_canvas_and_match_and_legacy_cards_are_not_creatable(client, monkeypatch):
+def test_inputs_are_owned_by_canvas_and_match_and_legacy_cards_are_not_creatable(client, monkeypatch, tmp_path):
     import base64
     import oaw_xrd
     owner = _create_node(client, 'xrd.match')
@@ -63,9 +63,12 @@ def test_inputs_are_owned_by_canvas_and_match_and_legacy_cards_are_not_creatable
     result = client.post(f"/api/nodes/{canvas['id']}/actions/import", json={'expected_revision':doc['revision'], 'arguments':{'filename':'pattern.csv', 'source_base64':base64.b64encode('\n'.join(f'{10+i},4' for i in range(25)).encode()).decode()}})
     assert result.status_code == 200, result.text
     assert len(result.json()['value']['points']) == 25
-    monkeypatch.setattr(oaw_xrd, 'inspect_library', lambda path: {'kind':'library','path':path,'count':12,'filename':'library.db'})
+    path = tmp_path / 'user-library.db'
+    path.write_bytes(b'fake library data')
+    monkeypatch.setattr(oaw_xrd, 'inspect_library', lambda path: {
+        'kind':'library', 'path':str(path), 'count':12, 'filename':path.name})
     doc = client.get(f"/api/nodes/{owner['id']}/document").json()
-    result = client.post(f"/api/nodes/{owner['id']}/actions/configure", json={'expected_revision':doc['revision'],'arguments':{'path':'user-library.db'}})
+    result = client.post(f"/api/nodes/{owner['id']}/actions/configure", json={'expected_revision':doc['revision'],'arguments':{'path':str(path)}})
     assert result.status_code == 200, result.text
     assert result.json()['value']['slots'][0]['count'] == 12
     assert result.json()['value']['structure'] is None

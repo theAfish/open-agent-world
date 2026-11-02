@@ -43,7 +43,7 @@ def published_frontend():
         },
     }
     cards = {
-        "published": SimpleNamespace(id="published", type="science.xrd", name="Published", status="idle",
+        "published": SimpleNamespace(id="published", revision=1, type="science.xrd", name="Published", status="idle",
                                      config={"heading": "Public title", "connection": "PRIVATE-CONNECTION"},
                                      state_scope="global", finish=None),
         "legion": SimpleNamespace(finish=None),

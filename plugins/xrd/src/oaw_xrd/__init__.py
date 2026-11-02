@@ -15,8 +15,10 @@ from .documents import InputDocument, import_input, associate
 from open_agent_world.plugin_api import (NodeDocumentDefinition, NodeDocumentAction, NodeDocumentDownload,
     CapabilityDefinition, CapabilityGrantDefinition, RelationshipDefinition)
 import base64
+import asyncio
+from pathlib import Path
 import sqlite3
-from .library import inspect_library
+from .library import inspect_library, configured_library_path, library_catalog
 from .structures import MatchDocument, prepare_cod_structure, apply_cod_structure, download_structure
 from open_agent_world.plugin_api import ResourceValidationError
 
@@ -33,20 +35,47 @@ class LibraryDocument(BaseModel):
     peaks: list = Field(default_factory=list)
     slots: list[dict | None] = Field(default_factory=list)
 
+def _library_slots(value, args):
+    slot = args.get('slot', 0)
+    if isinstance(slot, bool) or not isinstance(slot, int) or not 0 <= slot < 6:
+        raise ResourceValidationError('槽位必须为 1–6')
+    slots = list(value.get('slots') or ([{k:v for k,v in value.items() if k != 'slots'}] if value.get('path') else []))
+    slots += [None] * (6 - len(slots))
+    return slot, slots
+
+
+def unmount_library(value, args):
+    slot, slots = _library_slots(value, args)
+    if not slots[slot]:
+        return value
+    slots[slot] = None
+    primary = next((drive for drive in slots if drive), {})
+    return {**LibraryDocument().model_dump(mode='json'), **primary, 'slots': slots}
+
+
 def configure_library(value, args):
     try:
-        slot = args.get('slot', 0)
-        if isinstance(slot, bool) or not isinstance(slot, int) or not 0 <= slot < 6:
-            raise ValueError('槽位必须为 1–6')
-        mounted = inspect_library(args.get('path', ''))
-        slots = list(value.get('slots') or ([{k:v for k,v in value.items() if k != 'slots'}] if value.get('path') else []))
-        slots += [None] * (6 - len(slots))
-        if any(d and i != slot and d.get('path') == mounted['path'] for i,d in enumerate(slots)):
+        slot, slots = _library_slots(value, args)
+        path = Path(configured_library_path(args)).expanduser().resolve(strict=True)
+        if any(d and i != slot and d.get('path') == str(path) for i,d in enumerate(slots)):
             raise ValueError('这个数据库已经挂载在其他槽位')
+        current = slots[slot]
+        if current and current.get('path') == str(path):
+            stat = path.stat()
+            if (path.is_file() and current.get('size_bytes') == stat.st_size
+                    and current.get('mtime_ns') == stat.st_mtime_ns):
+                return value
+        mounted = inspect_library(path)
         slots[slot] = mounted
         return {**next(d for d in slots if d), 'slots': slots}
     except (ValueError, OSError, sqlite3.Error) as exc:
         raise ResourceValidationError(str(exc)) from exc
+
+
+async def prepare_library(value, args):
+    # SQLite counts and hashing large libraries must not hold the graph gate or
+    # occupy the worker event loop. The host rechecks the revision before saving.
+    return {'document': await asyncio.to_thread(configure_library, value, args)}
 
 class MatchWorkspaceDocument(LibraryDocument, MatchDocument):
     pass
@@ -57,6 +86,8 @@ class XRDConfig(BaseModel):
     connected_inputs: bool = False
     cif_node_id: str = ""
     tolerance_deg: float = Field(default=.15, gt=0, le=2)
+    cell_scale_percent: float = Field(default=2., ge=0, le=5,
+        description='晶胞长度等比缩放搜索范围（±百分比）；0 关闭。缩放后仍按峰位容差匹配。')
     prominence_fraction: float = Field(default=.03, gt=0, le=.5)
     min_peak_distance: float = Field(default=.1, gt=0, le=2)
     smoothing_deg: float = Field(default=.03, gt=0, le=.5)
@@ -139,7 +170,9 @@ class XRDPlugin:
             user_creatable=False, config_model=InputConfig, traits=frozenset({'xrd.readable', 'xrd.library'}), templateable=True,
             frontend={'body':'library','workspace':'library','preview':'library'}, surfaces={'preview':True,'inspector':True,'workspace':True},
             document=NodeDocumentDefinition(model=LibraryDocument, initial_value={'kind':'library'}, capture=lambda v: {'kind':'library'},
-                actions={'configure':NodeDocumentAction(configure_library),
+                actions={'configure':NodeDocumentAction(lambda v,a:a['document'], prepare=prepare_library),
+                    'unmount':NodeDocumentAction(unmount_library),
+                    'catalog':NodeDocumentAction(library_catalog, read_only=True, project=True),
                     'read':NodeDocumentAction(lambda v,a:v,read_only=True,capability_kind='xrd.read')},
                 summarize=lambda v:{'filename':v['filename'],'count':v['count'],'sha256':v['sha256']})))
         registration.register_node_type(NodeTypeDefinition(id="xrd.analysis",label="XRD 自动拟合",icon="xrd-spectrum",color="#c19875",
@@ -155,7 +188,10 @@ class XRDPlugin:
             traits=frozenset({"core.agent", "ui.schema-agent.v1", "ui.direct-run.v1"}), lifecycle=HistoryAgentBehavior(),
             resource_actions=history_actions(), frontend={"settings": "settings"}, surfaces={"preview": True, "inspector": True, "workspace": True},
             document=NodeDocumentDefinition(model=MatchWorkspaceDocument, initial_value={'kind':'library','structure': None}, capture=lambda v: {'kind':'library','structure': None}, max_size_bytes=4*1024*1024,
-                actions={'configure':NodeDocumentAction(lambda v,a:{**configure_library(v,a), 'structure':v.get('structure')}), 'fetch_cod': NodeDocumentAction(apply_cod_structure, prepare=prepare_cod_structure)},
+                actions={'configure':NodeDocumentAction(lambda v,a:{**a['document'], 'structure':v.get('structure')}, prepare=prepare_library),
+                    'unmount':NodeDocumentAction(lambda v,a:{**unmount_library(v,a), 'structure':v.get('structure')}),
+                    'catalog':NodeDocumentAction(library_catalog, read_only=True, project=True),
+                    'fetch_cod': NodeDocumentAction(apply_cod_structure, prepare=prepare_cod_structure)},
                 downloads={'structure': download_structure},
                 summarize=lambda v: {'cod_id': v['structure']['cod_id']} if v.get('structure') else {})))
         for kind, label, icon in (("pattern", "XRD 实验谱", "activity"), ("reference", "XRD 标准卡片", "file-text"), ("cif", "XRD 候选 CIF", "box")):

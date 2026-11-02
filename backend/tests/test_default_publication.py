@@ -15,6 +15,10 @@ def test_xrd_publishes_without_declarations_and_runs_inside_its_workspace(tmp_pa
         assert response.status_code == 201, response.text
         nodes = response.json()["nodes"]
         cards = {card["type"]: card for card in nodes}
+        tabs = cards['legion']['config']['workspace_layout']['root']['second']['views']
+        assert [view['card_id'] for view in tabs] == [cards['xrd.match']['id'], cards['conversation']['id']]
+        assert client.patch(f"/api/nodes/{cards['xrd.match']['id']}", json={'config':{
+            'tolerance_deg':.6,'cell_scale_percent':1.25,'library_engine':'native','library_elements':'Li P S Cl'}}).status_code == 200
         outside = node(client, "text", "Outside publication", content="PRIVATE")
         request = {"legion_id": cards["legion"]["id"], "name": "XRD publication"}
         readiness = client.post("/api/deployments/preview", json=request).json()
@@ -32,6 +36,14 @@ def test_xrd_publishes_without_declarations_and_runs_inside_its_workspace(tmp_pa
         assert outside["id"] not in world.text and "system_instruction" not in world.text
         assert {card["id"] for card in world.json()["nodes"]} == {card["id"] for card in nodes}
         canvas, owner = cards["xrd.spectrum-canvas"]["id"], cards["xrd.match"]["id"]
+        bootstrap = client.get('/api/runtime-app')
+        assert bootstrap.status_code == 200 and 'system_instruction' not in bootstrap.text
+        visible = next(card for card in bootstrap.json()['cards'] if card['id'] == owner)
+        business = next(card for card in world.json()['nodes'] if card['id'] == owner)
+        assert visible['config'] == business['config']
+        assert visible['revision'] == business['revision']
+        assert visible['config']['tolerance_deg'] == .6 and visible['config']['cell_scale_percent'] == 1.25
+        assert visible['config']['library_engine'] == 'native' and visible['config']['library_elements'] == 'Li P S Cl'
         document = client.get(f"{root}/nodes/{canvas}/document").json()
         spectrum = base64.b64encode("\n".join(f"{10 + i * .1} {1 + i % 7}" for i in range(30)).encode()).decode()
         imported = client.post(f"{root}/nodes/{canvas}/actions/import", json={"expected_revision": document["revision"], "arguments": {"filename": "sample.txt", "source_base64": spectrum}})
