@@ -65,6 +65,13 @@ name, evidence kept per file), so `knowledge_graph` search, traversal and the op
 semantic index cover them. Publication of experiment records and Insights is a separate
 human decision.
 
+`knowledge_graph` is queried coarse to fine (the procedure is in the tool description):
+`query` returns the best-matching concepts, each with `links` (its best relations for the
+question, with each neighbour's description); `traverse` with several `names` expands the
+neighbours worth a look; `evidence` with the two concept names (and `predicate`) returns one
+relation's full statement and the original text around its supporting sentences. Original
+documents are read only for the relations that decide the answer.
+
 ## Persistence and failure behavior
 
 MKB collections are projects; sources retain original bytes and relative paths.

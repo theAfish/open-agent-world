@@ -339,3 +339,51 @@ def test_model_messages_use_original_markdown_and_support_array_result(card):
     assert save(card, run, data)["data"] == [42]
     with pytest.raises(KnowledgeError, match="must return"):
         spaces.parse_output("[]")
+
+
+def _layered_graph(card):
+    project = projects.project_manage(card, {"operation": "create", "name": "Octrees"})["project"]
+    sentence = "Uni-3DAR compresses the\nspace with an octree before encoding."
+    source = add_file(card, project, "paper.md", f"# Methods\n{'Filler text. ' * 60}{sentence} {'More filler. ' * 60}")
+    run = prepare(card, make_space(card, kind="graph", definition=spaces.GRAPH_SCHEMA), project["id"])[0]
+    save(card, run, {"entities": [{"id": "a", "name": "Uni-3DAR", "description": "A 3D model"},
+                                  {"id": "b", "name": "octree", "description": "A hierarchical spatial index"},
+                                  {"id": "c", "name": "Langevin dynamics", "description": "A sampling method"}],
+                     "relations": [{"source": "a", "target": "b", "predicate": "uses", "description": "Uni-3DAR encodes space with octrees.",
+                                    "snippet": sentence, "source_ids": [source]},
+                                   {"source": "c", "target": "b", "predicate": "uses_for_sampling",
+                                    "source_ids": [source]}]})
+    return source
+
+
+def test_a_matched_concept_lists_its_best_relations_with_each_neighbours_description(card):
+    _layered_graph(card)
+    seed = next(e for e in actions.graph(card, {"query": "How does Uni-3DAR work?"})["entities"] if e["name"] == "Uni-3DAR")
+    assert seed["links"] == [{"predicate": "uses", "direction": "out", "neighbour": "octree",
+                              "neighbour_description": "A hierarchical spatial index",
+                              "statement": "Uni-3DAR encodes space with octrees."}]
+
+
+def test_traverse_expands_several_concepts_in_one_call(card):
+    _layered_graph(card)
+    found = actions.graph(card, {"operation": "traverse", "names": ["Uni-3DAR", "Langevin dynamics", "missing"]})
+    assert [s["name"] for s in found["starts"]] == ["Uni-3DAR", "Langevin dynamics"]
+    assert {r["source_name"] for r in found["hops"][0]["relations"]} == {"Uni-3DAR", "Langevin dynamics"}
+    assert found["unresolved"] == ["missing"]
+
+
+def test_evidence_returns_the_original_text_around_a_relations_supporting_sentence(card):
+    source = _layered_graph(card)
+    found = actions.graph(card, {"operation": "evidence", "names": ["Uni-3DAR", "octree"]})
+    relation = found["relations"][0]
+    assert (relation["source_name"], relation["predicate"], relation["target_name"]) == ("Uni-3DAR", "uses", "octree")
+    passage = relation["passages"][0]
+    # The sentence is found although the document wraps it across a line break.
+    assert passage["source_id"] == source and "Uni-3DAR compresses the\nspace with an octree" in passage["text"]
+    assert "Filler text." in passage["text"] and len(passage["text"]) < 1200
+    # A predicate narrows several relations; a relation without a sentence still names its sources.
+    only = actions.graph(card, {"operation": "evidence", "names": ["octree"], "predicate": "sampling"})["relations"]
+    assert [r["predicate"] for r in only] == ["uses_for_sampling"] and only[0]["passages"][0]["note"]
+    assert actions.graph(card, {"operation": "evidence", "names": ["nothing"]})["unresolved"] == ["nothing"]
+    with pytest.raises(KnowledgeError):
+        actions.graph(card, {"operation": "evidence"})

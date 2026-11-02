@@ -63,15 +63,12 @@ unpublish, delete approved data, alter settings or change model connections.
 
 Read knowledge_overview for actual inventory; knowledge_projections for project outputs;
 document search for original evidence. For questions about concepts and how they relate,
-use knowledge_graph before document search. Name every concept explicitly (resolve "it"
-or "its" from the conversation): names=[X, Y] returns the paths between them, including
-indirect ones through shared concepts; a path of two or more steps is a real, indirect
-relation and must be reported step by step with each statement. Each matched concept
-lists its neighbours; when the answer may lie one hop further, expand the relevant
-neighbour with operation=traverse (names=[neighbour], max_depth 1-2) before concluding
-that no connection exists. Only after the graph and its neighbourhoods show nothing say
-the knowledge base holds no such relation. An empty graph does not mean the knowledge
-base is empty. For connected
+use knowledge_graph before document search and follow the procedure in its description (query,
+then traverse the neighbours that matter, then evidence for the relations that decide the
+answer). Name every concept explicitly (resolve "it" or "its" from the conversation). Report a
+path of two or more steps step by step with each statement. Only after the graph and its
+neighbourhoods show nothing say the knowledge base holds no such relation. An empty graph
+does not mean the knowledge base is empty. For connected
 databases use inspect_database then bounded query_database SELECT with bound values.
 Use authorized target selectors; do not guess database paths or read private KB tables.
 Only claim capabilities and permissions present in the live tool list.
@@ -123,4 +120,4 @@ def definition():
     )
     return LegionPresetDefinition(id="knowledge.base.research", name="Lab Manager",
         description="Process project materials with Spaces and turn experimental records into evidence-linked insights.",
-        revision=7, nodes=nodes, edges=edges)
+        revision=8, nodes=nodes, edges=edges)

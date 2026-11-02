@@ -14,6 +14,7 @@ import base64
 import binascii
 import json
 import logging
+import re
 import uuid
 from typing import Any, Literal
 
@@ -1002,7 +1003,7 @@ def experiment_review(context, arguments):
 
 
 class GraphQuery(Request):
-    operation: Literal["query", "traverse", "connect"] = "query"
+    operation: Literal["query", "traverse", "connect", "evidence"] = "query"
     # A question or keywords in plain words: concepts are found by name, alias or
     # acronym anywhere in it, and relations are ranked by how well they fit — by
     # words and, when the card has an embedding model, by meaning.
@@ -1017,6 +1018,9 @@ class GraphQuery(Request):
     # ("dpa sse" finds "DPA-SSE"). ``name_contains`` is the single-needle form.
     names: list[str] = Field(default_factory=list, max_length=20)
     name_contains: str | None = Field(default=None, max_length=200, json_schema_extra=AGENT_HIDDEN)
+    # For evidence: which of the relations between the named concepts to read the sources of.
+    predicate: str | None = Field(default=None, max_length=200,
+        description="evidence only: the relation's predicate, to pick one of several between the named concepts")
     # A word to find in a relation's predicate, statement or snippet.
     relation_contains: str | None = Field(default=None, max_length=200, json_schema_extra=AGENT_HIDDEN)
     # The graph map's name filter passes false: a filter should not call a model.
@@ -1077,6 +1081,15 @@ COMPACT_RELATIONS = 12
 COMPACT_BYTES = 7000
 STATEMENT_CHARS = 240
 NEIGHBOUR_CHARS = 100
+# Per-concept neighbourhoods: the first seeds get their best few relations, each with the
+# neighbour's description, so the agent can judge which hop is worth expanding.
+SEEDS = 4
+SEED_LINKS = 4
+LINK_CHARS = 140
+EVIDENCE_RELATIONS = 3
+EVIDENCE_SOURCES = 2
+EVIDENCE_CONTEXT = 400
+TRAVERSE_STARTS = 5
 
 
 def _clip(text, limit):
@@ -1110,17 +1123,22 @@ def _compact_entity(entity, matched, *, neighbours=None):
     return item
 
 
-def _compact_relation(relation, names):
-    properties = relation.properties or {}
-    item = {"source_name": names.get(str(relation.source_id)), "predicate": relation.type,
-            "target_name": names.get(str(relation.target_id))}
+def _statement(properties):
+    """``(statement, other snippets)``: extraction often yields only the supporting
+    sentence, which is then the statement."""
     description = properties.get("description") if isinstance(properties.get("description"), str) else None
     snippets = [v for v in properties.get("snippets") or [] if isinstance(v, str)]
     if isinstance(properties.get("snippet"), str):
         snippets.insert(0, properties["snippet"])
     snippets = list(dict.fromkeys(snippets))
-    # Extraction often yields only the supporting sentence: it is the statement then.
-    statement = description or (snippets.pop(0) if snippets else None)
+    return description or (snippets.pop(0) if snippets else None), snippets
+
+
+def _compact_relation(relation, names):
+    properties = relation.properties or {}
+    item = {"source_name": names.get(str(relation.source_id)), "predicate": relation.type,
+            "target_name": names.get(str(relation.target_id))}
+    statement, snippets = _statement(properties)
     if statement:
         item["statement"] = _clip(statement, STATEMENT_CHARS)
     if snippets:
@@ -1140,10 +1158,43 @@ def _compact_path(first, second, path, names):
             "steps": [f"{names.get(str(r.source_id))} —{r.type}→ {names.get(str(r.target_id))}" for r in path]}
 
 
+def _links(seed, adjacency, scores, by_id):
+    """A seed concept's best relations for the question, each with the neighbour's own
+    description: what the agent needs to decide which neighbour is worth expanding."""
+    ranked = sorted(adjacency.get(seed, ()), key=lambda pair: (-scores.get(pair[0].id, 0), by_id[pair[1]].name.casefold()))
+    links = []
+    for relation, other in ranked[:SEED_LINKS]:
+        link = {"predicate": relation.type, "direction": "out" if relation.source_id == seed else "in",
+                "neighbour": by_id[other].name}
+        description = (by_id[other].properties or {}).get("description")
+        if isinstance(description, str):
+            link["neighbour_description"] = _clip(description, NEIGHBOUR_CHARS)
+        statement, _ = _statement(relation.properties or {})
+        if statement:
+            link["statement"] = _clip(statement, LINK_CHARS)
+        links.append(link)
+    return links
+
+
 def _fit(result, budget=COMPACT_BYTES):
-    """Drop the lowest-ranked relations, then unmatched concepts, until the JSON fits."""
+    """Drop the lowest-ranked relations, then the seed links, then unmatched concepts,
+    until the JSON fits."""
     def size():
         return len(json.dumps(result, ensure_ascii=False, default=str).encode("utf-8"))
+    def drop_link():
+        carriers = [e for e in result.get("entities", []) if e.get("links")]
+        if not carriers:
+            return False
+        max(reversed(carriers), key=lambda e: len(e["links"]))["links"].pop()
+        return True
+    while size() > budget and len(result.get("relations", [])) > 6:
+        result["relations"].pop()
+        result["truncated"] = True
+    while size() > budget and drop_link():
+        result["truncated"] = True
+    for entity in result.get("entities", []):
+        if "links" in entity and not entity["links"]:
+            del entity["links"]
     while size() > budget and len(result.get("relations", [])) > 1:
         result["relations"].pop()
         result["truncated"] = True
@@ -1241,9 +1292,14 @@ def _ranked_query(request, entities, relations, by_id, needles=(), semantic=None
     ordered = [i for i in dict.fromkeys(ids) if i in by_id]
     others = sorted((i for i in ordered if i not in set(top)), key=lambda i: by_id[i].name.casefold())
     adjacency = graph_search.adjacency(relations)
+    seeds = [i for i in top if entity_scores[i] >= graph_search.MATCHED][:SEEDS]
+    entities_json = [_compact_entity(by_id[i], i in strong, neighbours=_neighbour_names(adjacency, i, by_id) if i in strong else None)
+                     for i in list(top) + others]
+    for item, identifier in zip(entities_json, list(top) + others):
+        if identifier in seeds:
+            item["links"] = _links(identifier, adjacency, relation_scores, by_id)
     return _fit(_bounded({
-        "entities": [_compact_entity(by_id[i], i in strong, neighbours=_neighbour_names(adjacency, i, by_id) if i in strong else None)
-                     for i in list(top) + others],
+        "entities": entities_json,
         "relations": [_compact_relation(r, names) for r in shown],
         "connections": [_compact_path(first, second, path, names) for first, second, path in paths],
         "matched": len(top), "truncated": len(best) > len(shown),
@@ -1258,15 +1314,22 @@ def _traverse(request, entities, relations, by_id):
         start = by_id.get(_uuid(request.entity_id, "entity_id"))
         if start is None:
             raise KnowledgeError("entity_id is not in this graph scope")
+        starts, unresolved = [start], []
     else:
-        name = request.names[0] if request.names else (request.query or request.name_contains or "")
-        found = graph_search.resolve(entities, name)
-        if not found:
-            return {"start": None, "unresolved": name, "hops": [], "entities": []}
-        start = found[0]
+        wanted = request.names or [request.query or request.name_contains or ""]
+        starts, unresolved = [], []
+        for name in wanted[:TRAVERSE_STARTS]:
+            found = graph_search.resolve(entities, name)
+            if found and found[0] not in starts:
+                starts.append(found[0])
+            elif not found:
+                unresolved.append(name)
+        if not starts:
+            return {"start": None, "unresolved": ", ".join(unresolved), "hops": [], "entities": []}
+    start = starts[0]
     depth = request.max_depth or 1
     adjacency = graph_search.adjacency(relations)
-    visited, frontier, hops, seen = {start.id}, [start.id], [], set()
+    visited, frontier, hops, seen = {s.id for s in starts}, [s.id for s in starts], [], set()
     for level in range(1, depth + 1):
         step, next_frontier = [], []
         for identifier in frontier:
@@ -1289,11 +1352,16 @@ def _traverse(request, entities, relations, by_id):
     names = {str(identifier): by_id[identifier].name for identifier in visited if identifier in by_id}
     if request.full:
         shown = [r for hop in hops for r in hop["relations"]]
-        return _graph_result(list(visited), by_id, shown, {start.id}, start=_entity_json(start, matched=True),
+        return _graph_result(list(visited), by_id, shown, {s.id for s in starts}, start=_entity_json(start, matched=True),
                              hops=[{"depth": hop["depth"], "relations": [_relation_json(r, names) for r in hop["relations"]]} for hop in hops])
+    start_ids = {s.id for s in starts}
     result = {"start": _compact_entity(start, True), "degree": len(adjacency.get(start.id, ())),
               "hops": [{"depth": hop["depth"], "relations": [_compact_relation(r, names) for r in hop["relations"]]} for hop in hops],
-              "entities": [_compact_entity(by_id[i], False) for i in visited if i != start.id and i in by_id]}
+              "entities": [_compact_entity(by_id[i], False) for i in visited if i not in start_ids and i in by_id]}
+    if len(starts) > 1:
+        result["starts"] = [{**_compact_entity(s, True), "degree": len(adjacency.get(s.id, ()))} for s in starts]
+    if unresolved:
+        result["unresolved"] = unresolved
     return _fit_hops(_bounded(result))
 
 
@@ -1353,6 +1421,85 @@ def _connect(request, entities, relations, by_id):
                           "relations": relations, "entities": []}))
 
 
+def _locate(text, snippet):
+    """``(start, end)`` of a supporting sentence in the converted Markdown, tolerant of
+    line breaks and spacing; ``None`` when it cannot be found."""
+    index = text.find(snippet)
+    if index >= 0:
+        return index, index + len(snippet)
+    words = snippet.split()
+    if len(words) < 3:
+        return None
+    found = re.search(r"\s+".join(re.escape(word) for word in words[:12]), text)
+    return (found.start(), found.end()) if found else None
+
+
+def _passages(kb, properties, snippets):
+    """The original text around a relation's supporting sentences, read from the cited
+    files' Markdown. A source that cannot be read still reports its id."""
+    passages = []
+    for source_id in [v for v in properties.get("source_ids") or [] if isinstance(v, str)][:EVIDENCE_SOURCES]:
+        entry = {"source_id": source_id}
+        try:
+            record, text = _markdown_record(kb, source_id=source_id)
+        except (KnowledgeError, ValueError) as error:
+            entry["error"] = str(error)
+            passages.append(entry)
+            continue
+        entry["filename"] = (record.data or {}).get("filename")
+        for snippet in snippets:
+            span = _locate(text, snippet)
+            if span:
+                start, end = max(0, span[0] - EVIDENCE_CONTEXT), min(len(text), span[1] + EVIDENCE_CONTEXT)
+                entry.update(offset=start, text=text[start:end])
+                break
+        if "text" not in entry:
+            entry["note"] = "The supporting sentence was not found verbatim; read this file with knowledge_markdown."
+        passages.append(entry)
+    return passages
+
+
+def _evidence(kb, request, entities, relations, by_id):
+    """The sources behind a relation: its full statement and supporting sentences, and the
+    original text around them. Name the concept(s) it joins (and the predicate when they
+    are joined more than once). The last step of a graph question: use it only for
+    relations that matter to the answer."""
+    if not 1 <= len(request.names) <= 2:
+        raise KnowledgeError("evidence needs one or two concept names; add predicate to pick a relation")
+    sides = [graph_search.resolve(entities, name)[:3] for name in request.names]
+    missing = [name for name, side in zip(request.names, sides) if not side]
+    if missing:
+        return {"unresolved": missing, "relations": []}
+    first = {e.id for e in sides[0]}
+    second = {e.id for e in sides[-1]}
+    wanted = graph_search.phrase(request.predicate) if request.predicate else ""
+    matches = [r for r in relations
+               if (len(sides) == 1 and (r.source_id in first or r.target_id in first))
+               or (len(sides) == 2 and (r.source_id in first and r.target_id in second
+                                        or r.source_id in second and r.target_id in first))]
+    if wanted:
+        matches = [r for r in matches if wanted in graph_search.phrase(r.type)]
+    names = {str(i): e.name for i, e in by_id.items()}
+    items = []
+    for relation in matches[:EVIDENCE_RELATIONS]:
+        properties = relation.properties or {}
+        statement, snippets = _statement(properties)
+        item = _compact_relation(relation, names)
+        item.update(statement=statement, snippets=[_clip(v, 600) for v in snippets[:3]] or None,
+                    source_ids=[v for v in properties.get("source_ids") or [] if isinstance(v, str)],
+                    passages=_passages(kb, properties, ([statement] if statement else []) + snippets))
+        items.append({key: value for key, value in item.items() if value not in (None, [])})
+    result = {"relations": items, "total": len(matches), "truncated": len(matches) > len(items)}
+    # Passages are the bulk: trim the last ones until the host can read the whole result.
+    while len(json.dumps(result, ensure_ascii=False, default=str).encode("utf-8")) > COMPACT_BYTES:
+        carriers = [i for i in items if i.get("passages")]
+        if not carriers:
+            break
+        carriers[-1]["passages"].pop()
+        result["truncated"] = True
+    return _bounded(result)
+
+
 def graph(context, arguments):
     """The published graph. A name query answers "what does the base say about X (and
     Y)": the matching concepts, every relation touching them, and the concepts on the
@@ -1378,6 +1525,8 @@ def graph(context, arguments):
         return _connect(request, all_entities, all_relations, by_id)
     if request.operation == "traverse":
         return _traverse(request, all_entities, all_relations, by_id)
+    if request.operation == "evidence":
+        return _evidence(kb, request, all_entities, all_relations, by_id)
 
     # One search path. Whatever the caller typed — a question, concept names, a word
     # from a statement — is searched by words and (when the card has an embedding

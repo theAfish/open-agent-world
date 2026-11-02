@@ -83,7 +83,19 @@ OPERATIONS: tuple[Operation, ...] = (
         tool_name="knowledge_insight_update",
         description="Edit one draft insight's kind, title, statement, fields, confidence, evidence or note, when a person asks for the change. Refuses published insights. Never publishes: that is the person's click."),
     Operation("graph", actions.graph, actions.GraphQuery, tool_name="knowledge_graph",
-        description="Search and explore the knowledge graph: concepts and relations from saved project graph results (merged across projects by name), plus published experiment Insights with evidence. operation=query (default) takes a plain-words question and/or explicit concept names: it returns the matched concepts with their neighbour names, the best-fitting relations with their statements and source files, and — when two or more concepts are named — the shortest paths between them (indirect links through shared concepts count). operation=traverse expands one named concept hop by hop (names=[concept], max_depth 1-5) so you can follow a neighbour that looks relevant. operation=connect finds every shortest chain between exactly two names. Always name concepts explicitly (resolve pronouns from the conversation). Returned relations are claims with source evidence; concept descriptions alone are not claims. Semantic search is used only when an embedding model is configured; inspect semantic_error when it is unavailable."),
+        description=("Search and explore the knowledge graph: concepts and relations from saved project graph results "
+            "(merged across projects by name) plus published experiment Insights. Work coarse to fine, and read original "
+            "documents only for what matters. "
+            "1) operation=query with a plain-words question (and names=[...] for concepts you can name): the best-matching "
+            "concepts, each with `links` (its best relations for the question, with the neighbour's own description) and "
+            "`neighbours` (the rest, by name); also the strongest relations and, for two or more named concepts, the paths between "
+            "them. Semantic search is used only when an embedding model is configured; inspect semantic_error when it is unavailable. "
+            "2) Judge from the descriptions which neighbours matter, then operation=traverse with names=[those concepts] "
+            "(several at once, max_depth 1-2) to see THEIR relations. operation=connect with two names finds how they are linked. "
+            "3) Only for a relation that decides the answer: operation=evidence with names=[source, target] (and predicate "
+            "if they are joined more than once) returns its full statement, supporting sentences and the original text around "
+            "them. For broader reading use knowledge_document_search and knowledge_markdown. Relations are claims with source "
+            "evidence; concept descriptions alone are not claims. Use knowledge_projections for one project's full graph or table results.")),
     Operation("graph_index", actions.graph_index, actions.GraphIndexStatus, tool_name="knowledge_graph_index",
         description="Read the semantic index status: which embedding model the card uses (enabled=false when none), how many graph elements are embedded, pending or stale, and the last error. Call this when asked whether meaning-based search is available or why a search said semantic=false. Building the index requires knowledge_graph_index_build."),
     Operation("jobs", actions.jobs, actions.Jobs, tool_name="knowledge_jobs",
