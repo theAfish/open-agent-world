@@ -166,7 +166,7 @@ def test_reference_library_configuration_validates_schema_and_preserves_revision
 
 def test_library_search_scans_all_records_and_normalizes_intensity(tmp_path):
     root = Path(__file__).resolve().parents[2]
-    python = root.parent/'XRD/.venv-xrd'/('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+    python = Path(os.environ.get('OAW_XRD_PYTHON', str(root.parent/'XRD/.venv-xrd'/('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))))
     if not python.exists():
         pytest.skip('Scientific interpreter unavailable')
     script = r'''
@@ -239,6 +239,16 @@ print('full scan, ranking, intensity normalization, invalid records and waveleng
 '''
     result = subprocess.run([str(python),'-c',script,str(root/'plugins/xrd/src/oaw_xrd'),str(tmp_path/'cod.sq')],capture_output=True,text=True,timeout=60)
     assert result.returncode == 0, result.stdout+result.stderr
+
+def test_cell_scale_matching_scientific_regressions():
+    root = Path(__file__).resolve().parents[2]
+    python = Path(os.environ.get('OAW_XRD_PYTHON', str(root.parent/'XRD/.venv-xrd'/('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))))
+    if not python.exists():
+        pytest.skip('Scientific interpreter unavailable')
+    result = subprocess.run([str(python), str(Path(__file__).with_name('xrd_scale_checks.py'))],
+        capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+
 
 def test_library_slots_preserve_existing_mounts(client, tmp_path):
     import sqlite3
