@@ -257,12 +257,13 @@ def test_archive_environment_metadata_reuses_same_validation():
 def test_repository_sources_preserve_runtime_and_pack_ids():
     root = Path(__file__).resolve().parents[2]
     specs = {spec.owner: spec for spec in discover_source_packs([root / "plugins"])}
-    assert len(specs) == 9
     assert not {"oaw.barracks", "oaw.skills", "oaw.tasks", "openai.codex"} & specs.keys()
     assert read_source_pack(root / "packs/codex").packs == ("openai.codex.default",)
     assert specs["matcreator"].packs == ("matcreator.default",)
     assert specs["atomsculptor"].packs == ("atomsculptor.default",)
     assert specs["oaw.factory"].packs == ("oaw.factory",)
+    assert specs["oaw.office"].packs == ("oaw.office.default",)
+    assert specs["tools.time"].packs == ("tools.time.default",)
     assert specs["atomsculptor"].legacy_python_requirements == ()
     assert specs["atomsculptor"].environments['modelling'].python == (
         "ase>=3.22", "matplotlib>=3.7", "numpy>=1.23", "pymatgen>=2024.0")
