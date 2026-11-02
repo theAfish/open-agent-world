@@ -2,9 +2,10 @@ import { DocumentMarkdown, WorkspaceEmptyState, WorkspaceSection, WorkspaceToolb
 import type { PluginViewProps } from "@oaw/plugin-api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, FileText, FolderOpen, FolderPlus, Layers3, LoaderCircle, Lock, Network, Pencil, Play, Plus, RefreshCw, Search, Sparkles, Table2, Trash2, Upload, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, FileText, FolderOpen, FolderPlus, Layers3, LoaderCircle, Lock, Network, Pencil, Play, Plus, RefreshCw, Search, Sparkles, Square, Table2, Trash2, Upload, X } from "lucide-react";
 import { GraphMap } from "./GraphMap";
 import { RecordTable } from "./RecordView";
+import { RunLogModal, type LogEvent } from "./RunLogModal";
 import "./ProjectWorkspace.css";
 
 export type ProjectTab = "projects" | "spaces" | "results";
@@ -28,7 +29,9 @@ type SavedView = { selected: string[]; projectId: string; spaceId: string; resul
 type Props = { host: PluginViewProps["host"]; cardId: string; tab: ProjectTab; visible: boolean; onTab: (tab: ProjectTab) => void;
   deployed: boolean; selectedModel: string; modelSelect: ReactNode; agent?: { id: string; name: string }; version: number;
   sourceToOpen?: string; onSourceOpened: () => void; onChanged: () => Promise<void>;
-  request: (path: string, body: unknown, deployed: boolean, onProgress?: (event: BridgeProgress) => void) => Promise<Record<string, unknown>> };
+  request: (path: string, body: unknown, deployed: boolean, onProgress?: (event: BridgeProgress) => void, signal?: AbortSignal) => Promise<Record<string, unknown>> };
+/** The person stopped a model run; not a failure to report. */
+class Stopped extends Error {}
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
@@ -75,6 +78,10 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
   const [notice, setNotice] = useState("");
   const [drag, setDrag] = useState(false);
   const [progress, setProgress] = useState<BridgeProgress>();
+  const [logOpen, setLogOpen] = useState(false);
+  const [progressLog, setProgressLog] = useState<LogEvent[]>([]);
+  const [stopping, setStopping] = useState(false);
+  const abortRef = useRef<AbortController>();
   const [reader, setReader] = useState<{ sourceId: string; filename: string; markdown: string; has_more: boolean }>();
   const [resultEdit, setResultEdit] = useState<string | undefined>(restored?.resultEdit);
   const [revisionNote, setRevisionNote] = useState(restored?.revisionNote ?? "");
@@ -110,9 +117,26 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
     setResults([...new Map(resultLists.flatMap(r => r.projections as Projection[] ?? []).map(r => [r.id, r])).values()]);
     setMoreProjects(!!projectLists.at(-1)?.has_more); setMoreResults(!!resultLists.at(-1)?.has_more);
   }, [call, history, projectPages, resultPages]);
+  // A host-model call the person can stop: every streamed step is kept for the log window.
+  const stream = useCallback(async (path: string, body: unknown, onEvent?: (event: BridgeProgress) => void) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setProgressLog([]);
+    try {
+      return await request(path, body, deployed, event => {
+        setProgressLog(log => [...log.slice(-199), { at: new Date().toISOString(), stage: event.stage, message: event.message, done: event.done, total: event.total }]);
+        onEvent?.(event);
+      }, controller.signal);
+    } catch (reason) {
+      if (controller.signal.aborted) throw new Stopped();
+      throw reason;
+    } finally { if (abortRef.current === controller) abortRef.current = undefined; }
+  }, [request, deployed]);
   const perform = useCallback(async (work: () => Promise<void>) => {
     setBusy(true); setError(""); setNotice("");
-    try { await work(); } catch (reason) { if (mounted.current) setError(message(reason)); }
+    try { await work(); } catch (reason) {
+      if (mounted.current) { if (reason instanceof Stopped) setNotice(t("Extraction stopped")); else setError(message(reason)); }
+    }
     finally { if (mounted.current) setBusy(false); }
   }, []);
   useEffect(() => { void load().catch(reason => setError(message(reason))); }, [load, version]);
@@ -250,8 +274,8 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
       setProgress({ stage: "projection", done: 0, total: ids.length });
       try {
         for (let offset = 0; offset < ids.length; offset += 100) {
-          await request(`knowledge/${cardId}/project-space`, { space_id: targetSpace, project_ids: ids.slice(offset, offset + 100), rerun,
-            ...(deployed ? {} : { model: selectedModel }) }, deployed,
+          await stream(`knowledge/${cardId}/project-space`, { space_id: targetSpace, project_ids: ids.slice(offset, offset + 100), rerun,
+            ...(deployed ? {} : { model: selectedModel }) },
           event => setProgress({ ...event, done: offset + (event.done ?? 0), total: ids.length }));
         }
       }
@@ -270,8 +294,8 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
       setNotice(t("The agent is reviewing this result"));
     } else {
       setProgress({ stage: "review" });
-      try { const value = await request(`knowledge/${cardId}/review-projection`, { projection_id: currentResult.id,
-        ...(instruction ? { instruction } : {}), ...(deployed ? {} : { model: selectedModel }) }, deployed, setProgress);
+      try { const value = await stream(`knowledge/${cardId}/review-projection`, { projection_id: currentResult.id,
+        ...(instruction ? { instruction } : {}), ...(deployed ? {} : { model: selectedModel }) }, setProgress);
         if ((value.projection as Projection | undefined)?.id) setResultId((value.projection as Projection).id); }
       finally { setProgress(undefined); }
     }
@@ -282,15 +306,48 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
       note: revisionNote, expected_revision: currentResult.revision });
     setResultId((value.projection as Projection).id); setResultEdit(undefined); setRevisionNote(""); await load();
   });
+  // One Stop for every kind of extraction. It does not go through perform(): a busy
+  // card must still be stoppable. A cancelled run leaves its projection "running", so
+  // Stop also fails those, which is what makes "Restart extraction" work at once.
+  const running = results.filter(r => r.status === "running");
+  const stop = useCallback(async () => {
+    setStopping(true); setError("");
+    try {
+      abortRef.current?.abort();
+      if (agent && !deployed) {
+        for (const run of await readAgentRuns(agent.id)) {
+          if (!["created", "running", "waiting"].includes(run.status.toLowerCase())) continue;
+          const response = await fetch(`${hostApiBase}/runs/${encodeURIComponent(run.run_id)}/cancel`, { method: "POST" });
+          if (!response.ok) throw new Error(t("The run could not be stopped"));
+        }
+      }
+      const ids = new Map(running.map(r => [r.id, r.revision]));
+      for (const id of agentTask?.projectionIds ?? []) if (!ids.has(id)) ids.set(id, 1);
+      for (const [id, revision] of ids) {
+        await call("projection_fail", { projection_id: id, expected_revision: revision, error: t("Stopped by the user. Retry extraction.") }).catch(() => undefined);
+      }
+      setAgentTask(undefined);
+      setNotice(t("Extraction stopped"));
+      await load();
+    } catch (reason) { if (mounted.current) setError(message(reason)); }
+    finally { if (mounted.current) setStopping(false); }
+  }, [agent, deployed, running, agentTask, call, load, readAgentRuns]);
+  const active = !!agentTask || !!progress || running.length > 0;
+  const canStop = active && !stopping;
+  const logAvailable = !!agentTask || (!deployed && !!agent) || progressLog.length > 0;
   const selectedProjects = projects.filter(p => selected.includes(p.id));
   const ready = selectedProjects.length === selected.length && selectedProjects.length > 0 && selectedProjects.every(p => p.source_count > 0 && p.converted_count === p.source_count);
   const visibleProjects = projects.filter(p => `${p.name} ${p.description ?? ""}`.toLowerCase().includes(query.toLowerCase()));
   const visibleResults = results.filter(r => (!spaceId || r.space_id === spaceId) && (!selected.length || selected.includes(r.project_id)));
   const toggle = (id: string) => setSelected(previous => previous.includes(id) ? previous.filter(value => value !== id) : [...previous, id]);
   const sectionVisible = (id: ProjectTab) => visible && tab === id || isDetached(id);
+  const runControls = <>
+    {logAvailable && <button type="button" onClick={() => setLogOpen(true)}>{t("View log")}</button>}
+    {active && <button type="button" className="project-stop" disabled={stopping} onClick={() => void stop()}><Square size={13} />{stopping ? t("Stopping…") : t("Stop")}</button>}</>;
   const banner = <>{error && <p role="alert" className="knowledge-error">{error}</p>}{notice && <p role="status" className="knowledge-notice">{notice}</p>}
     {progress && <div className="project-progress" role="status"><LoaderCircle className="project-spin" size={17} /><span>{progress.message || (progress.stage === "review" ? t("Reviewing result…") : t("Extracting project data…"))}</span>
-      {progress.total ? <progress value={progress.done ?? 0} max={progress.total} /> : <progress />}</div>}</>;
+      {progress.total ? <progress value={progress.done ?? 0} max={progress.total} /> : <progress />}{runControls}</div>}
+    {!progress && agentTask && <div className="project-progress" role="status"><LoaderCircle className="project-spin" size={17} /><span>{t("The agent is extracting. Open the log to follow it.")}</span>{runControls}</div>}</>;
   const refreshButton = <button type="button" className="knowledge-icon-button" aria-label={t("Refresh projects")} disabled={busy}
     onClick={() => void perform(load)}><RefreshCw size={16} /></button>;
   const spacePicker = <label className="project-space-picker"><Layers3 size={16} /><span className="knowledge-visually-hidden">{t("Extraction Space")}</span>
@@ -393,13 +450,18 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
                   : <ProjectionData projection={currentResult} definition={currentResult.space_snapshot?.definition} selected={graphSelection} onSelect={setGraphSelection} />}
               </>}
               {currentResult.status === "failed" && <button type="button" className="knowledge-primary" disabled={runBusy || !canRun} onClick={() => void execute([currentResult.project_id], true, currentResult.space_id)}><RefreshCw size={15} />{t("Retry extraction")}</button>}
-              {currentResult.status === "running" && <button type="button" disabled={runBusy || !canRun} onClick={() => void execute([currentResult.project_id], true, currentResult.space_id)}><RefreshCw size={15} />{t("Restart extraction")}</button>}
+              {currentResult.status === "running" && <div className="project-action-row project-run-controls">
+                <button type="button" disabled={runBusy || !canRun} onClick={() => void execute([currentResult.project_id], true, currentResult.space_id)}><RefreshCw size={15} />{t("Restart extraction")}</button>
+                {logAvailable && <button type="button" onClick={() => setLogOpen(true)}>{t("View log")}</button>}
+                <button type="button" className="project-stop" disabled={stopping} onClick={() => void stop()}><Square size={13} />{stopping ? t("Stopping…") : t("Stop")}</button></div>}
               <details className="project-evidence"><summary><ChevronDown size={14} />{t("Source files")} <span>{currentResult.sources.length}</span></summary>{currentResult.sources.map(f => <button key={f.source_id} type="button" onClick={() => { onTab("projects"); setProjectId(currentResult.project_id); void perform(() => openFile(f.source_id, f.filename)); }}><FileText size={14} />{f.relative_path || f.filename}</button>)}</details>
             </div>}
           </div>}
         {moreResults && <button type="button" disabled={busy} onClick={() => setResultPages(value => value + 1)}>{t("Load more results")}</button>}
       </div>
     </WorkspaceSection>
+    {logOpen && <RunLogModal agentId={!deployed ? agent?.id : undefined} runId={agentTask?.runId} events={progressLog}
+      stopping={stopping} canStop={canStop} onStop={() => void stop()} onClose={() => setLogOpen(false)} />}
   </>;
 }
 

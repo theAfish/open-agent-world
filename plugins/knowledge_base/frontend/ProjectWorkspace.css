@@ -168,3 +168,24 @@
   .project-detail-heading { gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) { .project-spin { animation: none; } .project-dropzone, .project-row { transition: none; } }
+.project-progress button { flex: none; }
+.project-stop { display: inline-flex; align-items: center; gap: 6px; border-color: var(--danger, #b74747); color: var(--danger, #b74747); }
+.project-run-controls { justify-content: flex-start; margin-top: 12px; }
+.run-log-modal { width: min(900px, 94vw); }
+.run-log-run { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; font-size: .85rem; }
+.run-log-live { color: var(--accent, #7854bc); font-weight: 600; }
+.run-log-list { list-style: none; margin: 0; padding: 0; max-height: 52vh; overflow: auto; font-size: .8rem; border-top: 1px solid var(--line); }
+.run-log-row { border-bottom: 1px solid var(--line); }
+.run-log-row > button, .run-log-event { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 4px; background: none; border: 0; text-align: left; color: inherit; }
+.run-log-row > button { cursor: pointer; }
+.run-log-row time { color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
+.run-log-row strong { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-log-meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.run-log-state { flex: none; color: var(--muted); }
+.run-log-row.is-failed strong, .run-log-row.is-failed .run-log-state { color: var(--danger, #b74747); }
+.run-log-row[data-kind="models"] strong { font-weight: 500; color: var(--muted); }
+.run-log-chevron { flex: none; transition: transform .1s; }
+.run-log-row > button[aria-expanded="true"] .run-log-chevron { transform: rotate(90deg); }
+.run-log-detail { padding: 2px 4px 10px 24px; }
+.run-log-detail pre { margin: 4px 0 8px; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-raised, rgba(127,127,127,.12)); border-radius: 4px; }
+.run-log-repeat { margin-bottom: 10px; }

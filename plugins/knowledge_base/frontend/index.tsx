@@ -87,10 +87,10 @@ const provisionalName = (files: File[]) => {
 /** An extraction needs a model, so it goes through the host bridge, not the
  * plugin. The engineering bridge lives at ``/api/...``; a deployment mounts the same
  * bridge scoped under the runtime workspace instead, gated by the release's grants. */
-async function request(path: string, body: unknown, deployed: boolean, onProgress?: (event: BridgeProgress) => void) {
+async function request(path: string, body: unknown, deployed: boolean, onProgress?: (event: BridgeProgress) => void, signal?: AbortSignal) {
   const base = deployed ? `${deploymentApiBase}/runtime-app/workspace` : deploymentApiBase;
   const response = await fetch(`${base}/${path}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
   const type = response.headers?.get?.("content-type") ?? "";
   if (!type.includes("x-ndjson") || !response.body) {
     const data = await response.json().catch(() => ({}));
