@@ -243,3 +243,19 @@ it("notices a finished agent run (status \"succeeded\") and shows the saved resu
   await waitFor(() => expect(screen.queryAllByText("The agent is extracting. Open the log to follow it.")).toHaveLength(0), { timeout: 5000 });
   expect(action.mock.calls.some(([name]) => name === "projection_fail")).toBe(false);
 });
+
+it("shows each relation's description (or its supporting snippet) in the list and under a selected concept", async () => {
+  const GRAPH = { ...RESULT, kind: "graph", data: {
+    entities: [{ id: "a", name: "GAN" }, { id: "b", name: "CrystalGAN" }, { id: "c", name: "DiscoGAN" }],
+    relations: [{ source: "b", target: "a", predicate: "extends", description: "CrystalGAN adapts GAN to crystals." },
+      { source: "b", target: "c", predicate: "compared_with", snippet: "CrystalGAN was compared with DiscoGAN." }] } };
+  setup(async (name, args) => name === "projections" ? args.operation === "get" ? { projection: GRAPH } : { projections: [{ ...GRAPH, data: undefined }] } : undefined);
+  fireEvent.click(screen.getByRole("button", { name: "results" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Report A/ }));
+  expect(await screen.findByText("CrystalGAN adapts GAN to crystals.")).toBeTruthy();
+  expect(screen.getByText("CrystalGAN was compared with DiscoGAN.")).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: "GAN" })[0]);
+  // The selected concept lists its own relations with their descriptions.
+  expect((await screen.findAllByText("CrystalGAN adapts GAN to crystals.")).length).toBe(2);
+  expect(screen.getAllByText("CrystalGAN was compared with DiscoGAN.").length).toBe(1);
+});

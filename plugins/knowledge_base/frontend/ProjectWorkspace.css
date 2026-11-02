@@ -135,6 +135,9 @@
 .project-progress span { flex: 1; font-size: .85rem; }
 .project-progress progress { width: 25%; height: 5px; accent-color: var(--accent, #7854bc); }
 .project-graph-detail { margin-top: 12px; padding: 12px; background: color-mix(in srgb, var(--accent, #7854bc) 6%, transparent); border-radius: 8px; }
+.project-graph-relations { display: grid; gap: 8px; margin-top: 8px; }
+.project-graph-relations > div > button { background: none; border: 0; padding: 0; text-align: left; font-weight: 600; overflow-wrap: anywhere; }
+.project-graph-relations p { margin: 2px 0 0; font-size: .85rem; line-height: 1.45; color: var(--muted); }
 .project-spin { animation: project-spin 1.2s linear infinite; }
 @keyframes project-spin { to { transform: rotate(360deg); } }
 @container (max-width: 840px) {
