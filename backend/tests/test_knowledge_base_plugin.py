@@ -275,9 +275,9 @@ def test_the_research_formation_deploys_wired_independent_bases(client):
     assert all(nodes[a[key]]["parent_id"] == a["group"] for key in a if key != "group")
     assert nodes[a["knowledge"]]["type"] == NODE_TYPE
     instruction = nodes[a["agent"]]["config"]["system_instruction"]
-    assert "knowledge_projection_save" in instruction and "knowledge_experiment_save" in instruction
-    assert "knowledge_insight_save" in instruction and "INSIGHT EXTRACTION REQUEST" in instruction
-    # The assistant prepares both workflows from conversation; publication remains human-only.
+    # The chat agent answers from the graph; extraction recipes come with the card's own requests.
+    assert "knowledge_graph" in instruction and "knowledge_projection_save" not in instruction
+    # Publication remains human-only.
     assert {(edge["source"], edge["target"], edge["relationship"]) for edge in first["edges"]} == {
         (a["agent"], a["conversation"], "participate"),
         (a["agent"], a["knowledge"], f"{NODE_TYPE}.research")}
