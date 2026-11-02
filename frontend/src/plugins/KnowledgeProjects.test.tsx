@@ -227,3 +227,19 @@ it("does not mistake the previous completed agent run for a newly queued extract
   await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 3500 });
   expect(action.mock.calls.some(([name]) => name === "projection_fail")).toBe(false);
 });
+
+it("notices a finished agent run (status \"succeeded\") and shows the saved result instead of staying on running", async () => {
+  let runs: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => runs })));
+  const runAgent = vi.fn(async () => { runs = [{ run_id: "run-new", status: "succeeded", created_at: new Date(Date.now() + 1000).toISOString() }]; });
+  const { action } = setup(async (name, args) => name === "projection_prepare"
+    ? { projections: [{ ...RESULT, status: "running", disposition: "created" }] }
+    : name === "projections" && args.operation === "get" ? { projection: RESULT } : undefined,
+  { agent: { id: "agent-a", name: "Researcher" }, host: { runAgent } });
+  fireEvent.click(await screen.findByLabelText("Select Report A"));
+  fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: "space-a" } });
+  fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
+  await screen.findAllByText("The agent is extracting. Open the log to follow it.");
+  await waitFor(() => expect(screen.queryAllByText("The agent is extracting. Open the log to follow it.")).toHaveLength(0), { timeout: 5000 });
+  expect(action.mock.calls.some(([name]) => name === "projection_fail")).toBe(false);
+});

@@ -30,6 +30,8 @@ type Props = { host: PluginViewProps["host"]; cardId: string; tab: ProjectTab; v
   deployed: boolean; selectedModel: string; modelSelect: ReactNode; agent?: { id: string; name: string }; version: number;
   sourceToOpen?: string; onSourceOpened: () => void; onChanged: () => Promise<void>;
   request: (path: string, body: unknown, deployed: boolean, onProgress?: (event: BridgeProgress) => void, signal?: AbortSignal) => Promise<Record<string, unknown>> };
+/** Run statuses that are still in progress; any other status means the run has ended. */
+const LIVE_RUN = ["created", "running", "waiting"];
 /** The person stopped a model run; not a failure to report. */
 class Stopped extends Error {}
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
@@ -156,7 +158,7 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
         const run = agentTask.runId ? runs.find(r => r.run_id === agentTask.runId)
           : runs.filter(r => !agentTask.previousRunIds.includes(r.run_id) && Date.parse(r.created_at) >= Date.parse(agentTask.startedAt) - 1000).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
         if (!active) return;
-        if (run && ["completed", "failed", "cancelled", "interrupted"].includes(run.status.toLowerCase())) {
+        if (run && !LIVE_RUN.includes(run.status.toLowerCase())) {
           for (const id of agentTask.projectionIds) {
             const current = (await call("projections", { operation: "get", projection_id: id })).projection as Projection;
             if (current.status === "running") await call("projection_fail", { projection_id: id,
@@ -166,7 +168,7 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
             const value = await call("projections", { operation: "list", project_id: agentTask.reviewOf.projectId, space_id: agentTask.reviewOf.spaceId, limit: 1 });
             const latest = (value.projections as Projection[])[0];
             if (latest && active) setResultId(previous => previous === agentTask.reviewOf?.id ? latest.id : previous);
-            if (run.status.toLowerCase() !== "completed") setError(run.error || t("The agent did not finish reviewing this result"));
+            if (run.status.toLowerCase() !== "succeeded") setError(run.error || t("The agent did not finish reviewing this result"));
           }
           if (active) { setAgentTask(undefined); await load(); }
         } else if (active) { setAgentTask({ ...agentTask, ...(run ? { runId: run.run_id } : {}) }); await load(); }
@@ -316,7 +318,7 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
       abortRef.current?.abort();
       if (agent && !deployed) {
         for (const run of await readAgentRuns(agent.id)) {
-          if (!["created", "running", "waiting"].includes(run.status.toLowerCase())) continue;
+          if (!LIVE_RUN.includes(run.status.toLowerCase())) continue;
           const response = await fetch(`${hostApiBase}/runs/${encodeURIComponent(run.run_id)}/cancel`, { method: "POST" });
           if (!response.ok) throw new Error(t("The run could not be stopped"));
         }
