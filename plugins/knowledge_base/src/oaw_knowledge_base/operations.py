@@ -53,7 +53,7 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation("markdown", actions.markdown, actions.Markdown, tool_name="knowledge_markdown",
         description="Read the markdown extracted from one source, by source_id or record_id. Long documents are windowed: use offset and limit and follow has_more to page through."),
     Operation("search", actions.search, actions.Search, tool_name="knowledge_document_search",
-        description="Full-text search across every converted document's markdown. Returns ranked excerpts, each with the source filename and the heading it falls under — raw document text, not a verified fact. Use this to answer document-level questions across many sources at once instead of reading one document from the top with knowledge_markdown."),
+        description="Full-text search across every converted document's markdown. Returns ranked excerpts, each with the source filename and the heading it falls under — raw document text, not a verified fact. Use it AFTER knowledge_graph, for exact wording, numbers or tables, or when the graph has nothing on the question; for questions about concepts and how they relate, start with knowledge_graph. Prefer it to reading one document from the top with knowledge_markdown."),
     Operation("schemas", actions.schemas, actions.SchemaRead, tool_name="knowledge_schemas",
         description="List or read custom schemas for experiment JSON records. Use knowledge_spaces for direct project projections. Creating or changing an experiment schema requires knowledge_schema_manage."),
     Operation("experiment_bundles", actions.experiment_bundles, actions.ExperimentBundles,
