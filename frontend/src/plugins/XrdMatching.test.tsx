@@ -2,10 +2,23 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import xrd from "../../../plugins/xrd/frontend";
+import { FocusLayer } from '../../../plugins/xrd/frontend/MatchControls';
 import type { PluginViewProps } from "./sdk";
 import { TEST_CATALOG } from "../state/catalog.fixture";
 
 afterEach(cleanup);
+it('keeps an open picker attached when its trigger is replaced during refresh', () => {
+  const root = document.createElement('div');root.className = 'xrd-match-ui';
+  const anchor = document.createElement('button');root.append(anchor);document.body.append(root);
+  const close = vi.fn();
+  const view = render(<FocusLayer anchor={anchor} kind="elements" onClose={close}><button>Li</button></FocusLayer>);
+  try {
+    anchor.remove();
+    view.rerender(<FocusLayer anchor={anchor} kind="elements" onClose={close}><button>Li selected</button></FocusLayer>);
+    expect(screen.getByRole('dialog', { name: '选择元素' }).textContent).toContain('Li selected');
+    expect(close).not.toHaveBeenCalled();
+  } finally { view.unmount();root.remove(); }
+});
 beforeEach(()=>{vi.stubGlobal('ResizeObserver',class{observe(){} disconnect(){}});vi.stubGlobal('matchMedia',(media:string)=>Object.assign(new EventTarget(),{matches:true,media,onchange:null,addListener(){},removeListener(){}}));});
 
 const candidate = {

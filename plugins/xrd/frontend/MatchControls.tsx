@@ -11,7 +11,7 @@ export function Glyph({name}:{name:'close'|'down'|'elements'|'play'|'back'|'stop
 // Portal stays inside the transformed OAW window. All measurements are converted
 // back to this window's local coordinates, including its current canvas zoom.
 export function FocusLayer({anchor,kind,onClose,children,title="全谱拟合设置"}:{anchor:HTMLButtonElement;kind:'elements'|'engine'|'library'|'settings';onClose:()=>void;children:ReactNode|((dismiss:()=>void)=>ReactNode);title?:string}) {
-  const root=anchor.closest<HTMLElement>('.legion-workspace-pane, .node-workspace-window, article.world-card')??anchor.closest<HTMLElement>('.xrd-match-ui')!;
+  const [root]=useState(()=>anchor.closest<HTMLElement>('.legion-workspace-pane, .node-workspace-window, article.world-card')??anchor.closest<HTMLElement>('.xrd-match-ui')!);
   const layer=useRef<HTMLDivElement>(null), panel=useRef<HTMLDivElement>(null);
   const close=useRef(onClose);close.current=onClose;
   const closing=useRef(false);
