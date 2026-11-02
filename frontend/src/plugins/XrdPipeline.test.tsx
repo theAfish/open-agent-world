@@ -1,11 +1,23 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import xrd from '../../../plugins/xrd/frontend';
 import type { PluginViewProps } from './sdk';
 import { TEST_CATALOG } from '../state/catalog.fixture';
 
 afterEach(cleanup);
+it('keeps the element picker open when saved results finish loading after editing begins', async () => {
+  let loaded!: (value: Awaited<ReturnType<PluginViewProps['host']['getAgentInfo']>>) => void;
+  const info = new Promise<Awaited<ReturnType<PluginViewProps['host']['getAgentInfo']>>>(resolve => { loaded = resolve; });
+  const host = mount({ host: { getAgentInfo: vi.fn(() => info) } });
+  fireEvent.click(screen.getByRole('button', { name: '01 参数设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '选择元素' }));
+  fireEvent.click(screen.getByRole('button', { name: '3 Li Lithium' }));
+  await act(async () => { loaded({ session_id: '', details: { result, workflow: { match_run_id: 'match-1' }, last_run: { run_id: 'match-1', status: 'succeeded' } } }); });
+  expect(screen.getByRole('dialog', { name: '选择元素' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '15 P Phosphorus' }));
+  await waitFor(() => expect(host.updateConfig).toHaveBeenLastCalledWith({ library_elements: 'Li P' }));
+});
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} })); });
 const candidates = Array.from({ length: 12 }, (_, index) => ({
   node_id: `library:${index + 1}`, filename: `COD ${7222155 + index}`, metadata: { formula: `Phase ${index + 1}` },

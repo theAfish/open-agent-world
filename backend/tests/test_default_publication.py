@@ -15,6 +15,8 @@ def test_xrd_publishes_without_declarations_and_runs_inside_its_workspace(tmp_pa
         assert response.status_code == 201, response.text
         nodes = response.json()["nodes"]
         cards = {card["type"]: card for card in nodes}
+        tabs = cards['legion']['config']['workspace_layout']['root']['second']['views']
+        assert [view['card_id'] for view in tabs] == [cards['xrd.match']['id'], cards['conversation']['id']]
         assert client.patch(f"/api/nodes/{cards['xrd.match']['id']}", json={'config':{
             'tolerance_deg':.6,'cell_scale_percent':1.25,'library_engine':'native','library_elements':'Li P S Cl'}}).status_code == 200
         outside = node(client, "text", "Outside publication", content="PRIVATE")
@@ -39,6 +41,7 @@ def test_xrd_publishes_without_declarations_and_runs_inside_its_workspace(tmp_pa
         visible = next(card for card in bootstrap.json()['cards'] if card['id'] == owner)
         business = next(card for card in world.json()['nodes'] if card['id'] == owner)
         assert visible['config'] == business['config']
+        assert visible['revision'] == business['revision']
         assert visible['config']['tolerance_deg'] == .6 and visible['config']['cell_scale_percent'] == 1.25
         assert visible['config']['library_engine'] == 'native' and visible['config']['library_elements'] == 'Li P S Cl'
         document = client.get(f"{root}/nodes/{canvas}/document").json()

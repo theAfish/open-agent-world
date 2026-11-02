@@ -64,7 +64,7 @@ def workspace_snapshot(manifest, services):
             # Omitting their config here made the UI show defaults while runs
             # consumed the saved values. Credential filtering remains identical.
             config = projected_card(manifest, services, card)["config"]
-        cards.append({"id": card.id, "type": card.type, "name": card.name, "status": card.status,
+        cards.append({"id": card.id, "revision": card.revision, "type": card.type, "name": card.name, "status": card.status,
                       "parent_id": parents[node_id], "config": public_value(config), "state_scope": card.state_scope,
                       "finish": card.finish})
         sections = {"conversation": ("sessions", "conversation", "participants"),
