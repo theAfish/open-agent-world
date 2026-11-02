@@ -52,16 +52,19 @@ async def search_frames(run, result):
         async with semaphore:
             try:
                 meta = c.get('metadata') or {}
+                if meta.get('structure_available') == 'false' and not c.get('cifs'):
+                    return None, None
                 cod = meta.get('reference_code', '')
                 library = meta.get('library_node_id')
-                if library in library_ids and c['node_id'] == f'{library}:{cod}':
+                if (library in library_ids and c['node_id'] == f'{library}:{cod}'
+                        and meta.get('url') == f'https://www.crystallography.net/cod/{cod}.html'):
                     document = await structures.prepare_cod_structure({}, {'cod_id': cod})
                     source = decoded_cif(document['structure'])
                 else:
                     ids = {x['node_id'] for x in c.get('cifs', [])}
                     matches = [i['value'] for i in snapshot if i['node_id'] in ids and i['value'].get('reference_node_id') == c['node_id']]
                     if len(matches) != 1:
-                        raise ValueError('没有唯一关联的 CIF')
+                        raise ValueError('没有唯一关联的 CIF；标准卡片需另行关联经核对的结构模型')
                     source = decoded_cif(matches[0])
                 return source['text'], None
             except Exception as exc:
