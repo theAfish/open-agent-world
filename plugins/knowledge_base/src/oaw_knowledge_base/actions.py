@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import embeddings, graph_search
 from .client import DEFAULT_COLLECTION, collection, open_client
+from .entry_schema import expand, is_compact
 from .errors import KnowledgeError
 from .graph_store import LAYERS
 from .markdown import available_engines
@@ -538,13 +539,13 @@ def _schemas(context, request):
 
 
 def _validate_definition(definition):
-    if definition.get("type") != "object" or not isinstance(definition.get("properties"), dict):
-        raise KnowledgeError(
-            "definition must be a JSON Schema object with a properties map")
+    if definition.get("type", "object") != "object" or not isinstance(definition.get("properties"), dict):
+        raise KnowledgeError("definition must be an object with a properties map")
 
 
 def _check(definition, data):
     """Best-effort JSON Schema validation; ``jsonschema`` is optional."""
+    definition = expand(definition)
     try:
         import jsonschema
     except ImportError:
@@ -573,10 +574,26 @@ EXTRACT_INSTRUCTION = (
     "spreadsheet, a note) joined in order under '## File:' headings, plus the uploader's own "
     "notes. Project it onto the JSON Schema: produce one record per specimen, sample, run or "
     "table row the files describe, each with its fields filled from the document only. Leave a "
-    "field out rather than guess it. Reply with exactly this JSON shape: "
+    "field out rather than guess it. Use the schema's own property names: map what the files "
+    "state onto those properties (a column or label may be named differently), and do not add "
+    "properties of your own. Reply with exactly this JSON shape: "
     "{\"records\": [{\"name\": <short label, e.g. the sample id>, \"data\": <object matching the "
     "schema>, \"source_ids\": [<ids of the files this record was read from>], "
     "\"note\": <optional: where in the files it came from, or what was unclear>}]}.")
+
+
+COMPACT_RECORD = (
+    " The schema lists properties, each with a value type, an optional expected unit and a "
+    "description. In a record's data, give every property you can fill as an object "
+    "{\"value\": <a value of the property's type>, \"unit\": <the unit the files state, "
+    "optional>, \"description\": <optional note about this value>} under the property's name; "
+    "omit a property the files do not state.")
+
+
+def _extract_instruction(definition):
+    properties = definition.get("properties") if isinstance(definition, dict) else None
+    compact = isinstance(properties, dict) and any(is_compact(prop) for prop in properties.values())
+    return EXTRACT_INSTRUCTION + (COMPACT_RECORD if compact else "")
 
 
 def _experiment_schema(kb, schema_id):
@@ -824,8 +841,11 @@ def experiment_extract_prompt(context, arguments):
         "bundle_id": bundle["id"], "bundle_name": bundle["name"], "notes": bundle["notes"],
         "group_id": bundle["group_id"], "schema_id": str(schema.id), "schema_name": schema.name,
         "schema_version": schema.version, "system_prompt": schema.system_prompt,
+        # The compact form as stored: the expanded JSON Schema is several times longer, which
+        # pushes the whole result past the host's 8,000-character limit for what an agent sees
+        # in full, and the agent then gets only key names instead of the schema.
         "definition": schema.definition, "field_descriptions": schema.field_descriptions,
-        "instruction": EXTRACT_INSTRUCTION,
+        "instruction": _extract_instruction(schema.definition),
         "files": [{"source_id": f["source_id"], "filename": f["filename"]} for f in files],
         "total_characters": len(text), "offset": request.offset, "markdown": window,
         "has_more": request.offset + len(window) < len(text),
@@ -845,6 +865,9 @@ class ExperimentSave(Request):
     records: list[ExperimentRecordInput] = Field(min_length=1, max_length=500)
     # A re-extraction replaces the bundle's earlier drafts; published records stay.
     replace_drafts: bool = False
+    # The host's agent-free path stores a non-conforming record as a flagged draft a person
+    # can fix; an agent's save is rejected so it corrects the record itself.
+    keep_invalid: bool = Field(default=False, json_schema_extra=AGENT_HIDDEN)
 
 
 def _record_json(kb, record, *, sources=False):
@@ -872,17 +895,36 @@ def experiment_save(context, arguments):
     if not files:
         raise KnowledgeError("This experiment upload has no files to cite as evidence")
 
+    checks = [_check(schema.definition, item.data) for item in request.records]
+    if not request.keep_invalid:
+        wanted = list((schema.definition.get("properties") or {}))
+        problems = []
+        for item, check in zip(request.records, checks):
+            if check.get("valid") is not False:
+                continue
+            extra = [key for key in item.data if key not in wanted]
+            detail = (f"properties not in the schema: {', '.join(extra[:12])}" if extra
+                      else "; ".join((check.get("errors") or [f"missing {check.get('missing')}"])[:3]))
+            problems.append(f'"{item.name}": {detail}')
+        if problems:
+            raise KnowledgeError(
+                f"Nothing was saved: {len(problems)} record(s) do not match the schema "
+                f"({' | '.join(problems[:4])[:900]}). The schema's properties are: {', '.join(wanted)[:900]}. "
+                "Review the source again and fill those properties with the information you found "
+                "(a column or label may be named differently; each property is an object with value, "
+                "unit and description). Do not add properties of your own. Then call this tool again.")
+
     if request.replace_drafts:
         kb.oaw_experiments.delete_drafts_for_bundle(bundle["id"])
     saved = []
-    for item in request.records:
+    for item, check in zip(request.records, checks):
         cited = [source_id for source_id in item.source_ids if source_id in files]
         if item.source_ids and not cited:
             raise KnowledgeError(
                 f'Record "{item.name}" cites source_ids that are not in this upload')
         record = kb.oaw_experiments.create(
             group_id=bundle["group_id"], schema_id=str(schema.id), bundle_id=bundle["id"],
-            name=item.name, data=item.data, validation=_check(schema.definition, item.data),
+            name=item.name, data=item.data, validation=check,
             note=item.note, created_by=_actor(context))
         kb.oaw_experiments.set_sources(record["id"], [
             {"source_id": source_id, "artifact_id": files[source_id]["artifact_id"]}

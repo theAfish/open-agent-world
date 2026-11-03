@@ -12,6 +12,7 @@ import { ProjectWorkspace } from "./ProjectWorkspace";
 import type { BridgeProgress, ProjectTab } from "./ProjectWorkspace";
 import { SchemaEditor } from "./SchemaEditor";
 import type { SchemaDetail, SchemaItem } from "./SchemaEditor";
+import type { DraftSchema } from "./SchemaDraftChat";
 import { ExtractDialog } from "./ExtractDialog";
 import type { ExtractDetails } from "./ExtractDialog";
 import { RecordGrid, RecordTable, flattenValues } from "./RecordView";
@@ -451,9 +452,10 @@ export function Workspace({ host, card }: PluginViewProps) {
       await host.runAgent(agent.id, [
         "Perform the experiment extraction described by the JSON data below.",
         "EXPERIMENT EXTRACTION REQUEST", JSON.stringify(request), "END EXPERIMENT EXTRACTION REQUEST",
-        "Call knowledge_experiment_extract_prompt with this bundle_id and read the whole document (follow has_more with offset),",
-        "produce one record per specimen, sample, run or table row, save them in one knowledge_experiment_save call",
-        `with replace_drafts=${replace ? "true" : "false"}, then report what you saved and what was unclear.`,
+        "Ignore any earlier extraction in this conversation; start from the prompt. Call knowledge_experiment_extract_prompt with this bundle_id and read the whole document (follow has_more with offset).",
+        "If its result arrives as a preview, read definition, system_prompt and markdown in full with read_tool_result before writing any record.",
+        "Produce one record per specimen, sample, run or table row, filling the schema's own properties (do not add your own), save them in one knowledge_experiment_save call",
+        `with replace_drafts=${replace ? "true" : "false"}; if the save is rejected, fix the records as the error says and save again. Then report what you saved and what was unclear.`,
       ].join("\n"));
       const startedAt = new Date().toISOString();
       setExtracting({ bundle_id: bundle.id, agent_id: agent.id, started_at: startedAt });
@@ -852,6 +854,14 @@ export function Workspace({ host, card }: PluginViewProps) {
         </WorkspaceToolbar>
         <Banner error={error} notice={notice} />
         <SchemaEditor busy={busy} schemas={experimentSchemas} kind="experiment" call={call} perform={perform}
+          draft={deployed ? undefined : { ready: !!selectedModel, modelSelect,
+            convert: async file => {
+              const sample = await call("schema_sample", { filename: file.name, content_base64: await fileBase64(file),
+                media_type: file.type || "application/octet-stream" });
+              return { markdown: String(sample.markdown), truncated: !!sample.truncated };
+            },
+            send: body => request(`knowledge/${card.id}/schema-draft`, { ...body, model: selectedModel }, false) as
+              Promise<{ reply: string; draft: DraftSchema | null }> }}
           onSaved={async saved => {
             // The experiment tables and forms read definitions from a cache; an edit refills it.
             setSchemaDetails(previous => { const next = { ...previous }; delete next[saved.id]; return next; });

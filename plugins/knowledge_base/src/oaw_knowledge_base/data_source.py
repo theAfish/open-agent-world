@@ -1,6 +1,7 @@
 """Expose published graphs and structured records without coupling the chart Pack to MKB."""
 from open_agent_world.plugin_api import NodeDataSource, ResourceValidationError
 from . import actions
+from .entry_schema import expand
 
 
 def resolve(definition, root, depth=0):
@@ -56,7 +57,7 @@ def datasets(schema):
     # Every schema's dataset is its published records, whether they were read from an
     # experiment upload or straight from a literature source: one table, one id shape
     # (kept as "experiments:" so charts saved against it keep resolving).
-    definition = schema.definition
+    definition = expand(schema.definition)
     root = {"id": f"experiments:{schema.id}", "label": schema.name, "kind": "table", "fields": fields(definition), "aggregates": False}
     result = [root] if root["fields"] else []
     for name, prop in definition.get("properties", {}).items():

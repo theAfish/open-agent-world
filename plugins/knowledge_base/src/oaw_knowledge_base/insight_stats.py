@@ -15,6 +15,8 @@ from __future__ import annotations
 import math
 from statistics import mean, median, pstdev
 
+from .entry_schema import expand
+
 MAX_RECORDS = 500
 MAX_FIELDS = 40
 MAX_CATEGORIES = 20
@@ -68,7 +70,7 @@ def _number(value):
 def field_names(definition):
     """The flattened field names a schema describes, in declaration order."""
     names = []
-    properties = (definition or {}).get("properties")
+    properties = (expand(definition) or {}).get("properties")
     if not isinstance(properties, dict):
         return names
     for key, spec in properties.items():

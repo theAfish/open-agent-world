@@ -24,7 +24,13 @@ export const formatCell = (value: unknown): string => {
     if (value.every(isPrimitive)) return value.map(formatCell).join(", ");
     return t("{v0} items", { v0: value.length });
   }
-  if (isObject(value)) return `{${Object.keys(value).length}}`;
+  if (isObject(value)) {
+    // A { value, unit, description } entry reads as "3.16 mS/cm".
+    if ("value" in value && Object.keys(value).every(key => ["value", "unit", "description"].includes(key))) {
+      return [formatCell(value.value), typeof value.unit === "string" ? value.unit : ""].filter(Boolean).join(" ");
+    }
+    return `{${Object.keys(value).length}}`;
+  }
   return String(value);
 };
 

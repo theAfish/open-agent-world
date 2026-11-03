@@ -8,6 +8,7 @@ import base64
 import json
 import uuid
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -1049,6 +1050,7 @@ def test_an_experiment_upload_is_projected_into_several_reviewed_records(card):
     # One document: both files in upload order, each under a heading that names it.
     prompt = run(card, actions.experiment_extract_prompt, bundle_id=bundle["id"])
     assert prompt["schema_id"] == schema["id"] and prompt["definition"] == EXPERIMENT_SCHEMA
+    assert "value" not in prompt["instruction"]  # a plain JSON Schema needs no record-shape note
     assert prompt["notes"].startswith("Conductivity is in S/cm")
     assert [f["source_id"] for f in prompt["files"]] == [sheet, note]
     assert prompt["markdown"].index(f"## File: batch7.csv (source_id={sheet})") < \
@@ -1059,7 +1061,16 @@ def test_an_experiment_upload_is_projected_into_several_reviewed_records(card):
     assert page["has_more"] is True and len(page["markdown"]) == 500
     assert page["total_characters"] == prompt["total_characters"]
 
-    saved = run(card, actions.experiment_save, bundle_id=bundle["id"], records=[
+    # An agent's save is strict: one non-conforming record rejects the call and stores nothing.
+    with pytest.raises(KnowledgeError, match="Nothing was saved") as rejected:
+        run(card, actions.experiment_save, bundle_id=bundle["id"], replace_drafts=True, records=[
+            {"name": "A1", "data": {"sample_id": "A1", "conductivity": 1.2}},
+            {"name": "A3", "data": {"sample_id": "A3"}}])
+    assert "sample_id, conductivity" in str(rejected.value)  # it names the schema's properties
+    assert not run(card, actions.experiments, bundle_id=bundle["id"])["experiments"]
+
+    # The host's agent-free path keeps a non-conforming record as a flagged draft to fix by hand.
+    saved = run(card, actions.experiment_save, bundle_id=bundle["id"], keep_invalid=True, records=[
         {"name": "A1", "data": {"sample_id": "A1", "conductivity": 1.2}, "source_ids": [sheet]},
         {"name": "A2", "data": {"sample_id": "A2", "conductivity": 0.9}, "source_ids": [sheet, note],
          "note": "cracked, see notes.md"},
@@ -1120,7 +1131,7 @@ def test_a_record_that_fails_its_schema_cannot_be_published(card):
     schema = _experiment_schema(card)
     bundle = _bundle(card, schema)
     _upload(card, bundle, "A9\n", "a.md")
-    saved = run(card, actions.experiment_save, bundle_id=bundle["id"],
+    saved = run(card, actions.experiment_save, bundle_id=bundle["id"], keep_invalid=True,
                 records=[{"name": "A9", "data": {"sample_id": "A9"}}])
     card.confirmed = True
     with pytest.raises(KnowledgeError):
@@ -1472,3 +1483,30 @@ def test_insights_can_span_several_schemas_matched_by_specimen_name(card):
     titles = {i["title"] for i in run(card, insights.insights)["insights"]}
     assert titles == {"Hotter batches are more crystalline", "xrd only", "cross draft 2"}
     assert run(card, insights.insights, operation="get", insight_id=single["insights"][0]["id"])["insight"]["schema_id"] == xrd["id"]
+
+
+def test_an_agent_reads_the_compact_schema_whole_and_is_told_how_to_fill_it_when_a_save_is_rejected(card):
+    example = json.loads((Path(__file__).parents[1] / "examples/solid_electrolyte/schema.json").read_text(encoding="utf-8"))
+    schema = run(card, actions.schema_manage, operation="create", kind="experiment", name=example["name"],
+                 definition=example["definition"], system_prompt=example["system_prompt"])["schema"]
+    bundle = _bundle(card, schema)
+    log = (Path(__file__).parents[1] / "examples/solid_electrolyte/production_log_2026-07.txt").read_text(encoding="utf-8")
+    _upload(card, bundle, log, "log.txt", "text/plain")
+
+    prompt = run(card, actions.experiment_extract_prompt, bundle_id=bundle["id"])
+    assert prompt["definition"] == example["definition"] and '"unit"' in prompt["instruction"]
+    # The host shows an agent a tool result in full only up to 8,000 characters; past that it sees
+    # just key names, no schema, and invents properties.
+    assert len(json.dumps(prompt, ensure_ascii=False)) <= 8000
+
+    flat = {"production_date": "2026/7/15", "batch_id": "SC2-01UP-2607115", "feed_mass_g": 400}
+    with pytest.raises(KnowledgeError) as rejected:
+        run(card, actions.experiment_save, bundle_id=bundle["id"], records=[{"name": "B1", "data": flat}])
+    message = str(rejected.value)
+    assert "batch_id, feed_mass_g" in message and "batch_no" in message and "ionic_conductivity" in message
+    assert not run(card, actions.experiments, bundle_id=bundle["id"])["experiments"]
+
+    filled = {"production_date": {"value": "2026-07-15"}, "batch_no": {"value": "SC2-01UP-2607115"},
+              "feed_amount": {"value": 400, "unit": "g"}, "output_amount": {"value": 304.62, "unit": "g"}}
+    saved = run(card, actions.experiment_save, bundle_id=bundle["id"], records=[{"name": "B1", "data": filled}])
+    assert saved["invalid"] == 0

@@ -30,6 +30,7 @@ from . import insight_stats
 from .actions import (
     MAX_MARKDOWN_CHARS, Request, _actor, _base, _bounded, _client, _schema_kind, _scope,
 )
+from .entry_schema import expand
 from .errors import KnowledgeError
 from .graph_store import EXPERIMENT_LAYER
 from .insight_store import KINDS, ROLES
@@ -144,13 +145,13 @@ def _statistics(groups):
                   for schema, records in groups]
     cross = insight_stats.cross_schema([
         {"schema_id": str(schema.id), "schema_name": schema.name,
-         "definition": schema.definition, "records": records} for schema, records in groups])
+         "definition": expand(schema.definition), "records": records} for schema, records in groups])
     return per_schema, cross
 
 
 def _schema_json(schema):
     return {"schema_id": str(schema.id), "schema_name": schema.name, "schema_version": schema.version,
-            "definition": schema.definition, "field_descriptions": schema.field_descriptions}
+            "definition": expand(schema.definition), "field_descriptions": schema.field_descriptions}
 
 
 def _insight_json(kb, insight, *, evidence=False):

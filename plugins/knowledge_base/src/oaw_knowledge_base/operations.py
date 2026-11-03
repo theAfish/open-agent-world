@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from . import actions, insights, projects, spaces
+from . import actions, insights, projects, schema_draft, spaces
 
 
 @dataclass(frozen=True)
@@ -64,7 +64,7 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Get everything needed to project one experiment upload onto its schema: the schema's system prompt and JSON Schema definition, the uploader's notes, and every file's markdown joined into one document (windowed: follow has_more with offset). Produce one record per specimen, then submit them with knowledge_experiment_save."),
     Operation("experiment_save", actions.experiment_save, actions.ExperimentSave,
         tool_name="knowledge_experiment_save",
-        description="Store the records projected from one experiment upload as drafts, each validated against the schema and linked to the files it was read from. Pass replace_drafts=true when re-extracting so earlier drafts are replaced; published records are never touched. A draft is a candidate until a person publishes it."),
+        description="Store the records projected from one experiment upload as drafts, each validated against the schema and linked to the files it was read from. Pass replace_drafts=true when re-extracting so earlier drafts are replaced; published records are never touched. A draft is a candidate until a person publishes it. Every record must match the schema exactly (its property names and structure, no extra properties); if any record does not, nothing is saved and the errors are returned: correct the records and call again."),
     Operation("experiments", actions.experiments, actions.Experiments,
         tool_name="knowledge_experiments",
         description="List or read structured records — structured JSON extracted from an experiment upload. Filter by schema, upload (bundle_id), source (source_id) or status: a published record is approved data; a draft is still being reviewed."),
@@ -118,6 +118,8 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Create, rename, annotate, mark the extraction state of, or delete one experiment upload."),
     Operation("experiment_ingest", actions.experiment_ingest, actions.ExperimentIngest,
         description="Upload one raw file into an experiment upload and queue its markdown conversion at once."),
+    Operation("schema_sample", schema_draft.schema_sample, schema_draft.SchemaSample,
+        description="Convert one sample file to markdown for drafting a schema; nothing is stored."),
     Operation("experiment_review", actions.experiment_review, actions.ExperimentReview,
         description="Publish, unpublish or delete one experiment record. Publishing asks for confirmation and marks the record as approved data."),
     Operation("insight_review", insights.insight_review, insights.InsightReview,

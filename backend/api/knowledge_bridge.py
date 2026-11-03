@@ -104,6 +104,24 @@ class ExperimentExtractRequest(BaseModel):
     replace_drafts: bool = False
 
 
+class DraftTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8_000)
+
+
+class DraftSample(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    markdown: str = Field(max_length=30_000)
+
+
+class SchemaDraftRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+    messages: list[DraftTurn] = Field(min_length=1, max_length=40)
+    samples: list[DraftSample] = Field(default_factory=list, max_length=5)
+    # The editor's current name, description, system prompt and definition, so a follow-up edits it.
+    current: dict | None = None
+
+
 class InsightExtractRequest(BaseModel):
     # One schema, several, or neither: every experiment schema with published records.
     schema_id: str | None = Field(default=None, max_length=64)
@@ -309,9 +327,29 @@ async def run_experiment_extract(node_id: str, request: ExperimentExtractRequest
 
     saved = await invoke_resource_action(services, node_id, "experiment_save",
         ResourceActionRequest(arguments={"bundle_id": request.bundle_id, "records": records,
-                                         "replace_drafts": request.replace_drafts}))
+                                         "replace_drafts": request.replace_drafts,
+                                         "keep_invalid": True}))
     return {"records": saved["records"], "invalid": saved["invalid"], "bundle_id": request.bundle_id,
             "truncated": truncated}
+
+
+async def run_schema_draft(node_id: str, request: SchemaDraftRequest, services) -> dict:
+    """One turn of **Draft with AI** in the schema editor: a single JSON-mode model call
+    that returns a reply and, usually, a draft schema. Nothing is saved here; the person
+    reviews the draft in the editor and creates the schema themselves."""
+    await _check_node(node_id, services)
+    base_url, api_key, model = _credentials(services, request.model)
+    build_messages, parse_draft = _builders("schema_draft", "build_messages", "parse_draft")
+    try:
+        messages = build_messages([turn.model_dump() for turn in request.messages],
+                                  [sample.model_dump() for sample in request.samples], request.current)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    answer = await _complete(base_url, api_key, model, messages, lambda content: content)
+    try:
+        return parse_draft(answer)
+    except ValueError as error:  # the message names what to fix; ask again or edit by hand
+        raise HTTPException(502, f"The model's draft was not usable: {error}") from None
 
 
 async def run_insight_extract(node_id: str, request: InsightExtractRequest, services) -> dict:
@@ -354,3 +392,8 @@ async def extract(node_id: str, request: ExperimentExtractRequest, services=Depe
 @router.post("/knowledge/{node_id}/insights")
 async def extract_insights(node_id: str, request: InsightExtractRequest, services=Depends(get_services)):
     return await run_insight_extract(node_id, request, services)
+
+
+@router.post("/knowledge/{node_id}/schema-draft")
+async def schema_draft(node_id: str, request: SchemaDraftRequest, services=Depends(get_services)):
+    return await run_schema_draft(node_id, request, services)
