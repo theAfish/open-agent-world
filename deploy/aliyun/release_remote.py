@@ -241,16 +241,21 @@ def prepare_bundle(request, config):
     for path in [scratch, *bundle_tree(bundle)]:
         os.chown(path, account.pw_uid, account.pw_gid, follow_symlinks=False)
         path.chmod(0o700 if path.is_dir() else 0o600 | (path.stat().st_mode & 0o100))
-    # Previous declarations are sufficient for offline wheel reuse. Never expose
-    # the previous application's environment files, data or site-packages.
+    # Static Pack parsing needs pyproject and any declared metadata/resources,
+    # not only oaw.pack.toml. Copy only receipt-verified Pack payload files;
+    # application environments, tenant data and untracked files stay outside.
     previous = b / ('previous-' + uuid4().hex)
     previous.mkdir(mode=0o755)
-    for declaration in sorted((app / 'plugins').glob('*/oaw.pack.toml')):
-        target = previous / declaration.relative_to(app)
-        public_parents(target.parent, previous)
-        shutil.copyfile(declaration, target)
-        target.chmod(0o644)
     try:
+        installed, _ = receipt(app)
+        for name, expected in sorted(installed['source_files'].items()):
+            if not name.startswith('plugins/'):
+                continue
+            source, target = destination(app, name), destination(previous, name)
+            require(source.is_file() and digest(source) == expected, 'Previous Pack file changed: ' + name)
+            public_parents(target.parent, previous)
+            shutil.copyfile(source, target)
+            target.chmod(0o755 if source.stat().st_mode & 0o111 else 0o644)
         run_sandbox(request, config, 'prepare', ['--source', '/workspace/source', '--previous', '/workspace/previous',
             '--scratch', '/workspace/scratch', '--bundle', '/workspace/scratch/bundle',
             '--environment', config['environment']], writable=scratch,

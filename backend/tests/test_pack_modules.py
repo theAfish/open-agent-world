@@ -28,7 +28,7 @@ def zipped(files):
     return output.getvalue()
 
 
-def distribution():
+def distribution(*, environments=None):
     prefix = "oaw_module_fixture-1.0.0.dist-info"
     wheel = zipped({
         "oaw_module_fixture/__init__.py": '''
@@ -42,7 +42,9 @@ WORKER = Path(__file__).with_name("worker.py")
 def register(registration):
     registration.register_node_type(NodeTypeDefinition(id="module.fixture.card", label="Fixture", description="Test", icon="boxes", color="#123456", deck_id="test", deck_label="Test", deck_icon="boxes", default_name="Fixture", default_size=(300,200), default_status="idle", statuses=frozenset({"idle"}), config_model=Config))
     registration.register_pack(PackDefinition(id="module.fixture.default", name="Fixture", cards=("module.fixture.card",)))
-def create_plugin():
+def create_plugin(*, context):
+    global CONTEXT
+    CONTEXT = context
     return PluginDefinition(PluginDescriptor(id="module.fixture", version="1.0.0", plugin_api_version="1.23"), register)
 ''',
         "oaw_module_fixture/data.txt": "canonical resource",
@@ -70,6 +72,8 @@ def result():
         "compatibility": {"oaw": ">=0.1.0,<1", "plugin_api": "1.23", "frontend_api": 1},
         "entrypoints": {"backend": "backend/fixture.whl", "frontend": "frontend/index.js"},
     }
+    if environments:
+        manifest['environments'] = environments
     files = {"manifest.json": json.dumps(manifest).encode(), "backend/fixture.whl": wheel,
              "frontend/index.js": b"export default {apiVersion:1,views:{}}"}
     files["checksums.json"] = json.dumps({key: hashlib.sha256(value).hexdigest() for key, value in files.items()}).encode()
@@ -121,6 +125,27 @@ def test_installed_schema3_has_real_file_resources_and_isolated_worker(tmp_path)
     load_installed_packs(create_builtin_registry(), tmp_path)
     assert sys.modules["oaw_module_fixture"].__file__ == original
     assert all(p.read_bytes() == value for p, value in caches.items())
+
+
+def test_installed_context_uses_archive_declaration_and_existing_environment_lifecycle(tmp_path):
+    from backend.packs.environments import PythonEnvironmentSpec
+    manager = PackInstallationManager(tmp_path, create_builtin_registry())
+    manager.install(distribution(environments={'worker': {
+        'target': 'host-worker', 'verify_imports': ['json'], 'prepare': 'install'}}))
+    registry = create_builtin_registry()
+    load_installed_packs(registry, tmp_path)
+    context = sys.modules['oaw_module_fixture'].CONTEXT
+    environment = context.environment('worker')
+    manifest = manager.selected()['module.fixture.release']
+    assert context.source_root == manager.version_path(manifest.id, manifest.version)
+    assert environment.spec == PythonEnvironmentSpec.from_declaration(
+        manifest.owner_id, 'worker', manifest.environments['worker'], context.source_root)
+    # Installation and plugin use must address the same prepared receipt.
+    handle = environment.read()
+    assert environment.prepare() == handle
+    with environment.lease(handle):
+        assert environment.read() == handle
+        assert environment.status()['status'] == 'ready'
 
 
 @pytest.mark.parametrize("mutation", ["changed", "missing", "extra", "directory"])

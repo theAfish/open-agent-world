@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -144,8 +145,10 @@ it("imports a new project without renaming an already selected project", async (
     return materialData(name, args);
   });
   fireEvent.click(await screen.findByLabelText("Select Sintering project"));
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByLabelText("Project files or archives"), { target: { files: [new File(["hello"], "new.md")] } });
-  await screen.findByLabelText("Project name");
+  await screen.findByText("new.md");
+  expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue("");
   fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "New report" } });
   fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
   await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({
@@ -236,7 +239,7 @@ it("keeps project data visible when experiment data is outside the release grant
   expect(await screen.findByRole("button", { name: "sintering.md" })).toBeTruthy();
 });
 
-it("imports a selected file and requests conversion only after its project preview is confirmed", async () => {
+it("imports a selected file and requests conversion only after its project intake is confirmed", async () => {
   let imported = false;
   const action = open(async (name, args) => {
     if (name === "projects") return args.project_id ? { project: PROJECT } : { projects: imported ? [PROJECT] : [] };
@@ -244,9 +247,10 @@ it("imports a selected file and requests conversion only after its project previ
     if (name === "project_import_commit") { imported = true; return { projects: [PROJECT] }; }
     return materialData(name, args);
   });
+  fireEvent.click(within(screen.getByRole("group", { name: "Projects" })).getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByLabelText("Project files or archives"), { target: { files: [new File(["hello"], "new.md")] } });
-  await screen.findByLabelText("Project name");
-  expect(action.mock.calls.some(([name]) => name === "project_import_commit")).toBe(false);
+  await screen.findByText("new.md");
+  expect(action.mock.calls.some(([name]) => name === "project_import_preview" || name === "project_import_commit")).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
   await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({ token: PREVIEW.token, auto_process: true }), undefined));
   fireEvent.click(await screen.findByRole("button", { name: "sintering.md" }));
@@ -255,12 +259,18 @@ it("imports a selected file and requests conversion only after its project previ
 });
 
 it("snapshots selected files before resetting the input clears its FileList", async () => {
-  const action = open(async (name, args) => name === "project_import_preview" ? PREVIEW : materialData(name, args));
+  const action = open(async (name, args) => name === "project_import_preview" ? PREVIEW
+    : name === "project_import_commit" ? { projects: [PROJECT] } : materialData(name, args));
+  fireEvent.click(within(screen.getByRole("group", { name: "Projects" })).getByRole("button", { name: "New project" }));
   const input = screen.getByLabelText("Project files or archives") as HTMLInputElement;
   let files: File[] = [new File(["first"], "first.md"), new File(["second"], "second.md")];
   Object.defineProperty(input, "files", { configurable: true, get: () => files });
   Object.defineProperty(input, "value", { configurable: true, set: () => { files = []; }, get: () => "" });
   fireEvent.change(input);
+  await screen.findByText("first.md");
+  await screen.findByText("second.md");
+  expect(files).toHaveLength(0);
+  expect(action.mock.calls.some(([name]) => name === "project_import_preview")).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
   await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_preview", expect.objectContaining({
     files: [expect.objectContaining({ filename: "first.md" }), expect.objectContaining({ filename: "second.md" })] }), undefined));
@@ -459,7 +469,8 @@ it("keeps graph relation evidence and original file provenance visible in a proj
   await openResult();
   expect(screen.getByLabelText("Knowledge graph map")).toBeTruthy();
   fireEvent.click(screen.getByText("Result JSON"));
-  expect(screen.getByText(/Si3N4 powder is densified by pressureless sintering/, { selector: "p" })).toBeTruthy();
+  fireEvent.click(screen.getByText("Entities and relationships", { selector: "summary" }));
+  expect(screen.getByText("Si3N4 powder is densified by pressureless sintering.")).toBeVisible();
   fireEvent.click(screen.getByText("Source files"));
   fireEvent.click(screen.getByRole("button", { name: "sintering.md" }));
   expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();

@@ -153,8 +153,11 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
 export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
   useLocale();
   const catalog = useWorldStore(state => state.catalog);
-  const contentSurface = !isMissingCard(card, catalog) && hasContentSurface(catalog.node_types.find(item => item.id === card.type));
-  return <section data-missing={Boolean(card.missing_plugin) || undefined} data-content-surface={contentSurface || undefined} className="node-workspace-window" role="dialog" aria-modal="false" aria-label={t("{v0} workspace", { v0: String(card.name) })} data-workspace-node-id={card.id}>
+  const definition = catalog.node_types.find(item => item.id === card.type);
+  const contentSurface = !isMissingCard(card, catalog) && hasContentSurface(definition);
+  return <section data-missing={Boolean(card.missing_plugin) || undefined} data-content-surface={contentSurface || undefined}
+    data-content-controls={contentSurface ? definition?.presentation?.content_controls ?? 'side' : undefined}
+    className="node-workspace-window" role="dialog" aria-modal="false" aria-label={t("{v0} workspace", { v0: String(card.name) })} data-workspace-node-id={card.id}>
     {contentSurface ? <ContentSurfaceControls card={card} level="workspace" /> : <WorkspaceTitlebar card={card} />}
     <WorkspaceContent card={card} />
   </section>;

@@ -14,7 +14,7 @@ def test_builtin_catalog_presentation_and_legacy_flags_agree():
         item = next(item for item in catalog.node_types if item.id == kind)
         assert item.presentation.model_dump(mode="json", exclude={"workspace_layout"}) == {
             "states": ["node", "preview", "workspace"], "initial": "workspace", "open": "workspace",
-            "sizes": {},
+            "sizes": {}, "content_controls": "side",
         }
         assert item.surfaces == {"preview": True, "inspector": False, "workspace": True}
         assert item.presentation.workspace_layout.min_width == 280
@@ -68,3 +68,13 @@ def test_optional_workspace_sizing_roundtrips_without_changing_canvas_presentati
     assert sized.states == legacy.states and sized.sizes == legacy.sizes
     definition = replace(create_builtin_registry().node_type("text"), presentation=sized)
     assert definition.catalog_item("custom").presentation.workspace_layout.ideal_width == 720
+
+
+def test_content_control_placement_roundtrips_and_rejects_unsupported_values():
+    presentation = NodePresentation(states=('workspace',), initial='workspace', open='workspace', content_controls='bottom')
+    definition = replace(create_builtin_registry().node_type('text'), presentation=presentation,
+                         traits=frozenset({'ui.content-surface.v1'}))
+    assert definition.catalog_item('custom').presentation.content_controls == 'bottom'
+    assert NodePresentation.model_validate_json(presentation.model_dump_json()) == presentation
+    with pytest.raises(ValidationError):
+        NodePresentation(states=('workspace',), initial='workspace', open='workspace', content_controls='overlay')

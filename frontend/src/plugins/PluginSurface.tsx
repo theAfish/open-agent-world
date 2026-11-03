@@ -70,12 +70,17 @@ export function PluginSurface({ card, slot, level, children }: {
   // Catalog refreshes replace definitions. Rebind the host only when its capabilities change,
   // so views depending on SDK callbacks keep their loaded content and local edits.
   const stateless = definition?.state?.mode === 'none';
+  const credentialConfiguration = Boolean(definition?.traits.some(trait => trait === 'core.environment' || trait === 'core.sandbox'));
   const configurablePersistence = Boolean(definition?.state?.mode === 'scoped' && definition.state.userConfigurable && definition.state.supportedScopes.length > 1);
   const runtime = useWorldStore((s) => definition ? s.catalog.frontend_modules?.[definition.plugin_id] : undefined);
   const updateCard = useWorldStore((s) => s.updateCard);
   const source = useWorldStore(s=>xrdCanvasSource(card,s.cards,s.edges));
   const viewCard = useMemo(()=>source?{...card,config:{...card.config,source_node_id:source}}:card,[card,source]);
   const host = useMemo<PluginViewProps["host"]>(() => ({
+    credentials: !access.deployed && credentialConfiguration ? {
+      status: () => worldApi.getCredentialBindings(card.id),
+      set: (reference, value, expectedRevision) => worldApi.bindCredential(card.id, reference, value, expectedRevision),
+    } : undefined,
     executionSources,
     workspace: inWorkspace && navigation ? { activate: view => navigation.activate({ ...view, card_id: view?.card_id ?? card.id }) } : undefined,
     dataSources: access.deployed ? undefined : {
@@ -241,7 +246,7 @@ export function PluginSurface({ card, slot, level, children }: {
       state.selectCards([target.id], { syncCanvas: true });
     },
     clearOpenedFile: () => useOpenFiles.getState().clear(card.id),
-  }), [card.id, card.state_scope, source, updateCard, access, stateless, configurablePersistence, sessionId, inWorkspace, navigation, executionSources]);
+  }), [card.id, card.state_scope, source, updateCard, access, stateless, configurablePersistence, credentialConfiguration, sessionId, inWorkspace, navigation, executionSources]);
   const reference = definition?.frontend?.[slot];
   if (covered && !inWorkspace && card.type.startsWith('xrd.')) return null;
   if (!reference || !definition) return <>{children}</>;

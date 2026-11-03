@@ -240,6 +240,19 @@ def test_preparation_only_mutates_a_private_clone_before_immutable_promotion(tmp
     current = app / 'backend/.venv/oaw-runtime-bundle'
     current.mkdir(parents=True)
     (current / 'library.py').write_text('installed')
+    from backend.tests.test_pack_spec import source as source_pack
+    from backend.packs.spec import read_source_pack
+    (app / 'plugins').mkdir()
+    old_pack = source_pack(app / 'plugins', '''
+[environments.analysis]
+target = "sandbox"
+sources = [{path="requirements.txt", kind="requirements"}]
+''')
+    (old_pack / 'requirements.txt').write_text('numpy>=2\n')
+    names = ['plugins/sample/' + name for name in ('oaw.pack.toml', 'pyproject.toml', 'requirements.txt')]
+    remote.write(app / '.oaw-deployment.json', {'source_commit': 'a' * 40,
+        'source_files': {name: remote.digest(app / name) for name in names}})
+    (old_pack / '.env').write_text('private operator environment')
     release = tmp_path / 'release'
     (release / 'stage').mkdir(parents=True)
     monkeypatch.setattr(remote, 'paths', lambda _: (app, tmp_path / 'hosting', tmp_path / 'releases'))
@@ -249,6 +262,10 @@ def test_preparation_only_mutates_a_private_clone_before_immutable_promotion(tmp
     monkeypatch.setattr(os, 'chown', lambda *a, **kw: None, raising=False)
     def prepare(*args, writable, readonly, **kwargs):
         assert readonly == ((release / 'stage', '/workspace/source'), (readonly[1][0], '/workspace/previous'))
+        previous = readonly[1][0]
+        old = read_source_pack(previous / 'plugins/sample')
+        assert old.environments['analysis'].python == ('numpy>=2',)
+        assert not (previous / 'plugins/sample/.env').exists()
         assert (writable / 'bundle/library.py').read_text() == 'installed'
         (writable / 'bundle/library.py').write_text('prepared')
         assert (current / 'library.py').read_text() == 'installed'
@@ -257,6 +274,7 @@ def test_preparation_only_mutates_a_private_clone_before_immutable_promotion(tmp
     assert (current / 'library.py').read_text() == 'installed'
     assert (release / 'prepared-runtime-bundle/library.py').read_text() == 'prepared'
     assert not list(release.glob('prepare-*'))
+    assert not list(release.glob('previous-*'))
 
 
 def test_verification_gets_only_minimal_snapshot_and_removes_it_on_failure(tmp_path, registration, release_request, monkeypatch):

@@ -2,6 +2,45 @@
 
 [API directory](../plugins.md) · [Card App tutorial](../developers/card-app.md)
 
+## Declared host-worker environments
+
+Plugin API 1.42 binds validated `[environments.<name>]` declarations to the
+factory's optional `context` argument. Keep your declaration in `oaw.pack.toml`;
+do not parse TOML again, recreate artifact models or infer a project root from
+the installed wheel. The host supplies the source declaration during development
+and the selected archive manifest after installation.
+
+```python
+def create_plugin(*, context):
+    worker = context.environment("client")
+
+    def install(context, arguments):
+        handle = worker.prepare()  # Explicit setup action only.
+        ...
+
+    def run(context, arguments):
+        handle = worker.read()  # Existing receipt; never installs.
+        with worker.lease(handle):
+            # Launch handle.executable (CLI) or handle.python (Python worker).
+            # Keep the lease until the child exits and cleanup finishes.
+            ...
+
+    # Register these handlers and return your ordinary PluginDefinition.
+```
+
+`status()`, `read()`, `prepare()` and `lease(handle)` use the existing Python or
+portable-executable provider, the active profile's data root and the same
+content fingerprint used by Pack installation. Python workers still use private
+packages and isolated subprocesses; the context does not modify host imports.
+Provider-specific APIs remain accessible as `worker.manager` and `worker.spec`,
+for example explicit external-executable verification. The declaration's
+`accept_external` policy continues to apply.
+
+Lookup accepts only this Pack's named, managed `host-worker` declarations on a
+supported platform. It does not install anything. Sandbox profiles and external
+environment configuration retain their existing mechanisms. Legacy entrypoints
+without a static Pack declaration can keep using the provider classes directly.
+
 ## Lifecycle transactions
 
 A passive node omits `lifecycle`. A stateful node implements

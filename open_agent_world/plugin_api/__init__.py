@@ -4,7 +4,7 @@ from backend.plugins.failures import PluginIntegrityError
 from backend.agents.media import ToolImage, VisualToolResult, codex_tool_content
 from backend.packs.environments import PackEnvironmentManager, PythonEnvironmentSpec, EnvironmentHandle
 from backend.packs.executables import ExecutableEnvironmentManager, ExecutableEnvironmentSpec, ExecutableHandle
-from .context import PluginContext
+from .context import PluginContext, PluginEnvironment
 from backend.execution_config import ComputeTarget, EnvironmentProfile, SecretRequirement
 from backend.security.execution_folders import FolderRequirement, FileRequirement, PathRequirement
 from backend.resources.artifact_models import ArtifactPublish, ArtifactMaterialize
@@ -102,6 +102,7 @@ __all__ = [
     "declarative_plugin",
     "PackEnvironmentManager",
     "PluginContext",
+    "PluginEnvironment",
     "ExecutableEnvironmentManager",
     "ExecutableEnvironmentSpec",
     "ExecutableHandle",

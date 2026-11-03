@@ -1,6 +1,13 @@
 # OAW frontend Pack SDK
 
 Use `FrontendPlugin` and `PluginViewProps` from `@oaw/plugin-api`.
+
+The npm package version (1.1.0), the host Plugin API feature level (currently
+1.42), and the frontend loading protocol (`apiVersion: 1`) are independent.
+Declare the minimum Plugin API actually used in both your Python descriptor
+and source compatibility; a newer SDK package does not upgrade the host.
+See the [version guide](../../docs/reference/plugin-compatibility.md#which-version-to-declare).
+
 Build the default `FrontendPlugin` export with `buildPackFrontendVite` from
 `@oaw/plugin-api/build-vite`. The build replaces React, JSX, ReactDOM and runtime SDK
 imports with references to the host instances. Do not bundle another React,
@@ -82,3 +89,12 @@ positioning and keyboard dismissal. They preserve trigger layout, refs and event
 handlers. Use `Tooltip` for noninteractive hints and `Popover` for small interactive
 panels. Declare the matching adapter/manifest minimum; see the workspace design
 guide for examples and focus behavior.
+
+Plugin API 1.42 adds optional `host.credentials` for human configuration on
+Environment/Sandbox cards. `status()` returns configured flags; `set(reference,
+value, expectedRevision)` saves or removes a binding through existing backend
+checks. Secrets never belong in config, documents or `host.state`. The interface
+is absent in deployed Workspaces. See [credential configuration](../../docs/reference/plugin-frontend.md#human-credential-configuration).
+Content-owned surfaces can request `NodePresentation(content_controls="bottom", ...)`
+instead of the default side edge. The host reserves space and owns its controls;
+Pack CSS should style only Pack content. See [workspace design](../../docs/developers/workspace-design.md).

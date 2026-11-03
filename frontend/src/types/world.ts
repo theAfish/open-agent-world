@@ -8,6 +8,8 @@ export interface NodePresentation {
   states: readonly NodeSurfaceLevel[];
   initial: NodeSurfaceLevel;
   open: NodeSurfaceLevel;
+  /** Host controls for ui.content-surface.v1. Defaults to side. Plugin API 1.42. */
+  content_controls?: 'side' | 'bottom';
   sizes?: Partial<Record<NodeSurfaceLevel, { width: number; height: number }>>;
   /** Optional content sizing hints for one-shot workspace composition. */
   workspace_layout?: import('../workspace/workspaceLayoutMetadata').WorkspaceLayoutMetadata;

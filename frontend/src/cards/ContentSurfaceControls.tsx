@@ -17,6 +17,7 @@ export function ContentSurfaceControls({ card, level }: { card: WorldCard; level
   useLocale();
   const catalog = useWorldStore(state => state.catalog);
   const definition = catalog.node_types.find(item => item.id === card.type);
+  const bottom = definition?.presentation?.content_controls === 'bottom';
   const base = useNodeSurfaceStore(state => state.baseLevels[card.id]);
   const canCollapse = level !== 'preview' && collapsedSurface(cardPresentation(card, catalog), level, base) !== level;
   const close = () => {
@@ -25,7 +26,7 @@ export function ContentSurfaceControls({ card, level }: { card: WorldCard; level
   };
   return <aside className="content-surface-controls" aria-label={t('Card controls')}>
     <Popover label={t('Card details')} className="content-surface-menu-content"
-      placement={level === 'preview' && !definition?.traits.includes('ui.ellipse.v1') ? 'bottom' : 'right'}
+      placement={bottom ? 'top' : level === 'preview' && !definition?.traits.includes('ui.ellipse.v1') ? 'bottom' : 'right'}
       trigger={<button type="button" className="content-surface-menu-button nodrag nopan" aria-label={t('Card details')} title={t('Card details')}><MoreHorizontal size={16} aria-hidden="true" /></button>}>
         <CardName card={card} workspace label={definition?.label ?? card.type} />
         <dl><div><dt>{t('Status')}</dt><dd>{t(card.status.replaceAll('_', ' '))}</dd></div>
