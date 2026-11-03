@@ -341,6 +341,40 @@ def test_successful_transaction_and_explicit_data_rollback(installation):
     assert next(f.b.glob('replaced-data-*/instances/*/data/document.txt')).read_text() == 'new user data'
 
 
+@pytest.fixture
+def service_generator_installation(installation):
+    f = installation
+    name = 'backend/hosting/systemd.py'
+    source = (ROOT / name).read_bytes().replace(b'\r\n', b'\n')
+    for root, contents in ((f.app, source.replace(b'\n', b'\r\n')), (f.stage, source)):
+        (root / name).parent.mkdir(parents=True)
+        (root / name).write_bytes(contents)
+    current = remote.read(f.app / '.oaw-deployment.json')
+    current['source_files'][name] = remote.digest(f.app / name)
+    remote.write(f.app / '.oaw-deployment.json', current)
+    f.manifest['files'][name] = remote.digest(f.stage / name)
+    f.manifest['baseline_receipt'] = remote.digest(f.app / '.oaw-deployment.json')
+    remote.write(f.stage / 'release-manifest.json', f.manifest)
+    return f
+
+
+def test_service_generator_accepts_verified_windows_baseline_and_linux_candidate(service_generator_installation):
+    f = service_generator_installation
+    assert remote.plan(f.request)['to_commit'] == f.manifest['source_commit']
+
+
+def test_service_generator_still_rejects_functional_change_across_line_endings(service_generator_installation):
+    f = service_generator_installation
+    name = 'backend/hosting/systemd.py'
+    source = (f.stage / name).read_bytes()
+    assert b'NoNewPrivileges=yes' in source
+    (f.stage / name).write_bytes(source.replace(b'NoNewPrivileges=yes', b'NoNewPrivileges=no', 1))
+    f.manifest['files'][name] = remote.digest(f.stage / name)
+    remote.write(f.stage / 'release-manifest.json', f.manifest)
+    with pytest.raises(ValueError, match='systemd.py changed; update the host environment/service definitions'):
+        remote.plan(f.request)
+
+
 def test_migration_failure_restores_real_files_and_data(installation, monkeypatch):
     f = installation
     def fail_migration(*args, **kwargs):

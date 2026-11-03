@@ -76,6 +76,19 @@ attempts, expired/ambiguous artifacts and failed checks are rejected. Pipeline
 updates require independent review and a controller policy update to the exact
 new trusted revision.
 
+For a reviewed validation-pipeline update, stop the timer and let the active
+transaction finish before changing `trusted_revision`. Verify the current PR/run
+again under the new policy. If that attempt was previously recorded in `seen`
+only because its validation entrypoint changed, remove only that rejection to
+allow fresh admission. Preserve completed results, slot generation and in-flight
+state; never clear an unrelated rejection or replay an uncertain transaction.
+
+The service-generator compatibility guard permits verified copies that differ
+only by CRLF/LF line endings, as can occur between an initial Windows build and
+Linux CI. Raw payload/source inventory hashes remain mandatory. Any other
+generator byte change, including removal, still requires an explicit service
+upgrade. Python dependency/runtime compatibility checks remain unchanged.
+
 ## Exact installation change plan: approval required
 
 Before approval, fill the pins below from the reviewed implementation commit and
@@ -121,8 +134,22 @@ and the two unit files. Never copy a privileged executable out of a PR artifact.
    [timer](oaw-preview-controller.timer). Verify their syntax with
    `systemd-analyze verify`. The service runs the trusted controller with
    `/usr/bin/python3 -I -S`; never run it from an application checkout. Its write
-   paths cover only controller/Preview state and the systemd paths needed by the
-   existing transaction. Production paths are inaccessible to the service.
+   paths cover controller/Preview state and the systemd paths needed by the
+   existing transaction. App and release directories share one writable `/opt`
+   mount so runtime bundle promotion and rollback can use atomic renames.
+   Separate writable binds for those directories cause `EXDEV` even when the
+   underlying host filesystem is the same. Controller/token, execution runtime
+   and independently installed operator code/registration remain read-only;
+   the operator directory stays writable for atomic policy-file replacement.
+   Inventory `/opt` and add every unrelated existing entry to a root-owned
+   `oaw-preview-controller.service.d/10-opt-readonly.conf` drop-in. Keep that
+   host inventory private. Review this list again before adding other software
+   under `/opt`. Production paths remain inaccessible. The trusted controller
+   can create entries in the shared `/opt` parent; application code still runs
+   only under the separately reviewed nonroot namespaces.
+   Before activation, prove an empty-directory app-to-release rename and return,
+   synthetic policy replacement, denied controller/code/token write-open probes,
+   and denied production read-open probes under the exact unit properties.
 6. Check the exact disposable candidate before enabling deployment:
 
    ```sh

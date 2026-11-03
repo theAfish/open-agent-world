@@ -42,7 +42,8 @@ def create_preview_services(settings):
     registry = load_plugin_registry(data_root=settings.data_root, core_only=True,
                                     load_installed=False, load_entry_points=False)
     services = create_services(settings, plugins=registry)
-    services.run_manager.unavailable_runtime("google.adk", ValueError("Paid models are disabled in Preview"))
+    services.run_manager.unavailable_runtime("google.adk", ValueError("Paid models are disabled in Preview"),
+                                           phase="hosting_policy")
     if any(unsafe_host_configuration({"type": card.type, "config": card.config})
            for card in services.world.list_cards()):
         services.close()
