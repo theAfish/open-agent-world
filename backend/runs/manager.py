@@ -656,7 +656,7 @@ class RunManager:
         await provider.create_agent(self._agent_config(card))
         self._agent_provider_ids[card.id] = provider_id
 
-    def unavailable_runtime(self, provider_id, error):
+    def unavailable_runtime(self, provider_id, error, *, phase='runtime'):
         from backend.plugins.failures import raise_if_unsafe
         raise_if_unsafe(error)
         try:
@@ -668,10 +668,10 @@ class RunManager:
             raise error
         affected = set()
         if owner and owner != 'open-agent-world.core':
-            affected = self.plugins.mark_unavailable(owner, 'runtime', error, source='runtime_provider')
+            affected = self.plugins.mark_unavailable(owner, phase, error, source='runtime_provider')
         if not any(row['source'] == 'runtime_provider' and row['id'] == provider_id for row in self.plugins.load_failures):
             self.plugins.load_failures.append(dict(id=provider_id, owner=None, source='runtime_provider',
-                state='unavailable', phase='runtime', error=str(error), retry='repair_and_restart'))
+                state='unavailable', phase=phase, error=str(error), retry='repair_and_restart'))
         logger.error('Runtime provider %s unavailable: %s', provider_id, error)
         return affected
 

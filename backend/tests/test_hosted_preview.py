@@ -13,7 +13,8 @@ from starlette.websockets import WebSocketDisconnect
 from backend.hosting.accounts import AccountStore
 from backend.hosting.configuration import read_gateway_settings
 from backend.hosting.gateway import create_gateway
-from backend.hosting.preview import create_preview_app, initialize_preview, preview_units, require_nonroot
+from backend.hosting.preview import create_preview_app, create_preview_services, initialize_preview, preview_units, require_nonroot
+from backend.hosting.upgrades import migrate_profile
 from backend.hosting.worker import WorkerConfig, mint_worker_token
 from backend.tests.conversation_helpers import wait_for_conversation_delivery
 
@@ -103,6 +104,53 @@ def test_preview_denies_paid_cloud_and_cross_profile_authority(fixture, monkeypa
     with TestClient(create_preview_app(bob)) as client:
         private = json.loads((directory / "fixture-receipt.json").read_text())["fixtures"][0]["cards"]["note"]
         assert client.get("/api/nodes/" + private, headers=headers(bob)).status_code == 404
+
+
+def test_preview_upgrade_keeps_both_profiles_saved_data_and_core_only_policy(fixture):
+    directory, _, settings = fixture
+    for index, profile in enumerate(settings.profiles):
+        config = worker_config(directory, profile)
+        binding = (config.data_root / "hosted-profile.json").read_bytes()
+        content = f"Saved Preview data for fixture {index}"
+        with TestClient(create_preview_app(config)) as client:
+            response = client.post("/api/nodes", headers=headers(config), json={"type": "text", "content": content})
+            assert response.status_code == 201, response.text
+            saved = response.json()["id"]
+        result = asyncio.run(migrate_profile(config, services_factory=create_preview_services))
+        assert result == {"profile": config.profile_id, "ready": True, "changed_contracts": []}
+        assert (config.data_root / "hosted-profile.json").read_bytes() == binding
+        with TestClient(create_preview_app(config)) as client:
+            services = client.app.state.services
+            assert services.resources.read_text(saved).content == content
+            assert set(services.run_manager._providers) == {"core.mock"}
+            assert all(failure["phase"] == "hosting_policy" for failure in services.plugins.load_failures)
+            paid = client.post("/api/nodes", headers=headers(config),
+                               json={"type": "agent", "config": {"runtime_provider_id": "google.adk"}})
+            assert paid.status_code == 422, paid.text
+
+
+@pytest.mark.parametrize("provider,phase,error,message", [
+    ("unexpected.preview.runtime", None, ValueError, "Pack startup or migration failed"),
+    ("core.mock", "hosting_policy", RuntimeError, "Unexpected runtime startup failure"),
+])
+def test_preview_upgrade_still_aborts_for_unexpected_runtime_startup_failure(
+        fixture, monkeypatch, provider, phase, error, message):
+    from backend.services import ApplicationServices
+
+    directory, _, settings = fixture
+    config = worker_config(directory, settings.profiles[0])
+    binding = (config.data_root / "hosted-profile.json").read_bytes()
+    startup = ApplicationServices.startup
+
+    async def fail(services):
+        await startup(services)
+        arguments = {} if phase is None else {"phase": phase}
+        services.run_manager.unavailable_runtime(provider, RuntimeError("Unexpected runtime startup failure"), **arguments)
+
+    monkeypatch.setattr(ApplicationServices, "startup", fail)
+    with pytest.raises(error, match=message):
+        asyncio.run(migrate_profile(config, services_factory=create_preview_services))
+    assert (config.data_root / "hosted-profile.json").read_bytes() == binding
 
 
 @pytest.mark.asyncio

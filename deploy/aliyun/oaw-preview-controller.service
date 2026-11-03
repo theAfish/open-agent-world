@@ -1,0 +1,27 @@
+[Unit]
+Description=Authorize validated GitHub PR builds for the private OAW Preview
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/oaw-preview-controller
+ExecStart=/usr/bin/python3 -I -S /opt/oaw-preview-controller/preview_controller.py --config /opt/oaw-preview-controller/config.json poll
+StateDirectory=oaw-preview-controller
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=3h
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+# App and release directories need one mount view for atomic bundle promotion.
+ReadWritePaths=/var/lib/oaw-preview-controller /opt /srv/oaw-preview-hosting /etc/systemd/system /run
+ReadOnlyPaths=/opt/oaw-preview-controller /opt/oaw-preview-execution
+ReadOnlyPaths=/opt/oaw-release-operator-preview/bootstrap.py /opt/oaw-release-operator-preview/release_remote.py /opt/oaw-release-operator-preview/release_worker.py /opt/oaw-release-operator-preview/release_verify.py /opt/oaw-release-operator-preview/installation.json /opt/oaw-release-operator-preview/execution.json
+# Installation must mark every unrelated existing /opt entry read-only too.
+InaccessiblePaths=-/opt/open-agent-world -/srv/oaw-hosting -/opt/oaw-releases -/opt/oaw-release-operator
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

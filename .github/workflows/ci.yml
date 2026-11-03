@@ -183,6 +183,21 @@ jobs:
       - name: Verify shared UI in Chromium and WebKit
         working-directory: frontend
         run: npm run test:e2e:ui
+      - name: Package the validated private Preview candidate
+        if: github.repository == 'theAfish/open-agent-world' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'feat/aliyun-agentcore-poc' && github.event.pull_request.head.repo.full_name == github.repository
+        run: python scripts/aliyun_release.py ci-package --output .tmp/preview-candidate
+      - name: Upload the private Preview candidate
+        if: github.repository == 'theAfish/open-agent-world' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'feat/aliyun-agentcore-poc' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: oaw-preview-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .tmp/preview-candidate/bundle.tar.gz
+            .tmp/preview-candidate/release.json
+            .tmp/preview-candidate/candidate.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@v4

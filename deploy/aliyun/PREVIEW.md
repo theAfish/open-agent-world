@@ -5,6 +5,11 @@ operator. It does not enable automatic GitHub Actions deployment or production
 deployment. Server installation, service changes, DNS, TLS and nginx changes
 require the operator's explicit approval of the concrete plan.
 
+Phase 3A adds the optional [automated PR Preview controller](PR_PREVIEW.md),
+which reuses this slot and operator. Its independent installation, GitHub
+credential and timer activation require separate approval; application artifacts
+cannot install or enable it.
+
 The first iteration serves the real hosted login, canvas, Core cards, persisted
 workspaces, mock Conversation turns and authenticated event WebSockets. Paid
 models, model discovery/configuration, cloud Sandbox operations, external Packs
@@ -464,7 +469,7 @@ automatic PR deployment is enabled by this switch.
 
 ## Trusted version identity and switching
 
-The installed receipt currently identifies the source commit and release; it
+The Phase 2 installed receipt identifies the source commit and release; it
 does not establish GitHub PR/head/base/merge/run provenance. `/api/application`
 and application HTML are artifact-controlled and cannot establish trusted release
 identity.
@@ -475,22 +480,24 @@ manually reviewed status route and immutable response headers. They are template
 not installed routing. Before live acceptance, install a root-owned public status
 projection outside the app, replace every placeholder using the independently
 approved artifact and installed receipt, and review the matching nginx headers.
-Keep GitHub identity fields null in this phase. The application version is
+Keep GitHub identity fields null for manually admitted Phase 2 releases. Phase 3A
+publishes verified GitHub provenance through native deployment records and PR
+comments, independently of application HTML. The application version is
 independently reviewed release metadata, not proven by the application response.
 Do not expose the full receipt or source inventory. Rerender/review the status
 projection and headers after every switch; stale identity blocks acceptance.
 
 The browser-visible identity and immutable response header must agree with that
 receipt after cold start. Replacing the shared slot invalidates the previous
-occupant's acceptance. This phase accepts only manually approved, pinned trusted
+occupant's acceptance. Phase 2 accepts only manually approved, pinned trusted
 artifacts; it does not implement GitHub head/base/merge/run provenance validation
 or make an artifact's self-reported PR identity authoritative.
 
-The current operator uses a per-environment release-directory lock. The legacy
-production workflow can still run concurrently with Preview; there is no shared
-host deployment lock or controller lease yet. Manual scheduling must exclude
-overlapping production/Preview changes, and automated or concurrent deployment
-remains blocked until host-wide coordination is implemented and tested. Switching,
+The operator uses a per-environment release-directory lock. Phase 3A adds a
+durable host lease around automated Preview admission and the entire transaction.
+Manual scheduling must still exclude overlapping legacy production/Preview
+changes; the production deployment path remains disabled in the new operator.
+Switching,
 backup, interrupted-transaction recovery and rollback use the trusted operator's
 pinned protocol. An unknown transaction or stale occupant cannot be cleared by
 blindly retrying. Failed recovery keeps the affected environment stopped. Never
@@ -541,31 +548,19 @@ After explicit approval, record acceptance separately for each required boundary
 
 Do not mark the live slot accepted from an HTTP 200 or from the local tests alone.
 
-## Phase 3 checklist: remains disabled
+## Phase 3A: implementation and activation boundary
 
-No workflow, environment secret, repository protection rule or automatic
-deployment is enabled by this phase. The following is the proposed OAW controller
-design, with GitHub event/API semantics linked beside the relevant step.
+[PR_PREVIEW.md](PR_PREVIEW.md) contains the automated private Preview flow,
+credential permissions, exact installation change plan and disposable PR
+acceptance procedures. CI produces the exact tested artifact; the independently
+installed host controller verifies GitHub provenance and reports native
+deployment records/statuses. No ECS deployment credential enters a PR job.
+Installation and live activation remain explicit approval steps.
 
-| Stage/event | Required implementation and acceptance |
-| --- | --- |
-| Existing PR CI: `pull_request` | Keep builds secret-free. Record PR head SHA and base SHA separately from the synthetic merge commit tested by default checkout (`github.sha`, `refs/pull/<n>/merge`). Revalidate all three for the current open PR. A green old merge build is stale after either branch changes. [Event semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request), [contexts](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts) |
-| Trusted completion controller: `workflow_run: completed` | Maintain reviewed controller code on the default branch and require successful upstream completion. Never checkout PR code, import artifact helpers, restore untrusted executable caches, or execute artifact scripts in the privileged controller. Do not use `pull_request_target` to build/run PR code. [workflow_run security](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run), [secure use](https://docs.github.com/en/actions/reference/security/secure-use) |
-| Artifact acceptance | Query GitHub for repository/head-repository identity, contributor/branch allowlist, workflow ID, run ID, attempt, exact artifact ID, expiry and platform digest. Bind the downloaded bytes and inner manifest to the current PR/head/base/merge and current required checks. Reject forks and mismatches; an artifact-supplied PR number/SHA grants no authority. [Artifact API](https://docs.github.com/en/rest/actions/artifacts) |
-| GitHub `preview` environment | Configure separate least-privilege Preview deployment credentials and explicit approval/protection rules. Verify repository-plan support before relying on required reviewers. Create a transient, non-production deployment record for the exact accepted SHA; publish `queued`/`in_progress`/`success` with `environment_url` pointing to the shared Preview origin and `log_url` to the controller transaction evidence. [Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments), [deployments](https://docs.github.com/en/rest/deployments/deployments), [statuses](https://docs.github.com/en/rest/deployments/statuses) |
-| Shared slot and host transaction | Use one deployment concurrency group shared by Preview and production with `cancel-in-progress: false`; only disposable PR builds may cancel prior builds. Add a host-wide lease alongside environment transaction locks. After acquiring it, recheck latest PR/branch identity, installed baseline and slot generation before switching. Queue order is not proof of freshness. [Concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency) |
-| Production: target-branch `push` | After merging into the approved Alibaba target branch, build a fresh artifact from that push's actual `github.sha`; bind its required checks and merged PR. Do not promote the temporary PR merge artifact. Require target-branch protection and separately approved production environment credentials. Keep production deployment disabled until its root provisioning broker is independently reviewed. [Push event](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#push), [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches) |
-
-Before enabling either environment, test the controller's rejection and recovery
-paths: forged repository/workflow/manifest identity, expired artifacts, PR
-updates/closure, reruns/attempt changes, out-of-order completion, slot replacement,
-cancellation, disconnect and lease expiry. A replaced Preview deployment becomes
-`inactive`, and its previous acceptance cannot follow the new occupant. Publish
-failed installation/recovery as `failure` or `error` with a transaction log link;
-if rollback succeeds, report the restored release separately. Failed rollback
-keeps the environment stopped and requires inspection, with no blind retry or
-success status. These states use GitHub's
-[deployment status API](https://docs.github.com/en/rest/deployments/statuses).
+The controller refuses environment protections that require an Actions job gate;
+it cannot treat a REST deployment as evidence that native reviewers approved it.
+Existing repository review/branch protection is preserved. Production automation
+is outside Phase 3A and remains blocked on its root provisioning boundary.
 
 Real models/cloud require a separate approved design with dedicated limited
 Preview credentials, budget, profile identifiers and Volumes. Verify that Preview

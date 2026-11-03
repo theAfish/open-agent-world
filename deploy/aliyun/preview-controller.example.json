@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "repository": "theAfish/open-agent-world",
+  "repository_id": 1351393176,
+  "base_branch": "feat/aliyun-agentcore-poc",
+  "environment": "preview",
+  "trusted_revision": "REPLACE_WITH_REVIEWED_PHASE3A_COMMIT",
+  "enabled_after": "REPLACE_WITH_APPROVED_ACTIVATION_TIME_IN_UTC",
+  "token_file": "/opt/oaw-preview-controller/github-token",
+  "controller_files": {
+    "preview_controller.py": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+    "preview_deploy.py": "REPLACE_WITH_REVIEWED_FILE_SHA256"
+  },
+  "access_instructions": "Private SSH access only. From a reviewed checkout, run ./scripts/aliyun_preview_tunnel.ps1 -Server <your-authorized-SSH-login> -IdentityFile <your-local-key>, keep the terminal open, then visit http://127.0.0.1:18081. Obtain the disposable Preview account credentials from the maintainer through the existing private channel."
+}

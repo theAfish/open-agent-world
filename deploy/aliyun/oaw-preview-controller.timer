@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll GitHub Actions for validated private Preview candidates
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=10s
+Unit=oaw-preview-controller.service
+
+[Install]
+WantedBy=timers.target

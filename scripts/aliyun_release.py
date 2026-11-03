@@ -296,8 +296,14 @@ def build(cfg, tree, args):
         run(['node', 'node_modules/vitest/vitest.mjs', 'run', '--no-cache', *frontend], cwd=tree / 'frontend')
     npm(tree, 'run', 'build')
     clean(tree)
+    return package(cfg, tree, commit, comparison, routine=routine, tests=tests, frontend=frontend)
+
+
+def package(cfg, tree, commit, comparison, *, routine=False, tests=(), frontend=(), directory=None):
+    """Create the same portable archive for manual builds and verified CI output."""
     release = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + commit[:12] + '-' + uuid4().hex[:8]
-    directory = Path(cfg['output']) / release
+    fixed_directory = directory is not None
+    directory = Path(directory) if fixed_directory else Path(cfg['output']) / release
     directory.mkdir(parents=True)
     names = set(git(tree, 'ls-files').splitlines())
     for directory_ in [tree / 'frontend/dist', *(tree / 'plugins').glob('*/frontend/dist')]:
@@ -314,7 +320,7 @@ def build(cfg, tree, args):
         raise ValueError('Build artifacts cannot supply privileged operator files')
     manifest = {'version': 2, 'kind': 'oaw-build', 'source_commit': commit,
                 'comparison_commit': comparison, 'routine': routine, 'files': files,
-                'checks': {'backend': tests, 'frontend': frontend, 'full_ci': False}}
+                'checks': {'backend': list(tests), 'frontend': list(frontend), 'full_ci': False}}
     write(directory / 'release-manifest.json', manifest)
     archive = directory / 'bundle.tar.gz'
     with tarfile.open(archive, 'w:gz') as tar:
@@ -322,11 +328,60 @@ def build(cfg, tree, args):
             tar.add(tree / name, arcname=name, recursive=False)
         tar.add(directory / 'release-manifest.json', arcname='release-manifest.json', recursive=False)
     record = {'version': 2, 'kind': 'oaw-build', 'release': release, 'commit': commit, 'archive_sha256': sha(archive),
-              'pytest_paths': tests, 'frontend_tests': frontend, 'routine': routine, 'full_ci': False}
+              'pytest_paths': list(tests), 'frontend_tests': list(frontend), 'routine': routine, 'full_ci': False}
     write(directory / 'release.json', record)
-    write(Path(cfg['output']) / 'latest.json', record)
+    if not fixed_directory:
+        write(Path(cfg['output']) / 'latest.json', record)
     print(json.dumps({'prepared': release, 'commit': commit, 'archive': str(archive),
                       'next': 'deploy --release ' + release + ' --check'}), flush=True)
+    return directory
+
+
+def ci_package(tree, output):
+    """Package this PR job's already tested build; claims never grant deployment authority."""
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
+        raise ValueError('ci-package requires a GitHub Actions pull_request job')
+    event = read(os.environ['GITHUB_EVENT_PATH'])
+    pr, repository = event['pull_request'], event['repository']
+    repository_id = int(os.environ['GITHUB_REPOSITORY_ID'])
+    repository_name = os.environ['GITHUB_REPOSITORY']
+    if (repository['id'] != repository_id or repository['full_name'] != repository_name
+            or pr['head']['repo']['id'] != repository_id or pr['base']['repo']['id'] != repository_id):
+        raise ValueError('Preview artifacts require a same-repository PR')
+    if Path(git(tree, 'rev-parse', '--show-toplevel')).resolve() != tree.resolve():
+        raise ValueError('Build source must be the root of its Git checkout')
+    clean(tree)
+    commit = git(tree, 'rev-parse', 'HEAD')
+    candidate = {
+        'version': 1, 'repository': repository_name, 'repository_id': repository_id,
+        'pull_request': int(event['number']), 'head_sha': pr['head']['sha'],
+        'base_sha': pr['base']['sha'], 'base_ref': pr['base']['ref'],
+        'tested_commit': commit, 'run_id': int(os.environ['GITHUB_RUN_ID']),
+        'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+    }
+    if (commit != os.environ['GITHUB_SHA']
+            or any(not re.fullmatch(r'[a-f0-9]{40}', candidate[key])
+                   for key in ('head_sha', 'base_sha', 'tested_commit'))
+            or any(candidate[key] < 1 for key in ('repository_id', 'pull_request', 'run_id', 'run_attempt'))):
+        raise ValueError('Invalid PR build identity')
+    required = [tree / 'frontend/dist/index.html']
+    for manifest in sorted((tree / 'plugins').glob('*/frontend/plugin.json')):
+        dist = manifest.parent / 'dist'
+        receipt = dist / 'frontend-build.json'
+        if not receipt.is_file():
+            raise ValueError('Missing validated Pack build: ' + str(receipt))
+        built = read(receipt)
+        for name in [built['entry'], *(item['path'] for item in built['files'])]:
+            path = Path(name)
+            if path.is_absolute() or '..' in path.parts:
+                raise ValueError('Invalid Pack build output path')
+            required.append(dist / path)
+    if any(not path.is_file() or path.stat().st_size == 0 for path in required):
+        raise ValueError('Missing validated frontend build output')
+    directory = package({}, tree, commit, candidate['base_sha'], directory=output)
+    candidate['archive_sha256'] = read(directory / 'release.json')['archive_sha256']
+    write(directory / 'candidate.json', candidate)
+    (directory / 'release-manifest.json').unlink()
     return directory
 
 
@@ -496,6 +551,9 @@ def main(argv=None):
     build_parser.add_argument('--source', type=Path, default=Path.cwd())
     build_parser.add_argument('--output', type=Path, required=True)
     build_parser.add_argument('--python', default=sys.executable)
+    ci_parser = commands.add_parser('ci-package', help='Package this PR job\'s prebuilt output; no tests, rebuild or deployment')
+    ci_parser.add_argument('--source', type=Path, default=Path.cwd())
+    ci_parser.add_argument('--output', type=Path, required=True)
     for command in (prepare_parser, build_parser):
         command.add_argument('--compare-ref', help='Local base ref for test selection; CI supplies its event base, never a server baseline')
         command.add_argument('--pytest-path', action='append', default=[])
@@ -514,6 +572,9 @@ def main(argv=None):
     rollback_parser.add_argument('--release', required=True)
     rollback_parser.add_argument('--restore-data', action='store_true', help='Restore code AND the pre-update data snapshot; preserve replaced data privately')
     args = parser.parse_args(argv)
+    if args.command == 'ci-package':
+        ci_package(args.source.resolve(), args.output.resolve())
+        return
     if args.command == 'build':
         tree = args.source.resolve()
         cfg = {'repository': str(tree), 'output': str(args.output.resolve()), 'python': str(Path(args.python).resolve())}

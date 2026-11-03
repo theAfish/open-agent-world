@@ -668,7 +668,13 @@ def plan(request):
         p = destination(app, name)
         require(not p.exists() or digest(p) == manifest['files'][name], f'Unmanaged application file would be overwritten: {name}')
     for name in ('backend/hosting/systemd.py',):
-        require(current['source_files'].get(name) == manifest['files'].get(name),
+        unchanged = current['source_files'].get(name) == manifest['files'].get(name)
+        if not unchanged and name in current['source_files'] and name in manifest['files']:
+            # Both inventories were verified above. Windows-built baselines may
+            # differ from Linux CI only by Git's CRLF checkout conversion.
+            unchanged = ((app / name).read_bytes().replace(b'\r\n', b'\n') ==
+                         (b / 'stage' / name).read_bytes().replace(b'\r\n', b'\n'))
+        require(unchanged,
                 f'{name} changed; update the host environment/service definitions explicitly first')
     require(locked_dependencies(app) == locked_dependencies(b / 'stage'),
             'backend/uv.lock dependencies changed; update the host environment explicitly first')
@@ -795,7 +801,7 @@ def restore(request, b):
     verify_files(app, previous['source_files'])
 
 
-def transaction(request, *, rollback=False):
+def transaction(request, *, rollback=False, before_switch=None):
     app, hosting, releases = paths(request)
     b = release_dir(request)
     helpers = []
@@ -837,6 +843,10 @@ def transaction(request, *, rollback=False):
                 resume(request, config=config)
                 return save(b, 'rolled-back')
             plan(request)
+            # Only an independently installed Python controller may supply this
+            # callback. JSON requests and downloaded artifacts cannot select it.
+            if before_switch is not None:
+                before_switch()
             stopped = True
             stop(request, config=config)
             save(b, 'stopped')
