@@ -472,6 +472,8 @@ def test_migration_unit_preserves_existing_worker_boundary():
     result = remote.worker_unit(original, '/app', '/helper.py', 'oaw-hosted')
     for line in ('User=oaw-alice', 'ProtectSystem=strict', 'BindReadOnlyPaths=/profile', 'EnvironmentFile=/secret'):
         assert line in result
+    assert 'BindReadOnlyPaths=/helper.py:/run/oaw-hosted-release-worker.py' in result
+    assert ' -I /run/oaw-hosted-release-worker.py migrate ' in result
     assert 'Type=oneshot' in result and 'Restart=no' in result and 'ExecStart=/old' not in result
     with pytest.raises(ValueError, match='hardened'):
         remote.worker_unit(original.replace('User=oaw-alice', 'User=root'), '/app', '/helper.py', 'oaw-hosted')
@@ -792,6 +794,82 @@ def test_ci_package_rejects_missing_pack_build(ci_build, monkeypatch):
     client.git(f.repo, 'commit', '-m', 'add Pack')
     monkeypatch.setenv('GITHUB_SHA', client.git(f.repo, 'rev-parse', 'HEAD'))
     with pytest.raises(ValueError, match='Missing validated Pack build'):
+        client.ci_package(f.repo, f.candidate)
+    assert not f.candidate.exists()
+
+
+@pytest.fixture
+def integration_ci_build(ci_build, monkeypatch):
+    f = ci_build
+    before = f.record['commit']
+    (f.repo / 'main.py').write_bytes(b'resulting merged revision\n')
+    client.git(f.repo, 'add', 'main.py')
+    client.git(f.repo, 'commit', '-m', 'merged integration update')
+    commit = client.git(f.repo, 'rev-parse', 'HEAD')
+    event = {'repository': {'id': 1351393176, 'full_name': 'theAfish/open-agent-world'},
+             'ref': 'refs/heads/feat/aliyun-agentcore-poc', 'before': before,
+             'after': commit, 'deleted': False}
+    client.write(f.event_path, event)
+    for name, value in {'GITHUB_EVENT_NAME': 'push', 'GITHUB_REPOSITORY_ID': '1351393176',
+                        'GITHUB_REPOSITORY': 'theAfish/open-agent-world',
+                        'GITHUB_REF': event['ref'], 'GITHUB_SHA': commit}.items():
+        monkeypatch.setenv(name, value)
+    return SimpleNamespace(**{**vars(f), 'event': event}, commit=commit)
+
+
+def test_integration_ci_packages_the_actual_resulting_revision_without_rebuilding(integration_ci_build):
+    f = integration_ci_build
+    client.main(['ci-package', '--source', str(f.repo), '--output', str(f.candidate)])
+    record = client.read(f.candidate / 'release.json')
+    candidate = client.read(f.candidate / 'candidate.json')
+    assert candidate == {
+        'version': 1, 'repository': 'theAfish/open-agent-world', 'repository_id': 1351393176,
+        'event': 'push', 'head_sha': f.commit, 'base_ref': 'feat/aliyun-agentcore-poc',
+        'tested_commit': f.commit, 'run_id': 456, 'run_attempt': 2,
+        'archive_sha256': record['archive_sha256'],
+    }
+    assert record['commit'] != f.record['commit']
+    manifest = client.verify_artifact(f.candidate, record)
+    assert manifest['source_commit'] == f.commit
+    assert manifest['routine'] is False and manifest['checks']['full_ci'] is False
+    with tarfile.open(f.candidate / 'bundle.tar.gz') as archive:
+        assert archive.extractfile('main.py').read() == b'resulting merged revision\n'
+        assert archive.extractfile('frontend/dist/index.html').read() == (f.repo / 'frontend/dist/index.html').read_bytes()
+    original = (f.candidate / 'bundle.tar.gz').read_bytes()
+    with pytest.raises(FileExistsError):
+        client.ci_package(f.repo, f.candidate)
+    assert (f.candidate / 'bundle.tar.gz').read_bytes() == original
+
+
+@pytest.mark.parametrize('field,value', [
+    ('ref', 'refs/heads/dev'), ('after', 'c' * 40), ('deleted', True), ('deleted', None),
+])
+def test_integration_ci_rejects_other_pushes_and_deleted_refs(integration_ci_build, field, value):
+    f = integration_ci_build
+    f.event[field] = value
+    client.write(f.event_path, f.event)
+    with pytest.raises(ValueError, match='exact repository and integration branch push'):
+        client.ci_package(f.repo, f.candidate)
+    assert not f.candidate.exists()
+
+
+@pytest.mark.parametrize('field,value', [
+    ('GITHUB_REF', 'refs/heads/main'), ('GITHUB_RUN_ATTEMPT', '0'),
+])
+def test_integration_ci_rejects_mismatched_job_identity(integration_ci_build, monkeypatch, field, value):
+    monkeypatch.setenv(field, value)
+    with pytest.raises(ValueError, match='integration'):
+        client.ci_package(integration_ci_build.repo, integration_ci_build.candidate)
+    assert not integration_ci_build.candidate.exists()
+
+
+def test_integration_ci_rejects_forks_even_with_matching_event_and_environment(integration_ci_build, monkeypatch):
+    f = integration_ci_build
+    f.event['repository'] = {'id': 99, 'full_name': 'someone/open-agent-world'}
+    client.write(f.event_path, f.event)
+    monkeypatch.setenv('GITHUB_REPOSITORY_ID', '99')
+    monkeypatch.setenv('GITHUB_REPOSITORY', 'someone/open-agent-world')
+    with pytest.raises(ValueError, match='exact repository and integration branch push'):
         client.ci_package(f.repo, f.candidate)
     assert not f.candidate.exists()
 

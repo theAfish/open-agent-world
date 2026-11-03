@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll GitHub Actions for validated Ali integration candidates
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=10s
+Unit=oaw-integration-controller.service
+
+[Install]
+WantedBy=timers.target

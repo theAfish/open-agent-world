@@ -1,0 +1,28 @@
+[Unit]
+Description=Authorize validated integration push builds for the existing OAW service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/oaw-integration-controller
+ExecStart=/usr/bin/python3 -I -S /opt/oaw-integration-controller/preview_controller.py --environment aliyun-integration poll
+StateDirectory=oaw-integration-controller
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=3h
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+# App and release directories need one mount view for atomic bundle promotion.
+ReadWritePaths=/var/lib/oaw-integration-controller /opt /srv/oaw-hosting /etc/systemd/system /run
+ReadOnlyPaths=/opt/oaw-integration-controller /opt/oaw-production-execution /opt/oaw-provisioner
+ReadOnlyPaths=/opt/oaw-release-operator/bootstrap.py /opt/oaw-release-operator/release_remote.py /opt/oaw-release-operator/release_worker.py /opt/oaw-release-operator/release_verify.py /opt/oaw-release-operator/provisioner_guard.py /opt/oaw-release-operator/provisioner.json /opt/oaw-release-operator/installation.json /opt/oaw-release-operator/execution.json
+# Installation must add every unrelated existing /opt entry to ReadOnlyPaths.
+# Verify exact host paths before approval.
+InaccessiblePaths=-/opt/oaw-preview-app -/srv/oaw-preview-hosting -/opt/oaw-preview-releases -/opt/oaw-release-operator-preview -/opt/oaw-preview-controller
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

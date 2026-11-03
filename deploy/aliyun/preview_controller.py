@@ -1,4 +1,4 @@
-"""Independently installed Preview admission controller; never run from a PR checkout.
+"""Independently installed deployment admission controller; never run from a checkout.
 
 The timer polls GitHub's native PR checks. Only the installed release operator
 executes deployments; this process holds its host lease until rollback finishes.
@@ -40,6 +40,18 @@ PINNED_FILES = [value[0] for value in WORKFLOWS.values()] + [
 SHA = re.compile(r'[a-f0-9]{40}')
 DIGEST = re.compile(r'[a-f0-9]{64}')
 MAX_ARCHIVE = 512 * 1024 * 1024
+INTEGRATION = 'aliyun-integration'
+
+
+def integration(cfg):
+    return cfg.get('environment') == INTEGRATION
+
+
+def select_environment(environment):
+    global ROOT, STATE
+    if environment == INTEGRATION:
+        ROOT = Path('/opt/oaw-integration-controller')
+        STATE = Path('/var/lib/oaw-integration-controller')
 
 
 class Rejected(ValueError):
@@ -107,11 +119,31 @@ def timestamp(value):
 def configuration(path):
     require(Path(path) == ROOT / 'config.json', 'Use the independently installed controller configuration')
     cfg = read(trusted(path, private=True))
-    require(set(cfg) == {'version', 'repository', 'repository_id', 'base_branch', 'environment',
-                         'trusted_revision', 'enabled_after', 'token_file', 'controller_files', 'access_instructions'},
+    expected = {'version', 'repository', 'repository_id', 'base_branch', 'environment',
+                'trusted_revision', 'enabled_after', 'token_file', 'controller_files', 'access_instructions'}
+    if ROOT == Path('/opt/oaw-integration-controller'):
+        expected.add('activation')
+    require(set(cfg) == expected,
             'Invalid controller configuration fields')
     require(cfg['version'] == 1 and cfg['repository'] == REPOSITORY and cfg['repository_id'] == REPOSITORY_ID
-            and cfg['base_branch'] == BASE and cfg['environment'] == 'preview', 'Unapproved controller repository or target')
+            and cfg['base_branch'] == BASE and cfg['environment'] ==
+            (INTEGRATION if 'activation' in expected else 'preview'), 'Unapproved controller repository or target')
+    if integration(cfg):
+        activation = cfg['activation']
+        require(isinstance(activation, dict) and set(activation) == {'mode', 'approved_run', 'accepted_revision'}
+                and activation['mode'] in {'disabled', 'controlled', 'routine'}, 'Invalid integration activation policy')
+        approved = activation['approved_run']
+        require(approved is None or isinstance(approved, dict) and set(approved) ==
+                {'run_id', 'run_attempt', 'baseline_commit', 'baseline_receipt'}
+                and all(type(approved[key]) is int and approved[key] > 0 for key in ('run_id', 'run_attempt'))
+                and isinstance(approved['baseline_commit'], str) and SHA.fullmatch(approved['baseline_commit'])
+                and isinstance(approved['baseline_receipt'], str) and DIGEST.fullmatch(approved['baseline_receipt']),
+                'Controlled deployment requires one exact run and installed baseline')
+        accepted = activation['accepted_revision']
+        require(accepted is None or isinstance(accepted, str) and SHA.fullmatch(accepted), 'Invalid accepted integration revision')
+        require(activation['mode'] != 'controlled' or approved is not None, 'Controlled deployment approval is missing')
+        require(activation['mode'] != 'routine' or accepted is not None and approved is None,
+                'Routine deployment requires completed acceptance and no pending controlled approval')
     require(isinstance(cfg['trusted_revision'], str) and SHA.fullmatch(cfg['trusted_revision']),
             'Controller must pin an independently reviewed revision')
     timestamp(cfg['enabled_after'])
@@ -223,16 +255,19 @@ def same_repository(value):
     return isinstance(value, dict) and value.get('id') == REPOSITORY_ID and value.get('full_name') == REPOSITORY
 
 
-def successful_run(api, run, workflow_id, pr):
+def successful_run(api, run, workflow_id, pr, *, event='pull_request'):
     require(run.get('workflow_id') == workflow_id and run.get('path') == WORKFLOWS[workflow_id][0]
-            and run.get('event') == 'pull_request' and same_repository(run.get('repository'))
+            and run.get('event') == event and same_repository(run.get('repository'))
             and same_repository(run.get('head_repository')) and run.get('head_sha') == pr['head']['sha'],
             'Workflow identity or immutable run head differs')
-    association = run.get('pull_requests', [])
-    require(len(association) == 1 and association[0].get('number') == pr['number']
-            and association[0].get('base', {}).get('ref') == BASE
-            and association[0].get('base', {}).get('sha') == pr['base']['sha'],
-            'Workflow run does not belong to the current PR base')
+    if event == 'pull_request':
+        association = run.get('pull_requests', [])
+        require(len(association) == 1 and association[0].get('number') == pr['number']
+                and association[0].get('base', {}).get('ref') == BASE
+                and association[0].get('base', {}).get('sha') == pr['base']['sha'],
+                'Workflow run does not belong to the current PR base')
+    else:
+        require(run.get('head_branch') == BASE, 'Push run targets another branch')
     if run.get('status') != 'completed':
         raise Pending('Required workflow is still running')
     if run.get('conclusion') != 'success' and workflow_id != CI:
@@ -257,14 +292,16 @@ def successful_run(api, run, workflow_id, pr):
     return actual
 
 
-def workflow_runs(api, workflow_id, head_sha):
-    return api.pages(f'actions/workflows/{workflow_id}/runs?' + urlencode({'event': 'pull_request', 'head_sha': head_sha}),
+def workflow_runs(api, workflow_id, head_sha, *, event='pull_request'):
+    return api.pages(f'actions/workflows/{workflow_id}/runs?' + urlencode({'event': event, 'head_sha': head_sha}),
                      'workflow_runs')
 
 
 def admit(api, cfg, run_id, attempt):
     require(type(run_id) is int and run_id > 0 and type(attempt) is int and attempt > 0,
             'Deployment requests require positive run and attempt IDs')
+    if integration(cfg):
+        return admit_push(api, cfg, run_id, attempt)
     repo = api.get('')
     require(same_repository(repo), 'GitHub repository identity differs')
     environment = api.get('environments/preview')
@@ -333,6 +370,100 @@ def admit(api, cfg, run_id, attempt):
     return {'candidate': candidate, 'artifact': artifact, 'created_at': run['created_at']}
 
 
+def admit_push(api, cfg, run_id, attempt):
+    """Admit a fresh push build, independently of any earlier PR merge ref."""
+    require(same_repository(api.get('')), 'GitHub repository identity differs')
+    environment = api.get('environments/' + INTEGRATION)
+    require(environment.get('name') == INTEGRATION and environment.get('protection_rules') == []
+            and 'deployment_branch_policy' in environment and environment['deployment_branch_policy'] is None,
+            'Integration environment has protections this controller cannot enforce; use the root activation policy')
+    run = api.get(f'actions/runs/{run_id}')
+    require(run.get('run_attempt') == attempt, 'A newer workflow attempt supersedes this request')
+    require(timestamp(run['created_at']) >= timestamp(cfg['enabled_after']), 'Workflow predates integration authorization')
+    revision = api.get('git/ref/heads/' + BASE)['object']['sha']
+    require(isinstance(revision, str) and SHA.fullmatch(revision) and run.get('head_sha') == revision,
+            'Push candidate is obsolete; current integration branch differs')
+    subject = {'head': {'sha': revision}}
+    actual = successful_run(api, run, CI, subject, event='push')
+    for path in PINNED_FILES:
+        pinned = api.get('contents/' + path + '?' + urlencode({'ref': cfg['trusted_revision']}))
+        proposed = api.get('contents/' + path + '?' + urlencode({'ref': revision}))
+        require(pinned.get('type') == proposed.get('type') == 'file' and pinned.get('sha') == proposed.get('sha'),
+                'Push changes a trusted validation entrypoint: ' + path)
+    for workflow_id in WORKFLOWS:
+        runs = workflow_runs(api, workflow_id, revision, event='push')
+        require(runs, 'Required push workflow is missing')
+        latest = max(runs, key=lambda item: (timestamp(item['run_started_at']), item['id'], item['run_attempt']))
+        if workflow_id == CI:
+            require(latest['id'] == run_id and latest['run_attempt'] == attempt,
+                    'A newer CI run or attempt supersedes this request')
+        else:
+            successful_run(api, api.get(f'actions/runs/{latest["id"]}'), workflow_id, subject, event='push')
+    selected = [item for item in api.pages(f'actions/runs/{run_id}/artifacts', 'artifacts')
+                if item.get('name') == f'oaw-integration-{run_id}-{attempt}']
+    require(len(selected) == 1, 'Expected exactly one attempt-bound integration artifact')
+    artifact = selected[0]
+    provenance = artifact.get('workflow_run', {})
+    require(artifact.get('expired') is False and type(artifact.get('id')) is int
+            and isinstance(artifact.get('digest'), str) and re.fullmatch(r'sha256:[a-f0-9]{64}', artifact['digest'])
+            and all(provenance.get(key) == value for key, value in {
+                'id': run_id, 'repository_id': REPOSITORY_ID, 'head_repository_id': REPOSITORY_ID,
+                'head_sha': revision}.items()), 'Artifact provenance is invalid')
+    require(timestamp(actual['run_started_at']) <= timestamp(artifact['created_at'])
+            <= timestamp(artifact['updated_at']) <= timestamp(actual['updated_at']), 'Artifact belongs to another run attempt')
+    candidate = {'version': 1, 'repository': REPOSITORY, 'repository_id': REPOSITORY_ID,
+                 'event': 'push', 'head_sha': revision, 'base_ref': BASE, 'tested_commit': revision,
+                 'run_id': run_id, 'run_attempt': attempt}
+    fresh = api.get(f'actions/runs/{run_id}')
+    require(fresh.get('run_attempt') == attempt and fresh.get('status') == 'completed'
+            and fresh.get('conclusion') == 'success', 'Workflow attempt changed during admission')
+    require(api.get('git/ref/heads/' + BASE)['object']['sha'] == revision,
+            'Integration branch advanced during admission')
+    return {'candidate': candidate, 'artifact': artifact, 'created_at': run['created_at']}
+
+
+def routine_path(name):
+    """Only UI/assets, docs and tests are unattended; backend/runtime changes need review."""
+    if not isinstance(name, str) or not name or '\\' in name or any(part in {'', '.', '..'} for part in name.split('/')):
+        return False
+    return (name.startswith(('frontend/src/', 'frontend/public/', 'docs/', 'backend/tests/'))
+            or bool(re.fullmatch(r'(?:plugins|packs)/[^/]+/(?:frontend/src|frontend/public|tests)/.+', name)))
+
+
+def production_approval(api, cfg, state, candidate, baseline):
+    """Root-installed activation policy and authoritative diff, never artifact claims."""
+    activation = cfg['activation']
+    mode = activation['mode']
+    require(mode != 'disabled', 'Integration deployment is disabled pending maintainer approval')
+    require(isinstance(baseline.get('commit'), str) and SHA.fullmatch(baseline['commit'])
+            and isinstance(baseline.get('receipt'), str) and DIGEST.fullmatch(baseline['receipt']),
+            'Installed integration baseline has no verifiable receipt')
+    binding = {'run_id': candidate['run_id'], 'run_attempt': candidate['run_attempt'],
+               'baseline_commit': baseline['commit'], 'baseline_receipt': baseline['receipt']}
+    if mode == 'controlled':
+        require(activation['approved_run'] == binding, 'Controlled approval differs from this run or installed baseline')
+        return binding
+    require(mode == 'routine' and activation['accepted_revision'] == state.get('controlled_revision'),
+            'Complete controlled deployment acceptance before enabling routine updates')
+    previous = state.get('slot')
+    require(previous and previous.get('installed_commit') == baseline['commit']
+            and previous.get('result', {}).get('receipt', {}).get('receipt') == baseline['receipt'],
+            'Installed baseline differs from the accepted controller history; controlled acceptance is required')
+    comparison = api.get('compare/' + baseline['commit'] + '...' + candidate['tested_commit'])
+    require(comparison.get('status') == 'ahead'
+            and comparison.get('merge_base_commit', {}).get('sha') == baseline['commit'],
+            'Routine deployment must advance the exact installed baseline without conflicting history')
+    files = comparison.get('files')
+    require(isinstance(files, list) and 0 < len(files) < 300,
+            'Routine diff is empty or exceeds the complete GitHub comparison limit; explicit review required')
+    for item in files:
+        require(item.get('status') in {'added', 'modified', 'removed', 'renamed'}
+                and routine_path(item.get('filename'))
+                and (item.get('status') != 'renamed' or routine_path(item.get('previous_filename'))),
+                'Change requires explicit maintainer approval: ' + str(item.get('filename')))
+    return binding
+
+
 def unpack(archive, destination, admission):
     expected = admission['candidate']
     destination = Path(destination)
@@ -353,7 +484,8 @@ def unpack(archive, destination, admission):
     require(set(candidate) == set(expected) | {'archive_sha256'}
             and all(candidate.get(key) == value for key, value in expected.items())
             and type(candidate.get('version')) is int
-            and all(type(candidate.get(key)) is int for key in ('repository_id', 'pull_request', 'run_id', 'run_attempt')),
+            and all(type(candidate.get(key)) is int for key in
+                    ('repository_id', 'run_id', 'run_attempt') + (('pull_request',) if 'pull_request' in expected else ())),
             'Artifact candidate claims differ from authoritative GitHub provenance')
     digest = sha(destination / 'bundle.tar.gz')
     record = read(destination / 'release.json')
@@ -361,7 +493,8 @@ def unpack(archive, destination, admission):
             and record.get('version') == 2 and record.get('kind') == 'oaw-build'
             and record.get('commit') == expected['tested_commit'] and record.get('routine') is False,
             'Fixed build archive identity differs')
-    return {**candidate, 'artifact_id': admission['artifact']['id'], 'pr_number': candidate['pull_request'],
+    return {**candidate, 'artifact_id': admission['artifact']['id'],
+            **({'pr_number': candidate['pull_request']} if 'pull_request' in candidate else {}),
             'artifact_digest': admission['artifact']['digest']}
 
 
@@ -370,12 +503,17 @@ def log_url(candidate):
 
 
 def deployment_status(api, deployment_id, state, candidate, description):
-    api.post(f'deployments/{deployment_id}/statuses', {
-        'state': state, 'environment': 'preview', 'environment_url': 'http://127.0.0.1:18081',
-        'log_url': log_url(candidate), 'description': description[:140], 'auto_inactive': False})
+    body = {
+        'state': state, 'environment': candidate.get('environment', 'preview'),
+        'log_url': log_url(candidate), 'description': description[:140], 'auto_inactive': False}
+    if candidate.get('event') != 'push':
+        body['environment_url'] = 'http://127.0.0.1:18081'
+    api.post(f'deployments/{deployment_id}/statuses', body)
 
 
 def comment(api, cfg, candidate, state, actual_commit=None):
+    if candidate.get('event') == 'push':
+        return
     marker = '<!-- oaw-private-preview -->'
     body = (marker + '\nPrivate shared Preview: **' + state + '**.\n\n'
             f'PR #{candidate["pull_request"]}; head `{candidate["head_sha"]}`; tested merge `{candidate["tested_commit"]}`.\n\n'
@@ -395,7 +533,8 @@ def comment(api, cfg, candidate, state, actual_commit=None):
 
 def commit_status(api, candidate, state, description):
     api.post('statuses/' + candidate['head_sha'], {
-        'state': state, 'context': 'Private Preview', 'description': description[:140], 'target_url': log_url(candidate)})
+        'state': state, 'context': 'Ali integration deployment' if candidate.get('event') == 'push' else 'Private Preview',
+        'description': description[:140], 'target_url': log_url(candidate)})
 
 
 @contextlib.contextmanager
@@ -451,8 +590,29 @@ def reconcile(api, cfg, state, adapter, operator):
     raise Pending('Interrupted Preview transaction requires operator inspection; automatic deployments are frozen')
 
 
-def report_rejection(api, cfg, state, run, reason):
+def report_rejection(api, cfg, state, run, reason, *, installed_commit=None):
     """Report only against a current same-repository head; never overwrite a newer slot result."""
+    if integration(cfg):
+        if (run.get('event') != 'push' or run.get('workflow_id') != CI or run.get('head_branch') != BASE
+                or not same_repository(run.get('head_repository'))
+                or api.get('git/ref/heads/' + BASE)['object']['sha'] != run.get('head_sha')):
+            return
+        slot = state.get('slot')
+        identity = (run['id'], run['run_attempt'])
+        if (slot and slot['candidate'].get('head_sha') == run.get('head_sha')
+                and (slot['candidate']['run_id'], slot['candidate']['run_attempt']) >= identity):
+            return
+        fresh = api.get(f'actions/runs/{run["id"]}')
+        if fresh.get('run_attempt') != run['run_attempt']:
+            return
+        runs = workflow_runs(api, CI, run['head_sha'], event='push')
+        latest = max(runs, key=lambda item: (timestamp(item['run_started_at']), item['id'], item['run_attempt'])) if runs else None
+        if latest is None or (latest['id'], latest['run_attempt']) != identity:
+            return
+        candidate = {'event': 'push', 'head_sha': run['head_sha'], 'run_id': run['id'], 'run_attempt': run['run_attempt']}
+        installed = installed_commit or (state.get('slot') or {}).get('installed_commit', 'unknown')
+        commit_status(api, candidate, 'failure', 'Installed ' + installed + '; deployment gated: ' + reason)
+        return
     if run.get('event') != 'pull_request' or run.get('workflow_id') != CI or not same_repository(run.get('head_repository')):
         return
     links = run.get('pull_requests', [])
@@ -476,20 +636,22 @@ def finish(api, cfg, state, inflight, result):
     success = phase in {'complete', 'already-current'} and actual == candidate['tested_commit']
     if success:
         previous = state['slot']
-        deployment_status(api, deployment_id, 'success', candidate, 'Exact validated merge deployed to private shared Preview')
-        commit_status(api, candidate, 'success', 'Deployed merge ' + actual[:12] + ' to the shared private Preview')
+        deployment_status(api, deployment_id, 'success', candidate, 'Installed validated revision ' + actual)
+        commit_status(api, candidate, 'success', 'Installed validated revision ' + actual)
         comment(api, cfg, candidate, 'deployed', actual)
         if previous and previous['deployment_id'] != deployment_id:
             deployment_status(api, previous['deployment_id'], 'inactive', previous['candidate'],
-                              f'Shared slot now occupied by PR #{candidate["pull_request"]}')
-            if previous['candidate']['pull_request'] != candidate['pull_request']:
+                              'Replaced by installed revision ' + actual)
+            if candidate.get('event') != 'push' and previous['candidate']['pull_request'] != candidate['pull_request']:
                 comment(api, cfg, previous['candidate'], f'superseded by PR #{candidate["pull_request"]}', actual)
         state['generation'] += 1
-        state['slot'] = {**inflight, 'installed_commit': actual, 'generation': state['generation']}
+        state['slot'] = {**inflight, 'result': result, 'installed_commit': actual, 'generation': state['generation']}
+        if integration(cfg) and cfg['activation']['mode'] == 'controlled':
+            state['controlled_revision'] = actual
     else:
         deployment_status(api, deployment_id, 'failure' if phase != 'recovery-required' else 'error', candidate,
-                          'Deployment ' + phase + '; installed revision ' + actual[:12])
-        commit_status(api, candidate, 'failure', 'Preview ' + phase + '; installed ' + actual[:12])
+                          'Deployment ' + phase + '; installed revision ' + actual)
+        commit_status(api, candidate, 'failure', 'Deployment ' + phase + '; installed ' + actual)
         comment(api, cfg, candidate, phase, actual)
         if phase == 'recovery-required':
             raise Pending('Preview recovery is required; automatic deployments are frozen')
@@ -499,6 +661,8 @@ def finish(api, cfg, state, inflight, result):
 
 
 def process(api, cfg, state, adapter, operator, run_id, attempt, directory):
+    if integration(cfg):
+        require(cfg['activation']['mode'] != 'disabled', 'Integration deployment is disabled pending maintainer approval')
     admission = admit(api, cfg, run_id, attempt)
     slot = state['slot']
     order = (admission['created_at'], run_id)
@@ -507,12 +671,18 @@ def process(api, cfg, state, adapter, operator, run_id, attempt, directory):
     zip_path = Path(directory) / 'candidate.zip'
     api.download(admission['artifact'], zip_path)
     candidate = unpack(zip_path, Path(directory) / 'candidate', admission)
+    if integration(cfg):
+        baseline = operator['dispatch']({**adapter['TARGET'], 'action': 'status'})
+        binding = production_approval(api, cfg, state, candidate, baseline)
+        candidate.update(environment=INTEGRATION, baseline_commit=binding['baseline_commit'],
+                         baseline_receipt=binding['baseline_receipt'])
+    environment = INTEGRATION if integration(cfg) else 'preview'
     deployment = api.post('deployments', {
-        'ref': candidate['tested_commit'], 'environment': 'preview', 'auto_merge': False, 'required_contexts': [],
-        'transient_environment': True, 'production_environment': False,
-        'description': f'Private shared Preview for PR #{candidate["pull_request"]}',
+        'ref': candidate['tested_commit'], 'environment': environment, 'auto_merge': False, 'required_contexts': [],
+        'transient_environment': not integration(cfg), 'production_environment': integration(cfg),
+        'description': 'Ali integration release' if integration(cfg) else f'Private shared Preview for PR #{candidate["pull_request"]}',
         'payload': {key: candidate[key] for key in ('pull_request', 'head_sha', 'base_sha', 'tested_commit',
-                                                   'run_id', 'run_attempt', 'artifact_id', 'artifact_digest')},
+                                                   'run_id', 'run_attempt', 'artifact_id', 'artifact_digest') if key in candidate},
     })
     require(type(deployment.get('id')) is int and deployment.get('sha') == candidate['tested_commit'],
             'GitHub deployment identity differs')
@@ -520,8 +690,9 @@ def process(api, cfg, state, adapter, operator, run_id, attempt, directory):
                 'generation': state['generation'], 'phase': 'reporting-start'}
     state['inflight'] = inflight
     save_state(state)
-    deployment_status(api, deployment['id'], 'queued', candidate, 'Verified artifact waiting for the private shared slot')
-    commit_status(api, candidate, 'pending', 'Verified candidate preparing the shared private Preview')
+    destination = 'Ali integration service' if integration(cfg) else 'private shared Preview'
+    deployment_status(api, deployment['id'], 'queued', candidate, 'Verified artifact waiting for the ' + destination)
+    commit_status(api, candidate, 'pending', 'Verified candidate preparing the ' + destination)
     comment(api, cfg, candidate, 'deploying')
     generation = state['generation']
 
@@ -529,7 +700,13 @@ def process(api, cfg, state, adapter, operator, run_id, attempt, directory):
         require(load_state()['generation'] == generation, 'Shared-slot generation changed before deployment')
         fresh = admit(api, cfg, run_id, attempt)
         require(fresh == admission, 'Candidate became stale during deployment preparation')
-        deployment_status(api, deployment['id'], 'in_progress', candidate, 'Verified current PR; switching the private shared slot')
+        if integration(cfg):
+            require(configuration(ROOT / 'config.json') == cfg,
+                    'Integration activation policy changed before switching')
+            current = operator['dispatch']({**adapter['TARGET'], 'action': 'status'})
+            require(production_approval(api, cfg, state, candidate, current) == binding,
+                    'Integration activation approval or installed baseline changed before switching')
+        deployment_status(api, deployment['id'], 'in_progress', candidate, 'Verified current candidate; switching the registered service')
 
     inflight['phase'] = 'transaction'
     save_state(state)
@@ -540,6 +717,9 @@ def process(api, cfg, state, adapter, operator, run_id, attempt, directory):
 
 
 def poll(api, cfg, adapter):
+    if integration(cfg) and cfg['activation']['mode'] == 'disabled':
+        print(json.dumps({'environment': INTEGRATION, 'deployment': 'disabled'}), flush=True)
+        return
     with host_lease():
         operator = adapter['load_operator']()
         state = load_state()
@@ -551,11 +731,20 @@ def poll(api, cfg, adapter):
             reconcile(api, cfg, state, adapter, operator)
         adapter['recover'](operator)
         reconcile(api, cfg, state, adapter, operator)
-        suffix = f'actions/workflows/{CI}/runs?' + urlencode({'event': 'pull_request', 'created': '>=' + cfg['enabled_after']})
+        suffix = f'actions/workflows/{CI}/runs?' + urlencode({'event': 'push' if integration(cfg) else 'pull_request',
+                                                           'created': '>=' + cfg['enabled_after']})
         runs = sorted(api.pages(suffix, 'workflow_runs'), key=lambda item: (item['created_at'], item['id']), reverse=True)
         for run in runs:
+            if integration(cfg) and cfg['activation']['mode'] == 'controlled':
+                approved = cfg['activation']['approved_run']
+                if (run['id'], run['run_attempt']) != (approved['run_id'], approved['run_attempt']):
+                    continue
             key = f'{run["id"]}:{run["run_attempt"]}'
-            if key in state['seen'] or run.get('status') != 'completed' or run.get('conclusion') != 'success':
+            approved_rejection = (integration(cfg) and cfg['activation']['mode'] == 'controlled'
+                                  and isinstance(state['seen'].get(key), dict)
+                                  and set(state['seen'][key]) == {'rejected'})
+            if (key in state['seen'] and not approved_rejection
+                    or run.get('status') != 'completed' or run.get('conclusion') != 'success'):
                 continue
             try:
                 with tempfile.TemporaryDirectory(prefix='candidate-', dir=STATE) as directory:
@@ -563,8 +752,12 @@ def poll(api, cfg, adapter):
             except Rejected as error:
                 if state['inflight']:
                     raise Pending('Deployment started; inspect the trusted controller state before retrying') from error
-                report_rejection(api, cfg, state, run, str(error))
-                state['seen'][key] = str(error)
+                if integration(cfg):
+                    current = operator['dispatch']({**adapter['TARGET'], 'action': 'status'})
+                    report_rejection(api, cfg, state, run, str(error), installed_commit=current['commit'])
+                else:
+                    report_rejection(api, cfg, state, run, str(error))
+                state['seen'][key] = {'rejected': str(error)} if integration(cfg) else str(error)
                 save_state(state)
                 print(json.dumps({'run_id': run['id'], 'attempt': run['run_attempt'], 'rejected': str(error)}), flush=True)
             except Pending:
@@ -575,17 +768,19 @@ def poll(api, cfg, adapter):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, default=ROOT / 'config.json')
+    parser.add_argument('--environment', choices=['preview', INTEGRATION], default='preview')
+    parser.add_argument('--config', type=Path)
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('poll')
     verify = commands.add_parser('verify-run', help='Read-only admission/download verification; never authorize or deploy')
     verify.add_argument('run_id', type=int)
     verify.add_argument('attempt', type=int)
     args = parser.parse_args(argv)
+    select_environment(args.environment)
     require(os.name == 'posix' and os.geteuid() == 0 and sys.flags.isolated and sys.flags.no_site,
             'Run the installed controller as root using independent Python -I -S')
     require(Path(__file__).absolute() == ROOT / 'preview_controller.py', 'Use the independently installed controller')
-    cfg = configuration(args.config)
+    cfg = configuration(args.config or ROOT / 'config.json')
     api = GitHub(trusted(cfg['token_file'], private=True).read_text(encoding='utf-8').strip())
     if args.command == 'verify-run':
         with tempfile.TemporaryDirectory(prefix='verify-', dir=STATE) as directory:
@@ -596,6 +791,9 @@ def main(argv=None):
             print(json.dumps({'verified': candidate}), flush=True)
         return
     adapter = runpy.run_path(str(trusted(ROOT / 'preview_deploy.py')))
+    if integration(cfg):
+        adapter['integration_target']()
+        adapter = adapter['deploy'].__globals__
     poll(api, cfg, adapter)
 
 

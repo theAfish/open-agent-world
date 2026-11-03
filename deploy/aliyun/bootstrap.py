@@ -147,7 +147,7 @@ def validate(config):
         require(all(not source_root.is_relative_to(PurePosixPath(root))
                     and not PurePosixPath(root).is_relative_to(source_root) for root in [*roots, operator, sandbox]),
                 'Reviewed source staging must be outside every installation directory')
-    inventory(source, config.get('operator_files'), CORE_FILES)
+    inventory(source, config.get('operator_files'), operator_files(environment))
     approved = config.get('approved_artifacts', [])
     require(isinstance(approved, list) and all(isinstance(item, dict)
             and set(item) == {'archive_sha256', 'source_commit'}
@@ -175,6 +175,10 @@ def validate(config):
     else:
         require(preview is None, 'Production bootstrap cannot contain Preview setup')
     return source, operator, execution, registered, production, preview
+
+
+def operator_files(environment):
+    return CORE_FILES | ({'provisioner_guard.py'} if environment == 'production' else set())
 
 
 def protected_paths(production):
@@ -373,11 +377,20 @@ def install_operator(config, *, upgrade_from=None):
     with tempfile.TemporaryDirectory(prefix='.oaw-operator-', dir=destination.parent) as temporary:
         stage = Path(temporary)
         stage.chmod(0o700)
-        for name in CORE_FILES:
+        required_files = operator_files(execution['environment'])
+        for name in required_files:
             shutil.copyfile(source / name, stage / name)
             (stage / name).chmod(0o644)
         # Recheck copied bytes before installing any authority or running sysusers.
-        inventory(stage, config['operator_files'], CORE_FILES)
+        inventory(stage, config['operator_files'], required_files)
+        # Provisioner registration is independent of application artifacts. Keep
+        # it across a reviewed operator upgrade; a fresh install stays blocked
+        # until an administrator installs and reviews the complete closure.
+        provisioner = destination / 'provisioner.json'
+        if execution['environment'] == 'production' and provisioner.exists():
+            trusted(provisioner)
+            shutil.copyfile(provisioner, stage / 'provisioner.json')
+            (stage / 'provisioner.json').chmod(0o600)
         write_json(stage / 'execution.json', execution)
         write_json(stage / 'trusted-artifacts.json', {'version': 1, 'purpose': 'trusted_manual',
                    'target': registered, 'approved_artifacts': config.get('approved_artifacts', [])})

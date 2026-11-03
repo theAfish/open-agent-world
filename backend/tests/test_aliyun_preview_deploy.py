@@ -218,3 +218,25 @@ def test_operator_loader_checks_reviewed_inventory_before_executing_code(tmp_pat
     monkeypatch.setattr(adapter.runpy, 'run_path', lambda path: pytest.fail('Unreviewed operator was executed'))
     with pytest.raises(ValueError, match='reviewed inventory'):
         adapter.load_operator()
+
+
+def test_controller_approved_baseline_is_enforced_by_real_transaction_adapter(deployment):
+    f = deployment
+    baseline = f.operator['dispatch']({**adapter.TARGET, 'action': 'status'})
+    f.candidate.update(baseline_commit=baseline['commit'], baseline_receipt=baseline['receipt'])
+    result = adapter.deploy(f.operator, f.candidate, f.archive, lambda: None)
+    assert result['state']['phase'] == 'complete'
+    assert result['receipt']['commit'] == f.candidate['tested_commit']
+    assert f.policy.read_bytes() == f.original_policy
+
+
+@pytest.mark.parametrize('field', ['baseline_commit', 'baseline_receipt'])
+def test_changed_installed_baseline_cannot_consume_production_approval(deployment, field):
+    f = deployment
+    baseline = f.operator['dispatch']({**adapter.TARGET, 'action': 'status'})
+    f.candidate.update(baseline_commit=baseline['commit'], baseline_receipt=baseline['receipt'])
+    f.candidate[field] = '0' * len(f.candidate[field])
+    with pytest.raises(ValueError, match='baseline changed after trusted admission'):
+        adapter.deploy(f.operator, f.candidate, f.archive, lambda: pytest.fail('Rejected admission callback'))
+    assert f.policy.read_bytes() == f.original_policy and not f.journal.exists()
+    assert not any(command[:2] == ('systemctl', 'stop') for command in f.existing.commands)

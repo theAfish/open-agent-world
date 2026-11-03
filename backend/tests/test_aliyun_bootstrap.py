@@ -146,6 +146,9 @@ def test_private_preview_keeps_https_production_and_distinct_cookie_hostname(con
 def test_production_cannot_contain_private_preview_setup(config):
     config['execution'].update(environment='production', target=config['production_target'])
     config['operator'] = bootstrap.OPERATOR_ROOTS['production']
+    guard = Path(config['source_directory']) / 'provisioner_guard.py'
+    guard.write_text('independently reviewed guard')
+    config['operator_files'][guard.name] = bootstrap.digest(guard)
     config['preview'].update(public_origin='http://127.0.0.1:8765', allow_local_http=True)
     with pytest.raises(ValueError, match='cannot contain Preview setup'):
         bootstrap.plan(config)

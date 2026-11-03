@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "target": {
+    "app": "/opt/open-agent-world",
+    "hosting": "/srv/oaw-hosting",
+    "releases": "/opt/oaw-releases",
+    "service": "oaw-hosted"
+  },
+  "source": "/opt/oaw-provisioner/source",
+  "dependencies": "/opt/oaw-provisioner/dependencies",
+  "verify_user": "oaw-production-verify",
+  "source_revision": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_COMMIT",
+  "files": {
+    "source": {},
+    "dependencies": {}
+  }
+}
