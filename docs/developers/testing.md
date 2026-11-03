@@ -29,7 +29,10 @@ npm pack ./frontend/pack-sdk --pack-destination .outputs
 
 Create `.outputs` first if it does not exist. Run
 `scripts/build-external-greeter.py` with `backend/.venv/Scripts/python.exe` on
-Windows or `backend/.venv/bin/python` on Linux/macOS. It copies
+Windows or `backend/.venv/bin/python` on Linux/macOS, passing
+`--sdk .outputs/<filename printed by npm pack>`. CI reads the filename and version
+from `npm pack --json` and uses that exact archive for both external builders and
+the SDK upload. The Greeter builder copies
 `examples/packs/greeter` outside the host, builds the wheel/frontend and writes
 `.outputs/pack-acceptance/build.json`.
 

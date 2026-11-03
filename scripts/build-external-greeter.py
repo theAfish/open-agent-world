@@ -1,4 +1,5 @@
 """Build the repository fixture from a real directory outside the host checkout."""
+import argparse
 from pathlib import Path
 import json
 import os
@@ -9,14 +10,17 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--sdk', type=Path, required=True, help='SDK tarball produced by npm pack')
+args = parser.parse_args()
+sdk = args.sdk.resolve()
+if not sdk.is_file():
+    parser.error(f'SDK tarball not found: {sdk}')
 external = Path(tempfile.mkdtemp(prefix='oaw-external-greeter-'))
 shutil.copytree(root / 'examples/packs/greeter', external, dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns('dist', 'node_modules'))
 artifact_directory = root / '.outputs/pack-acceptance' / external.name
 artifact_directory.mkdir(parents=True)
-sdk = root / '.outputs/oaw-plugin-api-1.0.0.tgz'
-if not sdk.is_file():
-    raise SystemExit('Build and npm pack frontend/pack-sdk first (see docs/pack-distribution.md)')
 
 
 def run(args):

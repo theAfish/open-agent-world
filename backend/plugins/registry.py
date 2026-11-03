@@ -33,7 +33,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.41"
+PLUGIN_API_VERSION = "1.42"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -144,6 +144,8 @@ class NodePresentation(BaseModel):
     open: SurfaceLevel
     sizes: dict[SurfaceLevel, dict[str, float]] = Field(default_factory=dict)
     workspace_layout: WorkspaceLayoutMetadata | None = None
+    # Used by ui.content-surface.v1; the host reserves space for its controls.
+    content_controls: Literal["side", "bottom"] = "side"
 
     @classmethod
     def from_legacy_surfaces(cls, surfaces: dict[str, bool]) -> Self:
@@ -327,6 +329,7 @@ class NodeTypeDefinition:
     icon_asset: str | None = None
     frontend: Mapping[str, str] = field(default_factory=dict)
     traits: frozenset[str] = frozenset()
+    # Compatibility input for pre-presentation plugins. New plugins declare presentation.
     surfaces: Mapping[str, bool] = field(
         default_factory=lambda: {
             "preview": True,

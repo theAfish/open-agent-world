@@ -49,6 +49,7 @@ it("keeps selected folder files local until confirmation, then commits the named
     : name === "project_import_commit" ? { projects: [PROJECT], source_ids: ["file-1"] } : undefined);
   const file = new File(["# Report"], "report.md", { type: "text/markdown" });
   Object.defineProperty(file, "webkitRelativePath", { value: "root/A/report.md" });
+  fireEvent.click(within(screen.getByRole("group", { name: "Projects" })).getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByLabelText("Project folder"), { target: { files: [file] } });
   expect(await screen.findByText("root/A/report.md")).toBeTruthy();
   expect(action.mock.calls.some(([name]) => name === "project_import_preview" || name === "project_import_commit" || name === "ingest")).toBe(false);

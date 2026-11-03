@@ -1,4 +1,4 @@
-/* Content owns the top and bottom edges. Only this narrow edge belongs to the host. */
+/* Content owns its layout; the host reserves a narrow side or bottom edge. */
 .content-surface-controls { position: absolute; z-index: 5; inset: 0 auto 0 0; width: 32px; display: flex; flex-direction: column; align-items: center; padding: 7px 2px; box-sizing: border-box; color: var(--ink-soft); }
 .content-surface-grip { width: 100%; flex: 1; min-height: 32px; display: grid; place-items: center; cursor: grab; color: var(--ink-faint); touch-action: none; }
 .content-surface-grip:active { cursor: grabbing; }
@@ -22,6 +22,16 @@
 .node-surface.is-preview[data-content-surface] .node-preview-body > [data-material-layer] { height: 100%; }
 .node-workspace-window[data-content-surface] { position: relative; grid-template-rows: minmax(0, 1fr); grid-template-columns: 32px minmax(0, 1fr); border: 0; }
 .node-workspace-window[data-content-surface] > .workspace-content { grid-column: 2; }
+
+/* The host owns the whole control edge, including space and menu placement. */
+[data-content-surface][data-content-controls="bottom"] > .content-surface-controls { inset: auto 0 0; width: 100%; height: 32px; flex-direction: row; padding: 2px 7px; }
+[data-content-controls="bottom"] > .content-surface-controls .content-surface-grip { width: auto; height: 100%; min-width: 32px; min-height: 0; }
+[data-content-controls="bottom"] > .content-surface-controls .content-surface-grip svg { transform: rotate(90deg); }
+[data-content-controls="bottom"] > .content-surface-controls .content-surface-actions { display: flex; }
+.node-surface.is-inspector[data-content-controls="bottom"] > .node-inspector-content,
+.node-surface.is-preview[data-content-controls="bottom"] > .node-preview-content { inset: 0 0 32px; border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.node-workspace-window[data-content-controls="bottom"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 32px; }
+.node-workspace-window[data-content-controls="bottom"] > .workspace-content { grid-column: 1; grid-row: 1; }
 
 /* Native handles follow the elliptical rim, including diagonal drag starts. */
 .world-card[data-card-shape="ellipse"] > .semantic-handle { inset:0 !important; width:100% !important; height:100% !important; }

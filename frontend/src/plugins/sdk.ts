@@ -186,6 +186,14 @@ export interface PluginViewProps {
     setDataPersistence?: (value: "shared" | "session" | null) => Promise<void>;
     /** Present only in a deployed Workspace. Reuse the view and hide engineering controls. */
     deployment?: import('../workspace/WorkspaceAccess').PluginDeploymentAccess;
+    /** Human configuration of this Environment/Sandbox card. Plugin API 1.42.
+     * Only configured flags are readable. null removes a binding; revision is
+     * from readDocument(). Absent in deployed Workspaces and on other card types.
+     * Never put secrets in config, documents, durable state or drafts. */
+    credentials?: {
+      status(): Promise<Record<string, boolean>>;
+      set(reference: string, value: string | null, expectedRevision: number): Promise<{ configured: boolean }>;
+    };
     getInputs?(nodeId?:string): Promise<{id:string;name:string;kind:string;ready:boolean;detail:string}[]>;
     ensureXrdInput?(kind:'pattern'|'library'): Promise<string>;
     startXrdWorkflow?(file:File): Promise<void>;
