@@ -284,7 +284,7 @@ class SqlGraphStore:
             return [row[0] for row in connection.execute(query).all()]
 
     def clear_layer(self, layer):
-        """Drop one layer's elements, before rebuilding it from its published drafts."""
+        """Drop one layer's elements, before rebuilding it."""
         if layer not in LAYERS:
             raise ValueError(f"layer must be one of {LAYERS}")
         with self._engine.begin() as connection:

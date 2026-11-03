@@ -73,7 +73,7 @@ or render displays a local error instead of silently substituting another view.
 Views receive the current card, definition, surface level, and a card-scoped host
 adapter with `updateConfig` and `getAgentInfo`. Updates go through existing host
 actions and backend validation. The adapter also provides document reads/actions,
-transforms, file-viewer access, `openWorkspace(nodeId)`, `runAgent(nodeId, prompt)`
+transforms, file-viewer access, `openWorkspace(nodeId)`, `runAgent(nodeId, prompt, freshContext?)`
 and `onDocumentChange(listener)`. The latter observes future authoritative
 `node_document` mutations and returns an unsubscribe function; it must not be
 used as a replacement for a plugin's own initial document load. `SchemaFields` is

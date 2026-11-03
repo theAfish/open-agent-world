@@ -13,6 +13,7 @@ export const CanvasCardLayers = memo(function CanvasCardLayers() {
     let enabled: boolean | undefined;
     const update = () => {
       const state = store.getState();
+      root.style.setProperty('--canvas-ui-scale', String(1 / state.transform[2]));
       const next = state.transform[2] <= 0.75;
       if (next === enabled) return;
       enabled = next;
@@ -23,7 +24,7 @@ export const CanvasCardLayers = memo(function CanvasCardLayers() {
     const unsubscribe = store.subscribe((state, previous) => {
       if (state.transform[2] !== previous.transform[2]) update();
     });
-    return () => { unsubscribe(); delete root.dataset.cardLayers; };
+    return () => { unsubscribe(); delete root.dataset.cardLayers; root.style.removeProperty('--canvas-ui-scale'); };
   }, [root, store]);
   return null;
 });

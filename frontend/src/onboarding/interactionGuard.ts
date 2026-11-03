@@ -14,9 +14,11 @@ export function tutorialAllowsDrop(target: Element): boolean {
   return !scope || tutorialAllows(target, scope, 'drop');
 }
 /** Gesture target filtering complements event capture: a released drag must still clean up. */
-export function tutorialAllowsCanvasTarget(id: string, action: 'connect' | 'glue' | 'transform'): boolean {
+export function tutorialAllowsCanvasTarget(id: string, action: 'connect' | 'glue' | 'transform' | 'move'): boolean {
   const scope = currentScope?.();
   if (!scope?.active) return true;
+  if (action === 'move') return !scope.busy && ['move', 'glue', 'transform', 'promotion'].includes(scope.step.expects ?? '')
+    && (scope.step.participants ?? [scope.step.role ?? scope.step.target]).some(role => scope.refs[role] === id);
   if (!scope.busy && action === 'transform' && scope.step.expects === 'promotion')
     return (scope.step.participants ?? []).some(role => scope.refs[role] === id);
   if (scope.busy || scope.step.expects !== action) return false;

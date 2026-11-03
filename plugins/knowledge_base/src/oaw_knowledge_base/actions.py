@@ -14,6 +14,7 @@ import base64
 import binascii
 import json
 import logging
+import re
 import uuid
 from typing import Any, Literal
 
@@ -21,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import embeddings, graph_search
 from .client import DEFAULT_COLLECTION, collection, open_client
+from .entry_schema import expand, is_compact
 from .errors import KnowledgeError
 from .graph_store import LAYERS
 from .markdown import available_engines
@@ -97,6 +99,12 @@ def _scope(group, all_groups):
     return None if all_groups or group is None else group.id
 
 
+def project_removed(collection):
+    """Deleted projects keep their collection (MKB cannot delete a non-empty one) but
+    are tombstoned in its metadata and left out of every project listing."""
+    return bool((collection.metadata or {}).get("removed"))
+
+
 def _bounded(payload):
     # Round-trip through JSON so timestamps and UUIDs leave as plain strings and an
     # oversized result is rejected here rather than halfway through the response.
@@ -137,11 +145,11 @@ def overview(context, arguments):
     jobs = kb.jobs.list(limit=50)
     counts = kb.oaw_graph_store.counts(group_id=scope)
     default_group_id = str(group.id) if group else ""
-    project_items = kb.collections.list(limit=500)
+    project_items = [item for item in kb.collections.list(limit=500) if not project_removed(item)]
     projection_items = kb.oaw_projections.list(project_id=str(scope) if scope else None, limit=500)
     return _bounded({
         "collection": {"id": str(group.id) if group else "", "name": group.name if group else settings["collection_name"]},
-        "groups": [_group_json(item, default_group_id) for item in kb.collections.list(limit=500)],
+        "groups": [_group_json(item, default_group_id) for item in project_items],
         "settings": settings,
         "engines": available_engines(settings["mineru_base_url"] or None,
                                      resolve_secret=getattr(context, "resolve_secret", None),
@@ -531,13 +539,13 @@ def _schemas(context, request):
 
 
 def _validate_definition(definition):
-    if definition.get("type") != "object" or not isinstance(definition.get("properties"), dict):
-        raise KnowledgeError(
-            "definition must be a JSON Schema object with a properties map")
+    if definition.get("type", "object") != "object" or not isinstance(definition.get("properties"), dict):
+        raise KnowledgeError("definition must be an object with a properties map")
 
 
 def _check(definition, data):
     """Best-effort JSON Schema validation; ``jsonschema`` is optional."""
+    definition = expand(definition)
     try:
         import jsonschema
     except ImportError:
@@ -566,10 +574,26 @@ EXTRACT_INSTRUCTION = (
     "spreadsheet, a note) joined in order under '## File:' headings, plus the uploader's own "
     "notes. Project it onto the JSON Schema: produce one record per specimen, sample, run or "
     "table row the files describe, each with its fields filled from the document only. Leave a "
-    "field out rather than guess it. Reply with exactly this JSON shape: "
+    "field out rather than guess it. Use the schema's own property names: map what the files "
+    "state onto those properties (a column or label may be named differently), and do not add "
+    "properties of your own. Reply with exactly this JSON shape: "
     "{\"records\": [{\"name\": <short label, e.g. the sample id>, \"data\": <object matching the "
     "schema>, \"source_ids\": [<ids of the files this record was read from>], "
     "\"note\": <optional: where in the files it came from, or what was unclear>}]}.")
+
+
+COMPACT_RECORD = (
+    " The schema lists properties, each with a value type, an optional expected unit and a "
+    "description. In a record's data, give every property you can fill as an object "
+    "{\"value\": <a value of the property's type>, \"unit\": <the unit the files state, "
+    "optional>, \"description\": <optional note about this value>} under the property's name; "
+    "omit a property the files do not state.")
+
+
+def _extract_instruction(definition):
+    properties = definition.get("properties") if isinstance(definition, dict) else None
+    compact = isinstance(properties, dict) and any(is_compact(prop) for prop in properties.values())
+    return EXTRACT_INSTRUCTION + (COMPACT_RECORD if compact else "")
 
 
 def _experiment_schema(kb, schema_id):
@@ -817,8 +841,11 @@ def experiment_extract_prompt(context, arguments):
         "bundle_id": bundle["id"], "bundle_name": bundle["name"], "notes": bundle["notes"],
         "group_id": bundle["group_id"], "schema_id": str(schema.id), "schema_name": schema.name,
         "schema_version": schema.version, "system_prompt": schema.system_prompt,
+        # The compact form as stored: the expanded JSON Schema is several times longer, which
+        # pushes the whole result past the host's 8,000-character limit for what an agent sees
+        # in full, and the agent then gets only key names instead of the schema.
         "definition": schema.definition, "field_descriptions": schema.field_descriptions,
-        "instruction": EXTRACT_INSTRUCTION,
+        "instruction": _extract_instruction(schema.definition),
         "files": [{"source_id": f["source_id"], "filename": f["filename"]} for f in files],
         "total_characters": len(text), "offset": request.offset, "markdown": window,
         "has_more": request.offset + len(window) < len(text),
@@ -838,6 +865,9 @@ class ExperimentSave(Request):
     records: list[ExperimentRecordInput] = Field(min_length=1, max_length=500)
     # A re-extraction replaces the bundle's earlier drafts; published records stay.
     replace_drafts: bool = False
+    # The host's agent-free path stores a non-conforming record as a flagged draft a person
+    # can fix; an agent's save is rejected so it corrects the record itself.
+    keep_invalid: bool = Field(default=False, json_schema_extra=AGENT_HIDDEN)
 
 
 def _record_json(kb, record, *, sources=False):
@@ -865,17 +895,36 @@ def experiment_save(context, arguments):
     if not files:
         raise KnowledgeError("This experiment upload has no files to cite as evidence")
 
+    checks = [_check(schema.definition, item.data) for item in request.records]
+    if not request.keep_invalid:
+        wanted = list((schema.definition.get("properties") or {}))
+        problems = []
+        for item, check in zip(request.records, checks):
+            if check.get("valid") is not False:
+                continue
+            extra = [key for key in item.data if key not in wanted]
+            detail = (f"properties not in the schema: {', '.join(extra[:12])}" if extra
+                      else "; ".join((check.get("errors") or [f"missing {check.get('missing')}"])[:3]))
+            problems.append(f'"{item.name}": {detail}')
+        if problems:
+            raise KnowledgeError(
+                f"Nothing was saved: {len(problems)} record(s) do not match the schema "
+                f"({' | '.join(problems[:4])[:900]}). The schema's properties are: {', '.join(wanted)[:900]}. "
+                "Review the source again and fill those properties with the information you found "
+                "(a column or label may be named differently; each property is an object with value, "
+                "unit and description). Do not add properties of your own. Then call this tool again.")
+
     if request.replace_drafts:
         kb.oaw_experiments.delete_drafts_for_bundle(bundle["id"])
     saved = []
-    for item in request.records:
+    for item, check in zip(request.records, checks):
         cited = [source_id for source_id in item.source_ids if source_id in files]
         if item.source_ids and not cited:
             raise KnowledgeError(
                 f'Record "{item.name}" cites source_ids that are not in this upload')
         record = kb.oaw_experiments.create(
             group_id=bundle["group_id"], schema_id=str(schema.id), bundle_id=bundle["id"],
-            name=item.name, data=item.data, validation=_check(schema.definition, item.data),
+            name=item.name, data=item.data, validation=check,
             note=item.note, created_by=_actor(context))
         kb.oaw_experiments.set_sources(record["id"], [
             {"source_id": source_id, "artifact_id": files[source_id]["artifact_id"]}
@@ -996,11 +1045,12 @@ def experiment_review(context, arguments):
 
 
 class GraphQuery(Request):
-    operation: Literal["query", "traverse", "connect"] = "query"
+    operation: Literal["query", "traverse", "connect", "evidence"] = "query"
     # A question or keywords in plain words: concepts are found by name, alias or
     # acronym anywhere in it, and relations are ranked by how well they fit — by
     # words and, when the card has an embedding model, by meaning.
     query: str | None = Field(default=None, max_length=500)
+    # For traverse: the concept to expand, by id or (through ``names``/``query``) by name.
     entity_id: str | None = None
     # The fields below are for the graph map and the CLI; the agent only sees ``query``
     # and ``names``, so there is no lexical-only knob for it to pick by mistake.
@@ -1010,6 +1060,9 @@ class GraphQuery(Request):
     # ("dpa sse" finds "DPA-SSE"). ``name_contains`` is the single-needle form.
     names: list[str] = Field(default_factory=list, max_length=20)
     name_contains: str | None = Field(default=None, max_length=200, json_schema_extra=AGENT_HIDDEN)
+    # For evidence: which of the relations between the named concepts to read the sources of.
+    predicate: str | None = Field(default=None, max_length=200,
+        description="evidence only: the relation's predicate, to pick one of several between the named concepts")
     # A word to find in a relation's predicate, statement or snippet.
     relation_contains: str | None = Field(default=None, max_length=200, json_schema_extra=AGENT_HIDDEN)
     # The graph map's name filter passes false: a filter should not call a model.
@@ -1023,7 +1076,7 @@ class GraphQuery(Request):
     direction: Literal["both", "out", "in"] = "both"
     limit: int = Field(default=200, ge=1, le=1000)
     group_id: str | None = None
-    # "literature": facts an approved draft published. "experiment": insights
+    # "literature": concepts and relations from saved project graph results. "experiment": insights
     # published from experiment records and the record/field nodes they cite.
     # Omitted: the whole graph, both layers.
     layer: Literal["literature", "experiment"] | None = None
@@ -1052,10 +1105,12 @@ def _relation_json(relation, names):
     return {"id": str(relation.id), "type": relation.type, "predicate": relation.type,
             "source_id": str(relation.source_id), "source_name": names.get(str(relation.source_id)),
             "target_id": str(relation.target_id), "target_name": names.get(str(relation.target_id)),
-            "statement": properties.get("description") if isinstance(properties.get("description"), str) else None,
+            "statement": properties.get("description") if isinstance(properties.get("description"), str) else (
+                properties.get("snippet") if isinstance(properties.get("snippet"), str) else None),
             "evidence_level": properties.get("evidence_level") if isinstance(properties.get("evidence_level"), int) else None,
             "snippet": properties.get("snippet") if isinstance(properties.get("snippet"), str) else None,
             "source_ids": [v for v in properties.get("source_ids") or [] if isinstance(v, str)],
+            "source_files": [v for v in properties.get("source_files") or [] if isinstance(v, str)],
             "properties": properties}
 
 
@@ -1067,37 +1122,76 @@ COMPACT_ENTITIES = 8
 COMPACT_RELATIONS = 12
 COMPACT_BYTES = 7000
 STATEMENT_CHARS = 240
+NEIGHBOUR_CHARS = 100
+# Per-concept neighbourhoods: the first seeds get their best few relations, each with the
+# neighbour's description, so the agent can judge which hop is worth expanding.
+SEEDS = 4
+SEED_LINKS = 4
+LINK_CHARS = 140
+EVIDENCE_RELATIONS = 3
+EVIDENCE_SOURCES = 2
+EVIDENCE_CONTEXT = 400
+TRAVERSE_STARTS = 5
 
 
 def _clip(text, limit):
     return text if not isinstance(text, str) or len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-def _compact_entity(entity, matched):
+NEIGHBOUR_NAMES = 20
+
+
+def _neighbour_names(adjacency, identifier, by_id):
+    """The concepts one hop away, by name: the hint that tells the agent where a
+    traverse would lead without spending the budget on those relations."""
+    names = {by_id[other].name for _, other in adjacency.get(identifier, ()) if other in by_id}
+    return sorted(names, key=str.casefold)
+
+
+def _compact_entity(entity, matched, *, neighbours=None):
     properties = entity.properties or {}
     item = {"name": entity.name, "type": entity.type, "matched": matched}
+    if neighbours:
+        item["degree"] = len(neighbours)
+        item["neighbours"] = neighbours[:NEIGHBOUR_NAMES]
     if matched:
-        # Only a matched concept's background and id (for traverse) are worth the space.
+        # Only a matched concept's id (for traverse) and aliases are worth the space.
         item["id"] = str(entity.id)
         aliases = [a for a in properties.get("aliases") or [] if isinstance(a, str)]
         if aliases:
             item["aliases"] = aliases
-        if isinstance(properties.get("description"), str):
-            item["description"] = _clip(properties["description"], STATEMENT_CHARS)
+    if isinstance(properties.get("description"), str):
+        item["description"] = _clip(properties["description"], STATEMENT_CHARS if matched else NEIGHBOUR_CHARS)
     return item
+
+
+def _statement(properties):
+    """``(statement, other snippets)``: extraction often yields only the supporting
+    sentence, which is then the statement."""
+    description = properties.get("description") if isinstance(properties.get("description"), str) else None
+    snippets = [v for v in properties.get("snippets") or [] if isinstance(v, str)]
+    if isinstance(properties.get("snippet"), str):
+        snippets.insert(0, properties["snippet"])
+    snippets = list(dict.fromkeys(snippets))
+    return description or (snippets.pop(0) if snippets else None), snippets
 
 
 def _compact_relation(relation, names):
     properties = relation.properties or {}
     item = {"source_name": names.get(str(relation.source_id)), "predicate": relation.type,
             "target_name": names.get(str(relation.target_id))}
-    if isinstance(properties.get("description"), str):
-        item["statement"] = _clip(properties["description"], STATEMENT_CHARS)
+    statement, snippets = _statement(properties)
+    if statement:
+        item["statement"] = _clip(statement, STATEMENT_CHARS)
+    if snippets:
+        item["snippets"] = [_clip(snippets[0], STATEMENT_CHARS)]
     if isinstance(properties.get("evidence_level"), int):
         item["evidence_level"] = properties["evidence_level"]
-    sources = [v for v in properties.get("source_ids") or [] if isinstance(v, str)]
-    if sources:
-        item["source_ids"] = sources
+    # Evidence by filename: ids stay in the store and the full view; here they would
+    # only eat the budget.
+    files = [v for v in properties.get("source_files") or [] if isinstance(v, str)]
+    if files:
+        item["source_files"] = files
     return item
 
 
@@ -1106,10 +1200,43 @@ def _compact_path(first, second, path, names):
             "steps": [f"{names.get(str(r.source_id))} —{r.type}→ {names.get(str(r.target_id))}" for r in path]}
 
 
+def _links(seed, adjacency, scores, by_id):
+    """A seed concept's best relations for the question, each with the neighbour's own
+    description: what the agent needs to decide which neighbour is worth expanding."""
+    ranked = sorted(adjacency.get(seed, ()), key=lambda pair: (-scores.get(pair[0].id, 0), by_id[pair[1]].name.casefold()))
+    links = []
+    for relation, other in ranked[:SEED_LINKS]:
+        link = {"predicate": relation.type, "direction": "out" if relation.source_id == seed else "in",
+                "neighbour": by_id[other].name}
+        description = (by_id[other].properties or {}).get("description")
+        if isinstance(description, str):
+            link["neighbour_description"] = _clip(description, NEIGHBOUR_CHARS)
+        statement, _ = _statement(relation.properties or {})
+        if statement:
+            link["statement"] = _clip(statement, LINK_CHARS)
+        links.append(link)
+    return links
+
+
 def _fit(result, budget=COMPACT_BYTES):
-    """Drop the lowest-ranked relations, then unmatched concepts, until the JSON fits."""
+    """Drop the lowest-ranked relations, then the seed links, then unmatched concepts,
+    until the JSON fits."""
     def size():
         return len(json.dumps(result, ensure_ascii=False, default=str).encode("utf-8"))
+    def drop_link():
+        carriers = [e for e in result.get("entities", []) if e.get("links")]
+        if not carriers:
+            return False
+        max(reversed(carriers), key=lambda e: len(e["links"]))["links"].pop()
+        return True
+    while size() > budget and len(result.get("relations", [])) > 6:
+        result["relations"].pop()
+        result["truncated"] = True
+    while size() > budget and drop_link():
+        result["truncated"] = True
+    for entity in result.get("entities", []):
+        if "links" in entity and not entity["links"]:
+            del entity["links"]
     while size() > budget and len(result.get("relations", [])) > 1:
         result["relations"].pop()
         result["truncated"] = True
@@ -1171,7 +1298,12 @@ def _ranked_query(request, entities, relations, by_id, needles=(), semantic=None
     it names two or more concepts — the shortest paths between them."""
     entity_scores, relation_scores = graph_search.search(
         entities, relations, request.search_text(), needles=needles, semantic=semantic)
-    top = sorted(entity_scores, key=lambda identifier: -entity_scores[identifier])
+    def named_first(identifier):
+        # Equal scores keep the caller's order: names=[X, Y] answers X then Y.
+        hits = [index for index, needle in enumerate(needles)
+                if graph_search.name_score(by_id[identifier], needle) >= graph_search.STRONG]
+        return (-entity_scores[identifier], hits[0] if hits else len(needles))
+    top = sorted(entity_scores, key=named_first)
     top = top[:min(request.limit, max(QUERY_ENTITIES, len(needles)))]
     by_relation = {r.id: r for r in relations}
     best = sorted(relation_scores, key=lambda identifier: -relation_scores[identifier])
@@ -1185,8 +1317,12 @@ def _ranked_query(request, entities, relations, by_id, needles=(), semantic=None
             for second in named[index + 1:]:
                 paths += [(first, second, path) for path in graph_search.shortest_paths(
                     adjacency, first, second, max_depth=request.max_depth or CONNECT_DEPTH, max_paths=2)]
+    # The relations that make up a path carry the answer to "how are X and Y related":
+    # show them (with their statements) before the merely well-ranked ones.
+    rank = {identifier: position for position, identifier in enumerate(best)}
+    on_paths = sorted(dict.fromkeys(r.id for _, _, path in paths for r in path), key=lambda i: rank.get(i, len(rank)))
+    shown = [by_relation[i] for i in on_paths] + [r for r in shown if r.id not in set(on_paths)]
     ids = list(top) + [i for r in shown for i in (r.source_id, r.target_id)]
-    ids += [r.source_id for _, _, path in paths for r in path] + [r.target_id for _, _, path in paths for r in path]
     names = {str(identifier): by_id[identifier].name for identifier in ids if identifier in by_id}
     if request.full:
         result = _graph_result(ids, by_id, shown, set(top), matched=len(top),
@@ -1194,14 +1330,98 @@ def _ranked_query(request, entities, relations, by_id, needles=(), semantic=None
         result["connections"] = [_path_json(first, second, path, names) for first, second, path in paths]
         return result
     top, shown = top[:COMPACT_ENTITIES], shown[:COMPACT_RELATIONS]
+    strong = {i for i in top if entity_scores[i] >= graph_search.MATCHED}
     ordered = [i for i in dict.fromkeys(ids) if i in by_id]
     others = sorted((i for i in ordered if i not in set(top)), key=lambda i: by_id[i].name.casefold())
+    adjacency = graph_search.adjacency(relations)
+    seeds = [i for i in top if entity_scores[i] >= graph_search.MATCHED][:SEEDS]
+    entities_json = [_compact_entity(by_id[i], i in strong, neighbours=_neighbour_names(adjacency, i, by_id) if i in strong else None)
+                     for i in list(top) + others]
+    for item, identifier in zip(entities_json, list(top) + others):
+        if identifier in seeds:
+            item["links"] = _links(identifier, adjacency, relation_scores, by_id)
     return _fit(_bounded({
-        "entities": [_compact_entity(by_id[i], i in set(top)) for i in list(top) + others],
+        "entities": entities_json,
         "relations": [_compact_relation(r, names) for r in shown],
         "connections": [_compact_path(first, second, path, names) for first, second, path in paths],
         "matched": len(top), "truncated": len(best) > len(shown),
     }))
+
+
+def _traverse(request, entities, relations, by_id):
+    """Expand one concept's neighbourhood hop by hop: the agent names it (or passes its
+    id), and gets the relations at depth 1, then 2, … up to ``max_depth``. Farther hops
+    are dropped first when the result is trimmed, so the near neighbourhood survives."""
+    if request.entity_id:
+        start = by_id.get(_uuid(request.entity_id, "entity_id"))
+        if start is None:
+            raise KnowledgeError("entity_id is not in this graph scope")
+        starts, unresolved = [start], []
+    else:
+        wanted = request.names or [request.query or request.name_contains or ""]
+        starts, unresolved = [], []
+        for name in wanted[:TRAVERSE_STARTS]:
+            found = graph_search.resolve(entities, name)
+            if found and found[0] not in starts:
+                starts.append(found[0])
+            elif not found:
+                unresolved.append(name)
+        if not starts:
+            return {"start": None, "unresolved": ", ".join(unresolved), "hops": [], "entities": []}
+    start = starts[0]
+    depth = request.max_depth or 1
+    adjacency = graph_search.adjacency(relations)
+    visited, frontier, hops, seen = {s.id for s in starts}, [s.id for s in starts], [], set()
+    for level in range(1, depth + 1):
+        step, next_frontier = [], []
+        for identifier in frontier:
+            for relation, other in adjacency.get(identifier, ()):
+                if request.direction == "out" and relation.source_id != identifier:
+                    continue
+                if request.direction == "in" and relation.target_id != identifier:
+                    continue
+                if relation.id in seen:
+                    continue
+                seen.add(relation.id)
+                step.append(relation)
+                if other not in visited:
+                    visited.add(other)
+                    next_frontier.append(other)
+        if not step:
+            break
+        hops.append({"depth": level, "relations": step})
+        frontier = next_frontier
+    names = {str(identifier): by_id[identifier].name for identifier in visited if identifier in by_id}
+    if request.full:
+        shown = [r for hop in hops for r in hop["relations"]]
+        return _graph_result(list(visited), by_id, shown, {s.id for s in starts}, start=_entity_json(start, matched=True),
+                             hops=[{"depth": hop["depth"], "relations": [_relation_json(r, names) for r in hop["relations"]]} for hop in hops])
+    start_ids = {s.id for s in starts}
+    result = {"start": _compact_entity(start, True), "degree": len(adjacency.get(start.id, ())),
+              "hops": [{"depth": hop["depth"], "relations": [_compact_relation(r, names) for r in hop["relations"]]} for hop in hops],
+              "entities": [_compact_entity(by_id[i], False) for i in visited if i not in start_ids and i in by_id]}
+    if len(starts) > 1:
+        result["starts"] = [{**_compact_entity(s, True), "degree": len(adjacency.get(s.id, ()))} for s in starts]
+    if unresolved:
+        result["unresolved"] = unresolved
+    return _fit_hops(_bounded(result))
+
+
+def _fit_hops(result, budget=COMPACT_BYTES):
+    """Trim the farthest hop's relations first, then the entity list, until the JSON fits."""
+    def size():
+        return len(json.dumps(result, ensure_ascii=False, default=str).encode("utf-8"))
+    while size() > budget and result["hops"]:
+        last = result["hops"][-1]
+        if len(last["relations"]) > 1 and (len(result["hops"]) == 1 or len(last["relations"]) > 3):
+            last["relations"].pop()
+        else:
+            result["hops"].pop()
+        result["truncated"] = True
+    while size() > budget and result["entities"]:
+        result["entities"].pop()
+        result["truncated"] = True
+    return result
 
 
 def _connect(request, entities, relations, by_id):
@@ -1243,6 +1463,85 @@ def _connect(request, entities, relations, by_id):
                           "relations": relations, "entities": []}))
 
 
+def _locate(text, snippet):
+    """``(start, end)`` of a supporting sentence in the converted Markdown, tolerant of
+    line breaks and spacing; ``None`` when it cannot be found."""
+    index = text.find(snippet)
+    if index >= 0:
+        return index, index + len(snippet)
+    words = snippet.split()
+    if len(words) < 3:
+        return None
+    found = re.search(r"\s+".join(re.escape(word) for word in words[:12]), text)
+    return (found.start(), found.end()) if found else None
+
+
+def _passages(kb, properties, snippets):
+    """The original text around a relation's supporting sentences, read from the cited
+    files' Markdown. A source that cannot be read still reports its id."""
+    passages = []
+    for source_id in [v for v in properties.get("source_ids") or [] if isinstance(v, str)][:EVIDENCE_SOURCES]:
+        entry = {"source_id": source_id}
+        try:
+            record, text = _markdown_record(kb, source_id=source_id)
+        except (KnowledgeError, ValueError) as error:
+            entry["error"] = str(error)
+            passages.append(entry)
+            continue
+        entry["filename"] = (record.data or {}).get("filename")
+        for snippet in snippets:
+            span = _locate(text, snippet)
+            if span:
+                start, end = max(0, span[0] - EVIDENCE_CONTEXT), min(len(text), span[1] + EVIDENCE_CONTEXT)
+                entry.update(offset=start, text=text[start:end])
+                break
+        if "text" not in entry:
+            entry["note"] = "The supporting sentence was not found verbatim; read this file with knowledge_markdown."
+        passages.append(entry)
+    return passages
+
+
+def _evidence(kb, request, entities, relations, by_id):
+    """The sources behind a relation: its full statement and supporting sentences, and the
+    original text around them. Name the concept(s) it joins (and the predicate when they
+    are joined more than once). The last step of a graph question: use it only for
+    relations that matter to the answer."""
+    if not 1 <= len(request.names) <= 2:
+        raise KnowledgeError("evidence needs one or two concept names; add predicate to pick a relation")
+    sides = [graph_search.resolve(entities, name)[:3] for name in request.names]
+    missing = [name for name, side in zip(request.names, sides) if not side]
+    if missing:
+        return {"unresolved": missing, "relations": []}
+    first = {e.id for e in sides[0]}
+    second = {e.id for e in sides[-1]}
+    wanted = graph_search.phrase(request.predicate) if request.predicate else ""
+    matches = [r for r in relations
+               if (len(sides) == 1 and (r.source_id in first or r.target_id in first))
+               or (len(sides) == 2 and (r.source_id in first and r.target_id in second
+                                        or r.source_id in second and r.target_id in first))]
+    if wanted:
+        matches = [r for r in matches if wanted in graph_search.phrase(r.type)]
+    names = {str(i): e.name for i, e in by_id.items()}
+    items = []
+    for relation in matches[:EVIDENCE_RELATIONS]:
+        properties = relation.properties or {}
+        statement, snippets = _statement(properties)
+        item = _compact_relation(relation, names)
+        item.update(statement=statement, snippets=[_clip(v, 600) for v in snippets[:3]] or None,
+                    source_ids=[v for v in properties.get("source_ids") or [] if isinstance(v, str)],
+                    passages=_passages(kb, properties, ([statement] if statement else []) + snippets))
+        items.append({key: value for key, value in item.items() if value not in (None, [])})
+    result = {"relations": items, "total": len(matches), "truncated": len(matches) > len(items)}
+    # Passages are the bulk: trim the last ones until the host can read the whole result.
+    while len(json.dumps(result, ensure_ascii=False, default=str).encode("utf-8")) > COMPACT_BYTES:
+        carriers = [i for i in items if i.get("passages")]
+        if not carriers:
+            break
+        carriers[-1]["passages"].pop()
+        result["truncated"] = True
+    return _bounded(result)
+
+
 def graph(context, arguments):
     """The published graph. A name query answers "what does the base say about X (and
     Y)": the matching concepts, every relation touching them, and the concepts on the
@@ -1253,29 +1552,6 @@ def graph(context, arguments):
     kb = _client(context)
     scope = _any_group(request.group_id)
     store = kb.oaw_graph_store
-
-    if request.operation == "traverse":
-        if not request.entity_id:
-            raise KnowledgeError("entity_id is required to traverse")
-        start = _uuid(request.entity_id, "entity_id")
-        result = kb.graph.traverse(start, max_depth=request.max_depth or 1, direction=request.direction)
-        all_entities, all_relations = list(result.entities), list(result.relations)
-        if scope is not None or request.layer is not None:
-            # kb.graph.traverse walks the whole store; group and layer are tags on
-            # published elements (see graph_store.py), so narrow after the walk.
-            in_scope = {item.id for item in store.list_relations(group_id=scope, layer=request.layer)}
-            all_relations = [item for item in all_relations if item.id in in_scope]
-            kept_ids = {item.source_id for item in all_relations} | {item.target_id for item in all_relations} | {start}
-            all_entities = [item for item in all_entities if item.id in kept_ids]
-        entities = all_entities[:request.limit]
-        kept = {str(entity.id) for entity in entities}
-        names = {str(entity.id): entity.name for entity in entities}
-        return _bounded({
-            "entities": [_entity_json(e, matched=str(e.id) == str(start)) for e in entities],
-            "relations": [_relation_json(r, names) for r in all_relations
-                          if str(r.source_id) in kept and str(r.target_id) in kept][:request.limit * 5],
-            "truncated": len(all_entities) > len(entities),
-        })
 
     needles = [graph_search.phrase(value) for value in request.names]
     if request.name_contains:
@@ -1289,6 +1565,10 @@ def graph(context, arguments):
 
     if request.operation == "connect":
         return _connect(request, all_entities, all_relations, by_id)
+    if request.operation == "traverse":
+        return _traverse(request, all_entities, all_relations, by_id)
+    if request.operation == "evidence":
+        return _evidence(kb, request, all_entities, all_relations, by_id)
 
     # One search path. Whatever the caller typed — a question, concept names, a word
     # from a statement — is searched by words and (when the card has an embedding

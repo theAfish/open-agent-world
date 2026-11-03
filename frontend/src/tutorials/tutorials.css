@@ -1,5 +1,6 @@
 .progressive-tutorial { position: fixed; z-index: 155; right: 18px; bottom: 110px; width: min(370px, calc(100vw - 32px)); max-height: min(620px, calc(100dvh - 160px)); display: flex; flex-direction: column; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--panel-shadow); color: var(--ink); overflow: hidden; }
 .progressive-tutorial.is-document { width: min(560px, calc(100vw - 32px)); }
+.progressive-tutorial[hidden] { display: none; }
 .progressive-tutorial > header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .progressive-tutorial > header > span { flex: 1; overflow-wrap: anywhere; }
 .progressive-tutorial-content { padding: 14px 18px; overflow: auto; overscroll-behavior: contain; min-height: 0; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }

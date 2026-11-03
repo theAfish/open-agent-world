@@ -44,7 +44,7 @@ export function CardLibrary() {
   const legions = useWorldStore(state => state.legions);
   const deleteLegion = useWorldStore(state => state.deleteLegion);
   const modal = useRef<HTMLDialogElement>(null);
-  const tab = hosted && library.tab === 'store' ? 'packs' : library.tab;
+  const tab = library.tab;
   const setTab = (tab: Tab) => useCardLibrary.setState({ tab });
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("");
@@ -182,8 +182,8 @@ export function CardLibrary() {
       <button className="top-icon-button" aria-label={t("Close Library")} onClick={library.close}><X size={18} /></button></header>
     <div className="library-tab-row"><nav className="library-tabs" aria-label={t("Library sections")}>{([
       ["packs", t("Packs"), Archive], ["cards", t("Cards"), LibraryBig], ["store", t("Store"), Store],
-    ] as const).filter(([id]) => !hosted || id !== 'store').map(([id, label, Icon]) => <button key={id} data-tutorial={`library-tab-${id}`} className={tab === id ? "is-active" : ""} aria-pressed={tab === id} onClick={() => { setTab(id); setReveal(null); setInspectedPack(null); }}>
-      <Icon size={16} />{label}{id !== "store" && <small>{id === "packs" ? currentPacks.length : allCards.length}</small>}
+    ] as const).map(([id, label, Icon]) => <button key={id} data-tutorial={`library-tab-${id}`} className={tab === id ? "is-active" : ""} aria-pressed={tab === id} onClick={() => { setTab(id); setReveal(null); setInspectedPack(null); }}>
+      <Icon size={16} />{label}
     </button>)}</nav><div className="library-tab-actions" ref={setInstallAction} /></div>
     {library.error ? <div className="library-error" role="alert">{library.error}<button onClick={() => void library.refresh()}>{t("Refresh")}</button></div> : null}
     {!snapshot ? <div className="library-empty">{library.error ? t("Your collection could not be loaded.") : t("Loading your collection…")}</div> :
@@ -275,7 +275,7 @@ export function CardLibrary() {
             </footer>}
           </> : <div className="library-detail-empty"><span className="library-detail-formation"><Layers3 size={30} aria-hidden="true" /></span><h3>{t("Explore a card")}</h3><p>{t("Select a card to inspect its purpose and origin.")}</p><p>{t("Removing a card from a deck keeps it in your collection.")}</p></div>}</aside></OverlayScrollbarsComponent></div>
         </> : null}
-        {tab === "store" && library.open ? <PackStore installations={installations.state} /> : null}
+        {tab === "store" && library.open ? <PackStore installations={installations.state} readOnly={hosted} /> : null}
       </div>}
     {!hosted && <details className="library-developer-tools"><summary>{t('Developer tools')}</summary>
       <button className="library-text-button" onClick={() => setShowPackIDE(true)}>Pack IDE <span className="pack-ide-experimental" title={t('Visual authoring is still in development.')}>{t('Experimental')}</span></button>

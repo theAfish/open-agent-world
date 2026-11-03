@@ -1,8 +1,10 @@
 import { t } from "@oaw/plugin-api";
 import { useState } from "react";
 import type { ReactNode } from "react";
+import { valueSchema } from "./schemaModel";
 
-type Property = { type?: string | string[]; enum?: unknown[]; description?: string; title?: string };
+type Property = { type?: string | string[]; enum?: unknown[]; description?: string; title?: string;
+  value?: unknown; unit?: string };
 
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 
@@ -50,6 +52,18 @@ export function RecordForm({ definition, value, disabled, onChange }: {
         {property.description && <small>{property.description}</small>}
       </span>;
       const current = value[key];
+      // A { value, unit, description } property is a small form of its own.
+      if (typeof property.value === "string" || Array.isArray(property.value)) {
+        const entry = (current && typeof current === "object" && !Array.isArray(current) ? current : {}) as Record<string, unknown>;
+        const parts: Record<string, Property> = {
+          value: { ...valueSchema(property.value), title: t("Value") },
+          unit: { type: "string", title: t("Unit"), ...(property.unit ? { description: t("Expected: {v0}", { v0: property.unit }) } : {}) },
+          description: { type: "string", title: t("Note") },
+        };
+        return <fieldset key={key} className="knowledge-record-entry"><legend>{label}</legend>
+          <RecordForm definition={{ properties: parts, required: ["value"] }} value={entry} disabled={disabled}
+            onChange={next => set(key, Object.keys(next).length ? next : undefined)} /></fieldset>;
+      }
       if (property.enum) {
         return <label key={key} className="knowledge-record-field">{label}
           <select value={current === undefined ? "" : String(current)} disabled={disabled}

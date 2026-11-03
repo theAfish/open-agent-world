@@ -107,7 +107,7 @@ it("keeps streamed progress mounted during navigation and sends only selected pr
   fireEvent.click(screen.getByRole("button", { name: "projects" }));
   fireEvent.click(screen.getByRole("button", { name: "results" }));
   expect(screen.getByRole("progressbar")).toBe(bar);
-  expect(request).toHaveBeenCalledWith("knowledge/kb/project-space", { project_ids: ["project-a"], space_id: "space-a", rerun: false, model: "model-a" }, false, expect.any(Function));
+  expect(request).toHaveBeenCalledWith("knowledge/kb/project-space", { project_ids: ["project-a"], space_id: "space-a", rerun: false, model: "model-a" }, false, expect.any(Function), expect.any(AbortSignal));
   expect(action.mock.calls.some(([name]) => name === "projection_save")).toBe(false);
   release(); await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
 });
@@ -140,8 +140,52 @@ it("releases only its prepared projections when the connected agent cannot start
   fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: "space-a" } });
   fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
   await screen.findByRole("alert");
-  expect(runAgent).toHaveBeenCalledWith("agent-a", expect.stringContaining('["result-a"]'));
+  expect(runAgent).toHaveBeenCalledWith("agent-a", expect.stringContaining('["result-a"]'), true);
   expect(action.mock.calls.filter(([name]) => name === "projection_fail")).toEqual([["projection_fail", { projection_id: "result-a", error: "Agent unavailable" }]]);
+});
+
+const RUNNING = { ...RESULT, status: "running", data: null };
+
+it("stops an agent's extraction from the card: cancels the live run and fails the running result so it can be restarted", async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => url.includes("/runs?agent_id=")
+    ? [{ run_id: "run-live", status: "running", created_at: "2026-11-02T06:33:30Z" }, { run_id: "run-old", status: "succeeded", created_at: "2026-11-01T00:00:00Z" }] : {}, init }));
+  vi.stubGlobal("fetch", fetchMock);
+  let failed = false;
+  const { action } = setup(async (name, args) => name === "projections" ? args.operation === "get" ? { projection: failed ? { ...RESULT, status: "failed" } : RUNNING }
+    : { projections: [failed ? { ...RESULT, status: "failed", data: undefined } : { ...RUNNING, data: undefined }] }
+    : name === "projection_fail" ? (failed = true, { projection: { ...RESULT, status: "failed" } }) : undefined,
+    { agent: { id: "agent-a", name: "Researcher" }, host: { runAgent: vi.fn() } });
+  fireEvent.click(screen.getByRole("button", { name: "results" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Report A.*Reported values/ }));
+  const stop = (await screen.findAllByRole("button", { name: "Stop" })).at(-1)!;
+  fireEvent.click(stop);
+  await waitFor(() => expect(action).toHaveBeenCalledWith("projection_fail", { projection_id: "result-a", expected_revision: 1, error: "Stopped by the user. Retry extraction." }, undefined));
+  const cancels = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([url]) => url);
+  // Only the live run is cancelled; finished runs are left alone.
+  expect(cancels).toEqual(["/api/runs/run-live/cancel"]);
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+  expect((await screen.findAllByText("Extraction stopped")).length).toBeGreaterThan(0);
+  // The failed result can be retried straight away.
+  expect(await screen.findByRole("button", { name: "Retry extraction" })).not.toBeDisabled();
+});
+
+it("aborts a host-model extraction from the card without reporting an error", async () => {
+  let signal: AbortSignal | undefined;
+  const request = vi.fn((_path: string, _body: unknown, _deployed: boolean, onProgress?: (event: BridgeProgress) => void, abort?: AbortSignal) => {
+    signal = abort; onProgress?.({ stage: "projection", message: "Reading original Markdown", done: 0, total: 1 });
+    return new Promise<Record<string, unknown>>((_resolve, reject) => abort?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+  });
+  setup(undefined, { request });
+  fireEvent.click(await screen.findByLabelText("Select Report A"));
+  fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: "space-a" } });
+  fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
+  const stop = (await screen.findAllByRole("button", { name: "Stop" }))[0];
+  expect(signal?.aborted).toBe(false);
+  fireEvent.click(stop);
+  await waitFor(() => expect(signal?.aborted).toBe(true));
+  await screen.findAllByText("Extraction stopped");
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByRole("progressbar")).toBeNull();
 });
 
 it("uses the deployment bridge without offering a live model or engineering settings", async () => {
@@ -149,7 +193,7 @@ it("uses the deployment bridge without offering a live model or engineering sett
   fireEvent.click(await screen.findByLabelText("Select Report A"));
   fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: "space-a" } });
   fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
-  await waitFor(() => expect(request).toHaveBeenCalledWith("knowledge/kb/project-space", { project_ids: ["project-a"], space_id: "space-a", rerun: false }, true, expect.any(Function)));
+  await waitFor(() => expect(request).toHaveBeenCalledWith("knowledge/kb/project-space", { project_ids: ["project-a"], space_id: "space-a", rerun: false }, true, expect.any(Function), expect.any(AbortSignal)));
   expect(screen.queryByText("model-a")).toBeNull();
 });
 
@@ -165,7 +209,7 @@ it("loads additional project pages without losing the selected execution scope",
   expect(action).toHaveBeenCalledWith("projects", { limit: 200, offset: 200 });
   fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: "space-a" } });
   fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
-  await waitFor(() => expect(request).toHaveBeenCalledWith("knowledge/kb/project-space", expect.objectContaining({ project_ids: ["project-a", "project-b"] }), false, expect.any(Function)));
+  await waitFor(() => expect(request).toHaveBeenCalledWith("knowledge/kb/project-space", expect.objectContaining({ project_ids: ["project-a", "project-b"] }), false, expect.any(Function), expect.any(AbortSignal)));
 });
 
 it("does not mistake the previous completed agent run for a newly queued extraction", async () => {
@@ -182,4 +226,36 @@ it("does not mistake the previous completed agent run for a newly queued extract
   await waitFor(() => expect(runAgent).toHaveBeenCalledOnce());
   await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 3500 });
   expect(action.mock.calls.some(([name]) => name === "projection_fail")).toBe(false);
+});
+
+it("notices a finished agent run (status \"succeeded\") and shows the saved result instead of staying on running", async () => {
+  let runs: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => runs })));
+  const runAgent = vi.fn(async () => { runs = [{ run_id: "run-new", status: "succeeded", created_at: new Date(Date.now() + 1000).toISOString() }]; });
+  const { action } = setup(async (name, args) => name === "projection_prepare"
+    ? { projections: [{ ...RESULT, status: "running", disposition: "created" }] }
+    : name === "projections" && args.operation === "get" ? { projection: RESULT } : undefined,
+  { agent: { id: "agent-a", name: "Researcher" }, host: { runAgent } });
+  fireEvent.click(await screen.findByLabelText("Select Report A"));
+  fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: "space-a" } });
+  fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
+  await screen.findAllByText("The agent is extracting. Open the log to follow it.");
+  await waitFor(() => expect(screen.queryAllByText("The agent is extracting. Open the log to follow it.")).toHaveLength(0), { timeout: 5000 });
+  expect(action.mock.calls.some(([name]) => name === "projection_fail")).toBe(false);
+});
+
+it("shows each relation's description (or its supporting snippet) in the list and under a selected concept", async () => {
+  const GRAPH = { ...RESULT, kind: "graph", data: {
+    entities: [{ id: "a", name: "GAN" }, { id: "b", name: "CrystalGAN" }, { id: "c", name: "DiscoGAN" }],
+    relations: [{ source: "b", target: "a", predicate: "extends", description: "CrystalGAN adapts GAN to crystals." },
+      { source: "b", target: "c", predicate: "compared_with", snippet: "CrystalGAN was compared with DiscoGAN." }] } };
+  setup(async (name, args) => name === "projections" ? args.operation === "get" ? { projection: GRAPH } : { projections: [{ ...GRAPH, data: undefined }] } : undefined);
+  fireEvent.click(screen.getByRole("button", { name: "results" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Report A/ }));
+  expect(await screen.findByText("CrystalGAN adapts GAN to crystals.")).toBeTruthy();
+  expect(screen.getByText("CrystalGAN was compared with DiscoGAN.")).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: "GAN" })[0]);
+  // The selected concept lists its own relations with their descriptions.
+  expect((await screen.findAllByText("CrystalGAN adapts GAN to crystals.")).length).toBe(2);
+  expect(screen.getAllByText("CrystalGAN was compared with DiscoGAN.").length).toBe(1);
 });

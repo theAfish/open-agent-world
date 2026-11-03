@@ -1,4 +1,5 @@
 import { t, useLocale } from "../i18n";
+import { CardMoveGrip } from './CardMoveGrip';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { Bot, Box, FileText, X } from "lucide-react";
 import { memo, useEffect, useId, useRef, useMemo } from "react";
@@ -48,6 +49,7 @@ function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
   },[members.length,state,card.id,card.config,update,syncing]);
   const advance=()=>void update(card.id,{config:{...card.config,display_state:state==="minimal"?"stacked":"expanded"}});
   return <section className={`shadow-collection container-frame ${selected?"is-selected":""} ${releasing?"is-releasing":""}`} data-card-id={card.id} data-card-type={card.type} data-finish={normalizeCardFinish(card.finish)} data-state={state} aria-label={t("{v0} collection", { v0: String(card.name) })} style={{width,height,transform:live&&origin?`translate(${rect.x-origin.x}px,${rect.y-origin.y}px)`:undefined}}>
+    <CardMoveGrip />
     <svg className="shadow-silhouette" width={width} height={height} style={{overflow:"visible"}} aria-hidden="true">
       <defs><filter id={`feather-${id}`} x="-30%" y="-30%" width="160%" height="160%">
         <feGaussianBlur stdDeviation={SHADOW.feather}/>

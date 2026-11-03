@@ -17,8 +17,15 @@ value. The host follows Markdown windows and refuses to save success if the proj
 exceeds its direct-call input limit. An Agent can read the remaining windows through
 its tools. Failed or interrupted direct calls mark their owned runs failed.
 
-Experiment extraction and Insight bridges retain their record validation,
-source-evidence checks and human publication boundary.
+Experiment record extraction keeps its record validation, source-evidence checks and
+human publication boundary. Insights have no model bridge: they are an Agent's work.
+`knowledge_insight_prompt` returns the published records as raw JSON, paged
+(`has_more` / `next_offset`; each page is sized to stay under the roughly 8 KB an Agent
+sees inline), with each schema's definition and the Insights already
+published; it computes nothing. The Agent explores freely, does every calculation with
+its own tools (the Lab Manager preset connects a Sandbox for this), and saves drafts with
+`knowledge_insight_save`, recording how it got each number in `properties.method`. The
+plugin only checks that every cited record is a published record of the scope.
 
 ## Agent connections
 
@@ -58,8 +65,19 @@ violations are rejected before files reach the project inventory.
 5. Optional `knowledge_projection_review_prompt` / `knowledge_projection_revise`
    verifies or transforms an existing result with an expected revision and note.
 
-There is no Knowledge Frame. Project results and graph views are readable directly;
-publication of experiment records and Insights is a separate human decision.
+There is no Knowledge Frame. Project results are readable directly with
+`knowledge_projections`. Saving or revising a graph-kind result also rebuilds its
+concepts and relations in the card's one knowledge graph (merged across projects by
+name, evidence kept per file), so `knowledge_graph` search, traversal and the optional
+semantic index cover them. Publication of experiment records and Insights is a separate
+human decision.
+
+`knowledge_graph` is queried coarse to fine (the procedure is in the tool description):
+`query` returns the best-matching concepts, each with `links` (its best relations for the
+question, with each neighbour's description); `traverse` with several `names` expands the
+neighbours worth a look; `evidence` with the two concept names (and `predicate`) returns one
+relation's full statement and the original text around its supporting sentences. Original
+documents are read only for the relations that decide the answer.
 
 ## Persistence and failure behavior
 

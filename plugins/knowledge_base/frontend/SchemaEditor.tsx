@@ -1,6 +1,10 @@
 import { t, WorkspaceEmptyState } from "@oaw/plugin-api";
 import { useState } from "react";
 import { Plus } from "lucide-react";
+import { PropertyBuilder } from "./PropertyBuilder";
+import { SchemaDraftChat } from "./SchemaDraftChat";
+import type { DraftApi, DraftSchema } from "./SchemaDraftChat";
+import { entryProperty } from "./schemaModel";
 
 export type SchemaItem = { id: string; name: string; description: string | null; domain: string;
   kind: "literature" | "experiment"; version: number };
@@ -11,11 +15,10 @@ type Editor = { id: string; name: string; description: string; system_prompt: st
 
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 
-/** A starting point for a record schema: one specimen's fields, typed. */
-const TEMPLATE = { type: "object", required: ["name"], properties: {
-  name: { type: "string", description: "The specimen, material or sample" },
-  value: { type: "number", description: "The measured value" },
-  unit: { type: "string" } } };
+/** A starting point for a record schema: each property is a value / unit / description entry. */
+const TEMPLATE = { required: ["sample_name"], properties: {
+  sample_name: entryProperty({ description: "The specimen, material or sample" }),
+  ionic_conductivity: entryProperty({ kind: "number", unit: "mS/cm", description: "Measured ionic conductivity" }) } };
 
 type Props = {
   busy: boolean;
@@ -27,16 +30,21 @@ type Props = {
   onSaved: (schema: SchemaItem) => Promise<void> | void;
   /** When set, the toolbar is the parent's: only the "New schema" button is rendered here. */
   compact?: boolean;
+  /** Offers "Draft with AI" in the editor; omitted where no model can be called. */
+  draft?: DraftApi;
 };
 
 /** Experiment record fields. General project extraction is configured in Spaces. */
-export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, compact }: Props) {
+export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, compact, draft }: Props) {
   const [editor, setEditor] = useState<Editor>();
+  // The editor as it was before the last applied draft, so applying one can be undone.
+  const [undo, setUndo] = useState<Editor>();
 
-  const create = () => setEditor({ id: "", name: "", description: "", system_prompt: "", kind, definition: pretty(TEMPLATE) });
+  const create = () => { setUndo(undefined); setEditor({ id: "", name: "", description: "", system_prompt: "", kind, definition: pretty(TEMPLATE) }); };
 
   const open = (id: string) => perform(async () => {
     const detail = (await call("schemas", { operation: "get", schema_id: id })).schema as SchemaDetail;
+    setUndo(undefined);
     setEditor({ id: detail.id, name: detail.name, description: detail.description ?? "",
       system_prompt: detail.system_prompt, definition: pretty(detail.definition), kind: detail.kind });
   });
@@ -50,9 +58,19 @@ export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, comp
     const result = editor.id
       ? await call("schema_manage", { operation: "update", schema_id: editor.id, ...payload })
       : await call("schema_manage", { operation: "create", ...payload });
-    setEditor(undefined);
+    setEditor(undefined); setUndo(undefined);
     await onSaved(result.schema as SchemaItem);
   });
+
+  const applyDraft = (result: DraftSchema) => editor && (setUndo(editor), setEditor({ ...editor, name: result.name,
+    description: result.description, system_prompt: result.system_prompt, definition: pretty(result.definition) }));
+  const currentSchema = () => {
+    // An untouched new schema is only the starter template, which would bias the draft.
+    if (editor && !editor.id && !editor.name && !editor.system_prompt && editor.definition === pretty(TEMPLATE)) return undefined;
+    let definition: unknown;
+    try { definition = JSON.parse(editor?.definition ?? ""); } catch { definition = undefined; }
+    return { name: editor?.name ?? "", description: editor?.description ?? "", system_prompt: editor?.system_prompt ?? "", definition };
+  };
 
   return <div className="knowledge-schema-editor">
     <div className="knowledge-formbar">
@@ -76,6 +94,8 @@ export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, comp
         </ul>
       </div>
       {editor && <div className="knowledge-form">
+        {draft && <SchemaDraftChat key={`draft-${editor.id}`} api={draft} current={currentSchema} onApply={applyDraft}
+          defaultOpen={!editor.id} onUndo={undo ? () => { setEditor(undo); setUndo(undefined); } : undefined} />}
         <label>{t("Name")}<input aria-label={t("Name")} value={editor.name} disabled={busy}
           onChange={event => setEditor({ ...editor, name: event.target.value })} /></label>
         <label>{t("Description")}<input aria-label={t("Description")} value={editor.description} disabled={busy}
@@ -83,12 +103,12 @@ export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, comp
         <label>{t("System prompt")}<textarea aria-label={t("System prompt")} value={editor.system_prompt} disabled={busy} rows={3}
           placeholder={t("What the model should read out, in the words of your field…")}
           onChange={event => setEditor({ ...editor, system_prompt: event.target.value })} /></label>
-        <label>{t("JSON Schema definition")}<textarea aria-label={t("JSON Schema definition")} value={editor.definition} disabled={busy} rows={8} spellCheck={false}
-          onChange={event => setEditor({ ...editor, definition: event.target.value })} /></label>
+        <PropertyBuilder key={`properties-${editor.id}`} value={editor.definition} disabled={busy}
+          onChange={definition => setEditor({ ...editor, definition })} />
         <div className="knowledge-formbar">
           <button type="button" className="knowledge-primary" disabled={busy || !editor.name || !editor.system_prompt}
             onClick={() => void save()}>{editor.id ? t("Save schema") : t("Create schema")}</button>
-          <button type="button" disabled={busy} onClick={() => setEditor(undefined)}>{t("Cancel")}</button>
+          <button type="button" disabled={busy} onClick={() => { setEditor(undefined); setUndo(undefined); }}>{t("Cancel")}</button>
         </div>
       </div>}
     </div>

@@ -141,3 +141,37 @@
 @media (prefers-reduced-motion: reduce) {
   .legion-layout-divider { transition: none; }
 }
+
+/* Compact workspaces navigate the same live views one at a time. Desktop split
+   ratios and tab selection remain presentation data for the desktop renderer. */
+.legion-compact-navigation { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--chrome); }
+.legion-compact-navigation select { flex: 1; min-width: 0; width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background-color: var(--surface-solid); font: inherit; font-size: 14px; text-overflow: ellipsis; }
+.legion-compact-count { flex-shrink: 0; color: var(--ink-soft); font-size: 11px; font-variant-numeric: tabular-nums; }
+.legion-compact-navigation button { flex-shrink: 0; min-height: 44px; }
+.legion-compact-pane { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.legion-compact-pane[hidden] { display: none; }
+.legion-workspace[data-compact] .legion-window-titlebar { flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
+.legion-workspace[data-compact] .legion-window-mark { display: none; }
+.legion-workspace[data-compact] .legion-window-title { flex: 1 1 100%; }
+.legion-workspace[data-compact] .legion-window-titlebar button { min-height: 44px; height: auto; }
+.legion-workspace[data-compact] .legion-workspace-trigger { width: 100%; justify-content: space-between; }
+.legion-workspace[data-compact] .legion-window-main { flex-direction: column; }
+.legion-workspace[data-compact] .legion-layout-stage { overflow: hidden; }
+.legion-workspace[data-compact] .legion-layout-palette { flex: 0 1 45%; width: 100%; min-height: 120px; border-right: 0; border-bottom: 1px solid var(--line); }
+.legion-workspace[data-compact] .legion-layout-palette > header { padding-top: 10px; }
+.legion-workspace[data-compact] .legion-layout-card { min-height: 52px; }
+.legion-workspace[data-compact] .legion-section-row button { min-height: 44px; }
+.legion-workspace[data-compact] .legion-pane-titlebar { min-height: 44px; height: auto; }
+.legion-workspace[data-compact] .legion-workspace-pane:not(.is-editing) > .legion-pane-titlebar { display: none; }
+.legion-workspace[data-compact] .legion-workspace-tab { min-height: 44px; cursor: pointer; }
+.legion-workspace[data-compact] .legion-tab-close { width: 44px; height: 44px; }
+.legion-workspace[data-compact] .legion-dock-targets { inset: 52px 8px 8px; }
+.legion-workspace[data-compact] .legion-dock-targets button { min-height: 44px; min-width: 44px; }
+.legion-workspace[data-compact] .legion-add-tab { min-height: 44px; }
+.legion-workspace[data-compact] .workspace-section-controls { opacity: 1; pointer-events: auto; }
+.legion-workspace[data-compact] .workspace-section-controls button { min-height: 44px; min-width: 44px; }
+.legion-workspace[data-compact] .legion-window-footer { gap: 6px; padding: 5px 10px; }
+.legion-workspace[data-compact] .legion-footer-hint { display: none; }
+.legion-workspace[data-compact] .legion-workspace-preferences { margin-left: auto; }
+.legion-workspace[data-compact] .legion-workspace-preferences button { width: 44px; height: 44px; }
+.legion-compact-compose { display: flex; flex-shrink: 0; flex-wrap: wrap; gap: 6px; padding: 10px; }

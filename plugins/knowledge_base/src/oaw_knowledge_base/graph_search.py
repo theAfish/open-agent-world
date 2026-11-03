@@ -16,6 +16,9 @@ _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 RRF_K = 60
 # A name phrase found inside the query, or an acronym equal to a query word.
 STRONG = 2
+# A concept counts as matched from an acronym, a semantic hit or two shared words up;
+# a single word shared with a description is only a neighbour.
+MATCHED = 1
 
 _STOP_WORDS = frozenset("""
 a an the and or of in on at to for from by with as is are was were be been it its this that

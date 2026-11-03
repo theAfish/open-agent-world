@@ -1,0 +1,108 @@
+:root {
+  --app-height: 100dvh;
+  --app-top: 0px;
+  --app-bottom: 0px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --screen-top: max(10px, var(--safe-top));
+  --screen-right: max(10px, var(--safe-right));
+  --screen-bottom: max(10px, var(--safe-bottom));
+  --screen-left: max(10px, var(--safe-left));
+  --touch-target: 44px;
+  --touch-gap: 8px;
+  --press-duration: 100ms;
+}
+
+.world-shell { top: var(--app-top); height: var(--app-height); }
+
+/* Restrict press feedback to controls: never transform a canvas/drag surface. */
+:root[data-touch-input="true"] :is(.icon-button, .top-icon-button, .primary-button, .secondary-button, .react-flow__controls-button):not(:where(.react-flow__viewport *)) {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+:root[data-touch-input="true"] :is(.icon-button, .top-icon-button, .primary-button, .secondary-button):not(:disabled):not(:where(.react-flow__viewport *)):active {
+  transform: scale(.96);
+  transition: transform var(--press-duration) ease-out;
+}
+:root[data-input="touch"] :is(.icon-button, .top-icon-button, .primary-button, .secondary-button):not(:active):hover { transform: none; }
+:root[data-touch-input="true"] .ui-select-option { min-height: var(--touch-target); padding: 10px 12px; }
+:root[data-touch-input="true"] .top-bar { width: 306px; }
+:root[data-touch-input="true"] .world-minimap.react-flow__minimap { right: calc(var(--screen-right) + 56px); }
+
+/* Opt in only on non-text gesture surfaces; ordinary text stays selectable. */
+[data-touch-hold] { -webkit-touch-callout: none; user-select: none; }
+[data-touch-hold="active"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  animation: touch-hold-recognized 180ms ease-out;
+}
+@keyframes touch-hold-recognized {
+  from { filter: brightness(1.12); }
+  to { filter: brightness(1); }
+}
+
+/* First consumers of safe/visible viewport metrics. Canvas content keeps its
+   authored dimensions; full-screen card presentation is a separate change. */
+:root[data-layout="compact"] :is(.dialog-backdrop, .settings-backdrop, .ui-modal-backdrop) {
+  top: var(--app-top);
+  bottom: var(--app-bottom);
+  padding: var(--screen-top) var(--screen-right) var(--screen-bottom) var(--screen-left);
+}
+:root[data-layout="compact"] :is(.connection-dialog, .settings-dialog, .ui-modal) {
+  max-width: 100%;
+  max-height: calc(var(--app-height) - var(--screen-top) - var(--screen-bottom));
+}
+:root[data-layout="compact"] .connection-dialog { overflow-y: auto; overscroll-behavior: contain; }
+:root[data-layout="compact"] .legion-workspace {
+  inset: calc(var(--app-top) + var(--safe-top)) var(--safe-right) calc(var(--app-bottom) + var(--safe-bottom)) var(--safe-left);
+  width: auto;
+  height: auto;
+  margin: 0;
+  border-radius: 0;
+}
+:root[data-layout="compact"] .card-library-modal {
+  top: calc(var(--app-top) + var(--screen-top));
+  bottom: calc(var(--app-bottom) + var(--screen-bottom) + var(--library-deck-space, 164px));
+  max-height: calc(var(--app-height) - var(--screen-top) - var(--screen-bottom));
+}
+:root[data-layout="compact"] :is(.hosted-login, .deployment-login) {
+  min-height: var(--app-height);
+  padding: max(20px, var(--safe-top)) max(20px, var(--safe-right)) max(20px, var(--safe-bottom)) max(20px, var(--safe-left));
+}
+:root[data-layout="compact"][data-touch-input="true"] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), textarea, select):not(:where(.react-flow__viewport *)) {
+  font-size: max(16px, 1em);
+  min-height: var(--touch-target);
+}
+
+/* Grow both the touch targets and their containing HUD, keeping the corner
+   panels apart. A touch-enabled laptop can still have a regular layout. */
+@media (max-width: 1250px) {
+  :root[data-touch-input="true"] .top-bar {
+    width: 56px;
+    padding: 5px;
+    top: var(--screen-top);
+    left: var(--screen-left);
+    max-height: max(54px, calc(var(--app-height) - var(--screen-top) - var(--screen-bottom) - 180px));
+  }
+  :root[data-touch-input="true"] .top-bar .connection-status { min-width: var(--touch-target); min-height: var(--touch-target); }
+  :root[data-touch-input="true"] .world-controls.react-flow__controls { top: var(--screen-top); right: var(--screen-right); }
+  :root[data-touch-input="true"] .world-minimap.react-flow__minimap { top: var(--screen-top); right: calc(var(--screen-right) + 56px); }
+  :root[data-touch-input="true"] .map-tools.react-flow__panel { top: calc(var(--screen-top) + 144px); right: var(--screen-right); max-width: calc(100vw - var(--screen-left) - var(--screen-right) - 64px); }
+}
+:root[data-layout="compact"] .component-palette {
+  bottom: var(--screen-bottom);
+  max-width: calc(100vw - var(--screen-left) - var(--screen-right));
+}
+:root[data-layout="compact"] .world-minimap.react-flow__minimap { max-width: calc(100vw - var(--screen-left) - var(--screen-right) - 132px); }
+:root[data-layout="compact"] .world-minimap .react-flow__minimap-svg { width: 100%; height: auto; }
+:root[data-layout="compact"] .activity-panel { top: var(--screen-top); bottom: var(--screen-bottom); right: var(--screen-right); max-width: calc(100vw - var(--screen-left) - var(--screen-right)); }
+:root[data-layout="compact"] .toast-stack { top: calc(var(--app-top) + var(--screen-top)); right: var(--screen-right); max-width: calc(100vw - var(--screen-left) - var(--screen-right)); }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-touch-hold="active"] { animation: none; }
+  :root[data-touch-input="true"] :is(.icon-button, .top-icon-button, .primary-button, .secondary-button):not(:disabled):active { transform: none; transition: none; }
+}

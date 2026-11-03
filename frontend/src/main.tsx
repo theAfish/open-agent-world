@@ -8,6 +8,11 @@ import './auth/hosted.css';
 import { initializeProfile } from "./state/profileStorage";
 import { fetchWithRetry } from './api/fetchWithRetry';
 import { initializeHostedSession, isHosted } from './auth/hostedSession';
+import { startInteractionEnvironment } from './interaction/environment';
+import './interaction/foundation.css';
+
+const stopInteractionEnvironment = startInteractionEnvironment();
+import.meta.hot?.dispose(stopInteractionEnvironment);
 
 let view: ReturnType<typeof ReactDOM.createRoot> | undefined;
 window.addEventListener('oaw-hosted-session-ended', () => { view?.unmount(); view = undefined; });

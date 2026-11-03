@@ -65,6 +65,25 @@ it("uses the host view when no override is declared", () => {
   expect(screen.getByText("Host schema")).toBeTruthy();
 });
 
+it('keeps a loaded time instrument mounted when a deck refresh returns equivalent catalog definitions', async () => {
+  const { Timepiece } = await import('../../../plugins/time/frontend');
+  install('tools.time');
+  const counter = { ...card, type: 'tools.time.counter' };
+  const definition = useWorldStore.getState().catalog.node_types[0];
+  useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: [{ ...definition, id: counter.type, frontend: { preview: 'timepiece' } }] } });
+  vi.spyOn(registry, 'pluginView').mockReturnValue(Timepiece as unknown as ReturnType<typeof registry.pluginView>);
+  const read = vi.spyOn(worldApi, 'nodeDocumentAction').mockResolvedValue({ value: {
+    time_zone: 'Asia/Shanghai', offset_minutes: 480, offset_ms: 0, selected_date: '', duration_ms: 300000,
+    elapsed_ms: 0, started_at_ms: null, updated_at_ms: 0, count: 42, laps: [],
+  }, revision: 1, summary: {} });
+  render(<PluginSurface card={counter} slot="preview" level="preview" />);
+  const count = await screen.findByLabelText('Current count');
+  expect(count.textContent).toBe('42');
+  act(() => useWorldStore.setState({ catalog: structuredClone(useWorldStore.getState().catalog) }));
+  expect(count.isConnected).toBe(true);
+  expect(read).toHaveBeenCalledTimes(1);
+});
+
 it("isolates a missing module without mounting a misleading fallback", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   install("example.missing", { settings: "view" });
@@ -89,7 +108,7 @@ it("renders a plugin resource icon without a vendor mapping", () => {
   expect(icon.style.width).toBe("var(--catalog-icon-size, 25px)");
 });
 
-it('omits persistent state and persistence controls for a stateless plugin', async () => {
+it('updates SDK persistence controls when the catalog changes a plugin state policy', async () => {
   install('test.viewer', { settings: 'view' });
   const definition = useWorldStore.getState().catalog.node_types[0];
   useWorldStore.setState({ cards: [card], catalog: { ...TEST_CATALOG, node_types: [{ ...definition, state: { mode: 'none' } }] } });
@@ -97,6 +116,13 @@ it('omits persistent state and persistence controls for a stateless plugin', asy
   vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => { props = value; return <p>Viewer</p>; }) as ReturnType<typeof registry.pluginView>);
   render(<PluginSurface card={card} slot="settings" level="inspector" />);
   await screen.findByText('Viewer');
+  expect(props.host.state).toBeUndefined();
+  expect(props.host.setDataPersistence).toBeUndefined();
+  act(() => useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: [{ ...definition,
+    state: { mode: 'scoped', supportedScopes: ['shared', 'session'], defaultScope: 'shared', userConfigurable: true } }] } }));
+  expect(props.host.state).toBeDefined();
+  expect(props.host.setDataPersistence).toBeTypeOf('function');
+  act(() => useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: [{ ...definition, state: { mode: 'none' } }] } }));
   expect(props.host.state).toBeUndefined();
   expect(props.host.setDataPersistence).toBeUndefined();
 });

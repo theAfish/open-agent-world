@@ -80,7 +80,7 @@ export default function DevelopmentPanel() {
     } catch (caught) { setError(String(caught instanceof Error ? caught.message : caught)); setBusy(false); setPlan(undefined); }
   };
   return <>
-    <button className="development-badge" onClick={() => setOpen(value => !value)} title={tr("开发调试 · F3", "Development tools · F3")}><Bug size={13} /> DEV · F3</button>
+    <button className="development-badge" onClick={() => setOpen(value => !value)} aria-label={tr("开发调试 · F3", "Development tools · F3")} title={tr("开发调试 · F3", "Development tools · F3")}><Bug size={13} /><span>DEV · F3</span></button>
     {open && <div className="development-backdrop" onPointerDown={event => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
       <section className="development-panel" role="dialog" aria-modal="true" aria-labelledby="development-title" onKeyDown={event => {
         if (event.key !== "Tab") return;

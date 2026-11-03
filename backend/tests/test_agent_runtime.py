@@ -353,3 +353,25 @@ def test_agent_api_streams_graph_derived_tools_and_live_revocation(
             assert message["payload"]["available_tools"] == []
     finally:
         services.close()
+
+
+def test_fresh_context_runs_get_separate_contexts(data_root: Path) -> None:
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings)
+    services.install_runtime_provider(
+        "core.mock", MockAgentRuntime(WorldAgentCapabilityProvider(services)), default=True,
+    )
+    try:
+        with TestClient(create_app(settings, services=services)) as client:
+            agent = client.post("/api/nodes", json={"type": "agent", "name": "Atlas"}).json()
+
+            def run(**options: Any) -> str:
+                accepted = client.post(f"/api/agents/{agent['id']}/run", json={"prompt": "go", **options})
+                assert accepted.status_code == 202
+                return client.get(f"/api/runs/{accepted.json()['run_id']}").json()["context_id"]
+
+            first, second = run(fresh_context=True), run(fresh_context=True)
+            assert first.startswith("isolated:") and second.startswith("isolated:") and first != second
+            assert run() is None
+    finally:
+        services.close()
