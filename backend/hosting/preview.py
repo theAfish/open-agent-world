@@ -32,6 +32,8 @@ def create_preview_services(settings):
 
     if settings.tenant_scope is None or not settings.tenant_scope.world_id:
         raise ValueError("Preview requires an explicitly bound hosted profile")
+    if (settings.data_root / ".phase3a-rollback-probe").exists():
+        raise RuntimeError("Controlled Preview migration acceptance failure")
     settings = replace(settings, agent_runtime="core.mock", sandbox_runtime=None,
                        application_mode="preview", marketplace_url=None,
                        plugin_directories=(), inherit_runtime_environment=False)
