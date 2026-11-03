@@ -12,7 +12,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 
 CORE = ["errors", "context", "operations", "projects", "spaces", "projection_store",
-        "experiment_prompt", "insight_prompt", "client", "markdown", "graph_store",
+        "experiment_prompt", "insights", "client", "markdown", "graph_store",
         "pipelines", "actions", "service.cli", "service.mcp"]
 
 PROBE = f"""

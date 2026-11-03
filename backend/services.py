@@ -2525,9 +2525,9 @@ class ApplicationServices:
         await self._publish_resource_modified(document, agent_id=agent_id, operation="patch")
         return document
 
-    async def run_agent(self, agent_id: str, prompt: str) -> dict[str, Any]:
+    async def run_agent(self, agent_id: str, prompt: str, *, context_id: str | None = None) -> dict[str, Any]:
         self._require_agent(agent_id)
-        run = await self._require_run_manager().start_run(agent_id, prompt)
+        run = await self._require_run_manager().start_run(agent_id, prompt, context_id=context_id)
         return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
     def conversation_summary(self, conversation_id: str) -> ConversationSummary:

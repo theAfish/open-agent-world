@@ -220,8 +220,8 @@ export interface PluginViewProps {
     documentDownloadUrl(name: string, nodeId?: string): string;
     /** Select a card and open its normal OAW workspace surface. */
     openWorkspace(nodeId: string): void;
-    /** Start an Agent through the ordinary OAW run lifecycle. */
-    runAgent(nodeId: string, prompt: string): Promise<void>;
+    /** Start an Agent through the ordinary OAW run lifecycle. `freshContext` runs it with no earlier history instead of the Agent's shared one. */
+    runAgent(nodeId: string, prompt: string, freshContext?: boolean): Promise<void>;
     /** Observe future node-document mutations received by the OAW event stream. */
     onDocumentChange(listener: (change: PluginDocumentChange) => void): () => void;
     /**

@@ -32,6 +32,9 @@ class SourceLaunchers(unittest.TestCase):
             result = self.run_command(["bash", str(self.root / "scripts" / script)])
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("environment is missing", result.stderr)
+            if script == "dev.sh":
+                self.assertIn('--profile default --skip-build', result.stderr)
+                self.assertIn('same --profile and --plugin-path', result.stderr)
         python = self.root / "backend/.venv/bin/python"
         python.parent.mkdir(parents=True)
         python.write_text('#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(sys.argv[1:]))\nsys.exit(7)\n')
