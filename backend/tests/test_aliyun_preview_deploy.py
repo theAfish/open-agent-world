@@ -114,6 +114,26 @@ def test_deployment_failure_reports_restored_receipt_and_removes_temporary_appro
     assert f.policy.read_bytes() == f.original_policy and not f.journal.exists()
 
 
+def test_later_manual_rollback_requires_reapproval_after_controller_authority_is_removed(deployment):
+    f = deployment
+    result = adapter.deploy(f.operator, f.candidate, f.archive, lambda: None)
+    assert result['state']['phase'] == 'complete'
+    request = {**adapter.TARGET, 'release': result['receipt']['release']}
+    (f.existing.data / 'document.txt').write_text('synthetic post-deployment write')
+    before = list(f.existing.commands)
+    with pytest.raises(ValueError, match='not been approved'):
+        remote.transaction(request, rollback=True)
+    assert f.existing.commands == before
+    assert remote.receipt(f.existing.app)[0]['source_commit'] == f.candidate['tested_commit']
+    # This models a separately reviewed, temporary exact-archive authorization;
+    # completed CI/controller approval must never become permanent root authority.
+    with adapter.approval(f.operator, f.candidate):
+        assert remote.transaction(request, rollback=True)['phase'] == 'rolled-back'
+    assert remote.receipt(f.existing.app)[0]['source_commit'] == 'a' * 40
+    assert (f.existing.data / 'document.txt').read_text() == 'user data before release'
+    assert f.policy.read_bytes() == f.original_policy and not f.journal.exists()
+
+
 def test_preparation_failure_restores_policy_without_starting_transaction(deployment, monkeypatch):
     f = deployment
 

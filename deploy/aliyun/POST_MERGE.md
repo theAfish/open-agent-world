@@ -26,6 +26,14 @@ GitHub's `Ali integration deployment` status reports the actual installed SHA.
 The path classifier is deliberately conservative; review remains necessary for
 behavioral risks inside an allowed UI change.
 
+Infrastructure PRs that change the trusted validation pipeline can be excluded
+from automatic Preview even when all required checks pass. The commit-status
+reporter cannot represent neutral/skipped; an explanatory PR comment records
+**no deployment attempted**. This intentional exclusion is not a merge blocker
+for a properly reviewed infrastructure PR when required checks and other merge
+requirements are satisfied. Keep the admission restriction intact; see the
+[eligibility and policy-update procedure](PR_PREVIEW.md#github-configuration).
+
 ## Privileged execution boundary
 
 The former root service used the application venv and imported
@@ -96,6 +104,15 @@ Perform these steps only after approval of their exact pins, identities, unit
 diffs and maintenance window. Save the prior operator, configuration and unit
 files; do not clear existing release backups or controller history.
 
+Read-only inspection on 2026-11-03 found no production operator, sealed
+provisioner, production execution runtime or integration controller installed.
+The production gateway was active, and its existing provisioner unit still used
+root. The initial operator step is therefore a **fresh installation**, subject
+to rechecking those facts at approval time. Host system Python was 3.14.4; build
+the sealed provisioner's native dependencies for that interpreter, separately
+from the explicitly registered Python 3.12 release-build runtime. Never substitute
+the running application's venv into the privileged import path.
+
 1. Read the live receipt, execution registration, unit definitions and existing
    accounts/profile/resource inventories. Record private persistence evidence and
    free-space checks. Exclude active user work and release/provisioning jobs.
@@ -118,7 +135,7 @@ files; do not clear existing release backups or controller history.
    real files to `/opt/oaw-provisioner/source` and `dependencies`, root-owned and
    nonwritable by other users. Do not copy production secrets or tenant data.
 3. Prepare `/opt/oaw-production-execution`, the independent self-contained release
-   runtime, with the system interpreter/shared libraries, locked production
+   runtime, with its registered Python 3.12 interpreter/shared libraries, locked production
    Python dependencies, `uv`, and required offline Pack wheels/runtime tools.
    Reuse the existing bootstrap runtime contract: root-owned real files, no links,
    empty `/workspace/{source,previous,scratch,sockets}` directories and empty
@@ -127,7 +144,8 @@ files; do not clear existing release backups or controller history.
    it has no Internet or production credentials. Do not bind the production venv
    into this build runtime. Existing worker venvs and scientific environments stay
    in place; changed host dependencies require a separate upgrade plan.
-4. Adapt the existing bootstrap configuration for environment `production`,
+4. Use [bootstrap.production.example.json](bootstrap.production.example.json),
+   preserving an existing reviewed production configuration if present. Register
    target `/opt/open-agent-world`, `/srv/oaw-hosting`, `/opt/oaw-releases`, service
    `oaw-hosted`, sandbox `/opt/oaw-production-execution`, and distinct
    `oaw-production-build`/`oaw-production-verify` identities. Review its plan.
@@ -137,6 +155,23 @@ files; do not clear existing release backups or controller history.
    invoked by `/usr/bin/python3 -I -S` from an independent root-owned review
    directory. Preserve the exact target and existing manual approvals. This step
    neither starts services nor upgrades application code.
+
+   Exact commands from the independently reviewed, root-owned staging directory:
+
+   ```sh
+   /usr/bin/python3 -I -S /opt/oaw-operator-review-phase3b/bootstrap.py \
+     --config /root/oaw-production-phase3b-bootstrap.json
+   # Only after the installation plan is approved; fresh operator installation:
+   /usr/bin/python3 -I -S /opt/oaw-operator-review-phase3b/bootstrap.py \
+     --config /root/oaw-production-phase3b-bootstrap.json --apply
+   ```
+
+   For an existing operator, add `--upgrade-from <CURRENT_INSTALLATION_SHA256>`
+   to both commands, using the current `installation.json` digest obtained
+   read-only. Preserve its execution registration and manual artifact approvals
+   in the reviewed configuration. Retain the old installation; inspect/archive
+   any `.previous` directory before an upgrade. Placeholder hashes in the example
+   deliberately prevent installation until the reviewed files are pinned.
 5. Fill [provisioner.example.json](provisioner.example.json), including the reviewed
    source revision, target and verifier identity. Generate complete inventories
    only after independently inspecting both installed trees:
@@ -206,6 +241,24 @@ admit it; a PR artifact cannot update that policy itself.
 
 ## First controlled acceptance: separate approval
 
+Operator checklist (live ECS required; no step is performed by this PR):
+
+- [ ] Approve the reviewed operator/provisioner inventories, exact unit diffs,
+  execution runtime and maintenance window; verify backups and idle user work.
+- [ ] Keep integration automation disabled and its timer stopped. Install only
+  the reviewed boundary and verifier socket permissions; confirm an idle sealed
+  provisioner tick and nonroot filesystem/network denials.
+- [ ] Verify the actual post-merge push artifact, required workflows and exact
+  installed baseline. Approve one run/attempt and start one service invocation.
+- [ ] Check every worker's cold startup, existing-account login, profile and
+  conversation/file persistence, tenant isolation and existing runtime/Sandbox
+  assignments. Confirm GitHub and the installed receipt report the same SHA.
+- [ ] With explicit data-restore approval and no intervening tenant writes,
+  exercise current-release rollback; confirm original code, runtime, data and
+  login. Revalidate and approve any reinstall against the restored baseline.
+- [ ] Retain private evidence. Keep unattended mode disabled pending a separate
+  acceptance decision; no automatic enabling is part of installation or rollback.
+
 Bind `activation.approved_run` to `{run_id, run_attempt, baseline_commit,
 baseline_receipt}` read from the current verified run and operator status, set
 mode `controlled`, and start **one** `oaw-integration-controller.service`
@@ -228,7 +281,10 @@ data-restore approval and keep the service quiescent during this acceptance.
 Routine mode requires another approval after all evidence passes: set
 `accepted_revision` to the successful controlled revision in state, clear
 `approved_run`, set mode `routine`, then start/enable the timer. Never manufacture
-controller history to satisfy this gate. Higher-risk changes keep using one
+controller history to satisfy this gate. A run already consumed by the controller
+cannot be replayed after manual rollback. A later reviewed integration push/run
+must complete a fresh controlled deployment before routine mode can be enabled
+against that installed baseline. Higher-risk changes keep using one
 baseline-bound controlled approval; runtime/service changes require their own
 upgrade plan first.
 
@@ -242,7 +298,16 @@ state, in-flight markers, authorization journals and release logs.
 The release directory records the release ID, original baseline, backups and
 actual transaction state. Ordinary failure automatically restores code, runtime
 bundle and data. For an explicit current-release rollback, after data-restore
-approval use the existing operator/client procedure:
+approval first re-authorize that exact current release, then use the existing
+operator/client procedure. The controller deliberately removes its temporary
+archive authorization when a deployment finishes; a later manual rollback must
+not inherit it. With timers stopped and no active transaction, read the installed
+receipt and retained release `request.json`; verify the release ID, source commit
+and archive digest agree, and verify the retained archive bytes. Independently
+approve only that `{archive_sha256, source_commit}` entry in the root-owned
+`trusted-artifacts.json`, preserving existing target/approvals and private file
+permissions. Save the exact previous policy for restoration. Do not approve
+values copied from an unverified artifact or weaken `approved_release` checks.
 
 ```sh
 python scripts/aliyun_release.py --config <private-release-config> \
@@ -252,7 +317,9 @@ python scripts/aliyun_release.py --config <private-release-config> \
 Use independently reviewed local tooling; it calls the installed trusted
 operator. An older release cannot overwrite a newer installed receipt. After an
 interruption inspect private state/receipt before recovery; never delete state
-to retry. After a manual rollback use controlled approval to establish the next
+to retry. Once the rollback task is terminal, restore the saved authorization
+policy; do not revoke authority from a still-running transaction. After a manual
+rollback use controlled approval to establish the next
 controller baseline. Restore a prior operator/configuration only with both
 timers stopped and no active transaction. Do not restore the unsafe application
 root provisioner as a shortcut.
@@ -273,3 +340,30 @@ root provisioner as a shortcut.
 
 No installation, production deployment, data restore, credential provisioning or
 unattended activation is authorized by merging the implementation PR alone.
+
+## Local release-readiness checks
+
+Controller/operator/provenance/archive/rollback tests need no ECS. POSIX
+ownership, symlinks and `flock` need Linux, but still run locally. The checklist
+above needs the actual ECS identities, systemd namespaces, sockets, installed
+runtime bundles and existing private accounts/data; local tests cannot establish
+those acceptance boundaries.
+
+The hosted upgrade suite exercises real installed Pack declarations. A Core-only
+environment lacks the optional ADK/LiteLLM providers and the declared Knowledge
+Base/Library converters, causing migration to correctly reject startup. Prepare
+only those declarations in a disposable Linux environment before rerunning:
+
+```sh
+UV_PROJECT_ENVIRONMENT=/tmp/oaw-phase3b-tests uv sync --project backend --locked \
+  --extra hosting --extra aliyun --extra aliyun-operator --extra adk --extra litellm --group dev
+uv pip install --python /tmp/oaw-phase3b-tests/bin/python \
+  --editable ./plugins/knowledge_base --editable ./plugins/library
+/tmp/oaw-phase3b-tests/bin/python .github/run-backend-tests.py \
+  backend/tests/test_hosted_upgrades.py -p no:cacheprovider
+```
+
+These are local test dependencies already declared by the affected Packs.
+Production dependencies and migration failure handling remain unchanged. Do not
+skip Pack failures or classify missing dependency wheels as a hosting-policy
+exclusion to make a migration pass.

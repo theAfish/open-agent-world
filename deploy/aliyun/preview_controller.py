@@ -58,6 +58,10 @@ class Rejected(ValueError):
     """A terminal admission rejection, without deployment side effects."""
 
 
+class PreviewExcluded(Rejected):
+    """Protected pipeline changes require independent review before Preview."""
+
+
 class Pending(ValueError):
     """GitHub checks have not yet reached an admissible terminal state."""
 
@@ -328,8 +332,8 @@ def admit(api, cfg, run_id, attempt):
     for path in PINNED_FILES:
         pinned = api.get('contents/' + path + '?' + urlencode({'ref': cfg['trusted_revision']}))
         proposed = api.get('contents/' + path + '?' + urlencode({'ref': merge}))
-        require(pinned.get('type') == proposed.get('type') == 'file' and pinned.get('sha') == proposed.get('sha'),
-                'PR changes a trusted validation entrypoint: ' + path)
+        if not (pinned.get('type') == proposed.get('type') == 'file' and pinned.get('sha') == proposed.get('sha')):
+            raise PreviewExcluded('PR changes a trusted validation entrypoint: ' + path)
     for workflow_id in WORKFLOWS:
         runs = [item for item in workflow_runs(api, workflow_id, pr['head']['sha'])
                 if any(link.get('number') == pr['number'] for link in item.get('pull_requests', []))]
@@ -520,7 +524,11 @@ def comment(api, cfg, candidate, state, actual_commit=None):
             f'[CI run {candidate["run_id"]}, attempt {candidate["run_attempt"]}]({log_url(candidate)}).\n\n'
             + (f'Operator receipt revision: `{actual_commit}`.\n\n' if actual_commit else '')
             + cfg['access_instructions'])
-    comments = api.pages(f'issues/{candidate["pull_request"]}/comments', None)
+    upsert_comment(api, candidate['pull_request'], marker, body)
+
+
+def upsert_comment(api, pull_request, marker, body):
+    comments = api.pages(f'issues/{pull_request}/comments', None)
     # Only update this token's own prior comment, never an impersonated marker.
     identity = api.request('/user')['id']
     existing = [item for item in comments if item.get('user', {}).get('id') == identity
@@ -528,7 +536,24 @@ def comment(api, cfg, candidate, state, actual_commit=None):
     if existing:
         api.patch(f'issues/comments/{existing[-1]["id"]}', {'body': body})
     else:
-        api.post(f'issues/{candidate["pull_request"]}/comments', {'body': body})
+        api.post(f'issues/{pull_request}/comments', {'body': body})
+
+
+def exclusion_comment(api, candidate, reason):
+    marker = '<!-- oaw-preview-eligibility -->'
+    body = (marker + '\nAutomatic Private Preview: **not eligible for this revision**.\n\n'
+            f'Head `{candidate["head_sha"]}`; '
+            f'[CI run {candidate["run_id"]}, attempt {candidate["run_attempt"]}]({log_url(candidate)}).\n\n'
+            + reason + '.\n\n'
+            '**No Preview deployment was attempted.** Protected validation/deployment files must match '
+            'the independently reviewed controller policy. That restriction remains enforced.\n\n'
+            'This reporter uses GitHub commit statuses, which have no neutral/skipped state; '
+            'the non-success status records an authorization exclusion, not a failed deployment. '
+            'It does not claim a successful Preview.\n\n'
+            'An intentional Preview policy exclusion is not a blocker for merging a properly reviewed '
+            'infrastructure PR when all required checks and other merge requirements are satisfied. '
+            'Production installation and activation remain separately gated.')
+    upsert_comment(api, candidate['pull_request'], marker, body)
 
 
 def commit_status(api, candidate, state, description):
@@ -590,7 +615,7 @@ def reconcile(api, cfg, state, adapter, operator):
     raise Pending('Interrupted Preview transaction requires operator inspection; automatic deployments are frozen')
 
 
-def report_rejection(api, cfg, state, run, reason, *, installed_commit=None):
+def report_rejection(api, cfg, state, run, reason, *, installed_commit=None, excluded=False):
     """Report only against a current same-repository head; never overwrite a newer slot result."""
     if integration(cfg):
         if (run.get('event') != 'push' or run.get('workflow_id') != CI or run.get('head_branch') != BASE
@@ -625,8 +650,12 @@ def report_rejection(api, cfg, state, run, reason, *, installed_commit=None):
             or slot and slot['candidate']['head_sha'] == run.get('head_sha')
             and slot['candidate']['run_id'] >= run['id']):
         return
-    candidate = {'head_sha': run['head_sha'], 'run_id': run['id'], 'run_attempt': run['run_attempt']}
-    commit_status(api, candidate, 'failure', 'Preview rejected: ' + reason)
+    candidate = {'head_sha': run['head_sha'], 'run_id': run['id'], 'run_attempt': run['run_attempt'],
+                 'pull_request': pr['number']}
+    if excluded:
+        exclusion_comment(api, candidate, reason)
+    commit_status(api, candidate, 'failure',
+                  ('Preview not eligible; no deployment attempted: ' if excluded else 'Preview rejected: ') + reason)
 
 
 def finish(api, cfg, state, inflight, result):
@@ -756,7 +785,7 @@ def poll(api, cfg, adapter):
                     current = operator['dispatch']({**adapter['TARGET'], 'action': 'status'})
                     report_rejection(api, cfg, state, run, str(error), installed_commit=current['commit'])
                 else:
-                    report_rejection(api, cfg, state, run, str(error))
+                    report_rejection(api, cfg, state, run, str(error), excluded=isinstance(error, PreviewExcluded))
                 state['seen'][key] = {'rejected': str(error)} if integration(cfg) else str(error)
                 save_state(state)
                 print(json.dumps({'run_id': run['id'], 'attempt': run['run_attempt'], 'rejected': str(error)}), flush=True)

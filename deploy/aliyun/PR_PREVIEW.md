@@ -76,6 +76,22 @@ attempts, expired/ambiguous artifacts and failed checks are rejected. Pipeline
 updates require independent review and a controller policy update to the exact
 new trusted revision.
 
+Protected pipeline changes are **not eligible for automatic Preview**. This is
+a rejection before artifact download or deployment creation, not a failed
+deployment. The existing commit-status API supports only error, failure, pending
+and success ([GitHub API](https://docs.github.com/en/rest/commits/statuses)); it
+cannot represent neutral/skipped. Keep a non-success authorization status and
+an explanatory PR comment stating that no deployment was attempted. Never mark
+an excluded revision successfully deployed. The reviewed controller update adds
+this explanation automatically without changing admission policy; until that
+code is independently installed, a maintainer can post the explanation directly.
+
+An intentional Preview policy exclusion is not a blocker for merging a properly
+reviewed infrastructure PR, provided required checks and all other merge
+requirements are satisfied. Do not relax branch rules or trust pins to turn an
+ineligible Preview green. Later Preview execution requires its own independent
+pipeline review and the approved policy-update procedure below.
+
 For a reviewed validation-pipeline update, stop the timer and let the active
 transaction finish before changing `trusted_revision`. Verify the current PR/run
 again under the new policy. If that attempt was previously recorded in `seen`
