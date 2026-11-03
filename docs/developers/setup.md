@@ -37,6 +37,11 @@ bash scripts/dev.sh --agent-runtime core.mock --profile plugin-tutorial
 
 Open the URL printed by the launcher. Ports can change when the usual ones are occupied. Keep the launcher running and stop it with Ctrl+C.
 
+For later frontend edits, keep dev running for hot updates. After pulling source
+changes, restart `dev.ps1` / `dev.sh` if needed; repeat setup only for a new profile
+or missing/changed dependencies. `start.ps1` / `start.sh` serve a production build,
+so they require rebuilding assets after edits. Use dev for the edit/reload loop.
+
 Setup is the installation entrypoint on every platform, backed by `scripts/setup.py`.
 Run it when creating a profile or changing dependencies. Default setup prepares
 Core and its development tools first, then the optional Agent SDKs and bundled

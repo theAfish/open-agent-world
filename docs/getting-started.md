@@ -26,6 +26,8 @@ bash scripts/start.sh
 
 Setup installs Core, backend development tools and frontend dependencies, then builds the Core frontend. It next prepares bundled Packs and Google ADK/LiteLLM independently: a failed optional component does not prevent Core or other Packs from being prepared. Existing compatible dependencies and environments are reused. Use `-CoreOnly` (PowerShell) or `--core-only` for minimal setup; use the application's Library/Store for subsequent plugin installation and repair. `start` serves the prepared build from the Python backend and opens the local application URL. Ctrl+C stops the launcher. Rebuild after frontend changes with `npm --prefix frontend run build`.
 
+For day-to-day frontend edits, use the dev workflow with hot reload below.
+
 The shell launcher uses the installed backend environment; Node.js and uv are only needed for setup and rebuilds. It accepts launcher options, for example `bash scripts/start.sh --mode preview --profile demo` or `bash scripts/start.sh --port 38474`. On a machine without a graphical browser, open the printed local URL manually on that machine. In WSL2, install the prerequisites and run both scripts inside the Linux distribution.
 
 The Windows desktop installer includes its own Python runtime and opens an independent Tauri window. Building an installer and using development profiles are covered in [Desktop installation and development](desktop.md).
@@ -38,22 +40,33 @@ Application setup and Sandbox provisioning are separate. Placing a card does not
 2. Open **Pack & Card Library**, open an installed pack, and add collected cards to your active deck. A fresh installation starts with unopened packs and an empty deck.
 3. Place an Agent from the bottom tray, set its instructions and model, and connect the resources you want it to use. [Core concepts](concepts.md) explains the available relationships.
 
-## Try without model credentials
+## Frontend development with hot reload
 
-For deterministic local debugging, use the mock runtime:
+For frontend development, use the development server on every platform. Prepare
+the profile once, then start dev:
 
 ```powershell
 ./scripts/setup.ps1 -Profile default -SkipBuild
-./scripts/dev.ps1 -AgentRuntime mock
+./scripts/dev.ps1
 ```
 
 Or with the portable launcher:
 
 ```bash
 bash scripts/setup.sh --profile default --skip-build
-bash scripts/dev.sh --agent-runtime core.mock
+bash scripts/dev.sh
 ```
 
+Keep dev running while editing: host frontend changes hot reload, and changed
+Pack frontends rebuild automatically. After pulling source changes, restart dev
+if needed; run setup again only for a new profile or missing/changed dependencies.
+An ordinary frontend edit needs no setup, production build, or deployment.
+`start.ps1` / `start.sh` serve the existing production build and do not hot reload.
+
+## Try without model credentials
+
+For deterministic debugging without model credentials, add `-AgentRuntime mock`
+on Windows or `--agent-runtime core.mock` with the portable launcher.
 The mock runtime is a debugging substitute, not a language model. Real Agent responses require a configured model service. Existing Agents with an explicitly selected runtime retain that selection.
 
 ## Startup and troubleshooting
