@@ -1,2 +1,3 @@
-Disposable private Preview acceptance A revision 1.
+Disposable private Preview acceptance A revision 2.
+This newer commit supersedes revision 1; the old artifact must be rejected.
 This branch must not be merged.
