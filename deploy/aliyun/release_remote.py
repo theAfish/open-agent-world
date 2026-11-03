@@ -161,7 +161,12 @@ def run_sandbox(request, config, mode, arguments, *, writable=None, readonly=(),
         run(*command, *arguments, log=log, timeout=3630)
     finally:
         # Wait for cgroup teardown before root inspects or promotes writable output.
-        run('systemctl', 'stop', unit, timeout=60)
+        loaded = run('systemctl', 'show', unit, '--property=LoadState', '--value', timeout=30).strip()
+        if loaded == 'not-found':
+            require(run('systemctl', 'show', unit, '--property=ActiveState', '--value', timeout=30).strip() == 'inactive',
+                    'A collected release sandbox must be inactive before inspecting its output')
+        else:
+            run('systemctl', 'stop', unit, timeout=60)
 
 
 def bundle_tree(root, *, immutable=False):
@@ -532,6 +537,15 @@ def extract_bundle(archive, output, *, source_commit=None, request=None):
                         f'File integrity check failed: {name}')
         tar.extractall(output, filter='data')
     verify_payload(output, manifest)
+    # tarfile creates implicit directories using root's private umask. The
+    # nonroot preparer needs to traverse its read-only source bind; the release
+    # parent remains private, so this exposes no request/backup/credential files.
+    output.chmod(0o755)
+    for path in output.rglob('*'):
+        if path.is_dir():
+            path.chmod(0o755)
+        else:
+            path.chmod(0o755 if path.stat().st_mode & 0o100 else 0o644)
     return manifest
 
 

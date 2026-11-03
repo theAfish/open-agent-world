@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
@@ -23,7 +24,7 @@ BASE = 'a' * 40
 RELEASE = '20261101T010000Z-' + COMMIT[:12] + '-12345678'
 
 
-def write_archive(path, *, version=2, source=COMMIT, extra=None, manifest_extra=None, corrupt=False):
+def write_archive(path, *, version=2, source=COMMIT, extra=None, manifest_extra=None, corrupt=False, modes=None):
     files = {'main.py': b'raise AssertionError("artifact code must not run in these tests")\n'}
     files.update(extra or {})
     manifest = {'version': version, 'source_commit': source, 'routine': False,
@@ -44,9 +45,29 @@ def write_archive(path, *, version=2, source=COMMIT, extra=None, manifest_extra=
     with tarfile.open(path, 'w:gz') as archive:
         for name, data in files.items():
             item = tarfile.TarInfo(name)
+            item.mode = (modes or {}).get(name, 0o644)
             item.size = len(data)
             archive.addfile(item, io.BytesIO(data))
     return manifest
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX traversal and DAC permissions')
+def test_verified_source_bind_is_readable_under_private_root_umask(tmp_path):
+    archive = tmp_path / 'build.tar.gz'
+    write_archive(archive, extra={'nested/script.py': b'print("source only")\n'},
+                  modes={'main.py': 0o600, 'nested/script.py': 0o700})
+    release = tmp_path / 'private-release'
+    release.mkdir(mode=0o700)
+    previous = os.umask(0o077)
+    try:
+        remote.extract_bundle(archive, release / 'stage')
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(release.stat().st_mode) == 0o700
+    assert stat.S_IMODE((release / 'stage').stat().st_mode) == 0o755
+    assert stat.S_IMODE((release / 'stage/nested').stat().st_mode) == 0o755
+    assert stat.S_IMODE((release / 'stage/main.py').stat().st_mode) == 0o644
+    assert stat.S_IMODE((release / 'stage/nested/script.py').stat().st_mode) == 0o755
 
 
 @pytest.fixture
