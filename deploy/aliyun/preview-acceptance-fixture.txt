@@ -1,3 +1,4 @@
-Disposable private Preview acceptance A revision 2.
-This newer commit supersedes revision 1; the old artifact must be rejected.
+Disposable private Preview acceptance A revision 3.
+This candidate includes the verified hosting-policy migration correction.
+Earlier candidate artifacts must be rejected after this update.
 This branch must not be merged.
