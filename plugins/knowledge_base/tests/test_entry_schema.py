@@ -2,8 +2,8 @@
 import json
 from pathlib import Path
 
-from oaw_knowledge_base import actions, data_source, insight_stats
-from oaw_knowledge_base.entry_schema import expand
+from oaw_knowledge_base import actions, data_source
+from oaw_knowledge_base.entry_schema import expand, field_names, flatten
 
 COMPACT = {
     "required": ["batch_no"],
@@ -49,13 +49,18 @@ def test_a_record_may_not_invent_properties_or_write_flat_values():
     assert actions._check(COMPACT, extra_field)["valid"] is False
 
 
-def test_stats_and_chart_fields_come_from_the_expanded_schema():
-    assert insight_stats.field_names(COMPACT) == [
+def test_insight_and_chart_fields_come_from_the_expanded_schema():
+    assert field_names(COMPACT) == [
         "batch_no.value", "batch_no.unit", "batch_no.description",
         "ionic_conductivity.value", "ionic_conductivity.unit", "ionic_conductivity.description",
         "xrd_result.value", "xrd_result.unit", "xrd_result.description"]
     schema = type("Schema", (), {"id": "s1", "name": "Batch", "definition": COMPACT})
     assert "ionic_conductivity.unit" in [f["name"] for f in data_source.datasets(schema)[0]["fields"]]
+
+
+def test_flatten_takes_scalars_and_one_level_of_objects_only():
+    assert flatten({"a": 1, "b": {"c": 2, "d": {"e": 3}}, "f": [1, 2], "g": None}) == {"a": 1, "b.c": 2, "g": None}
+    assert flatten("not a dict") == {}
 
 
 def test_the_shipped_example_is_compact_and_a_definition_without_a_type_is_accepted():

@@ -6,8 +6,9 @@ provider, and hands the result straight back to the plugin's own save action, so
 what was extracted is validated and evidence-linked by the plugin as usual.
 
 The prompts themselves are built by the plugin (``oaw_knowledge_base.spaces``,
-``experiment_prompt``, ``insight_prompt``), which is also what the ``kb`` CLI uses
-outside OAW, so the two paths cannot drift.
+``experiment_prompt``), which is also what the ``kb`` CLI uses
+outside OAW, so the two paths cannot drift. Insights are not here: they are the
+connected agent's work, from ``insight_prompt`` to ``insight_save``.
 
 The ``run_*`` functions are the reusable core: the engineering routes below and the
 deployment routes in ``backend/deployment_workspace.py`` both call them, so a
@@ -120,18 +121,6 @@ class SchemaDraftRequest(BaseModel):
     samples: list[DraftSample] = Field(default_factory=list, max_length=5)
     # The editor's current name, description, system prompt and definition, so a follow-up edits it.
     current: dict | None = None
-
-
-class InsightExtractRequest(BaseModel):
-    # One schema, several, or neither: every experiment schema with published records.
-    schema_id: str | None = Field(default=None, max_length=64)
-    schema_ids: list[str] = Field(default_factory=list, max_length=50)
-    model: str = Field(min_length=1, max_length=200)
-    group_id: str | None = Field(default=None, max_length=64)
-    all_groups: bool = False
-    # Which section's schemas an open scope takes (see ``insights.Scoped``).
-    schema_kind: Literal["literature", "experiment"] = "experiment"
-    replace_drafts: bool = False
 
 
 def _credentials(services, reference):
@@ -352,28 +341,6 @@ async def run_schema_draft(node_id: str, request: SchemaDraftRequest, services) 
         raise HTTPException(502, f"The model's draft was not usable: {error}") from None
 
 
-async def run_insight_extract(node_id: str, request: InsightExtractRequest, services) -> dict:
-    """The agent-free **Extract insights**: page through the schema's record table,
-    make one JSON-mode model call, and hand the insights to the plugin's own
-    ``insight_save`` — the same two actions a connected Lab assistant drives through
-    its tools, so an insight is evidence-checked identically whichever path produced it."""
-    await _check_node(node_id, services)
-    scope = {"schema_ids": request.schema_ids, "all_groups": request.all_groups,
-             "schema_kind": request.schema_kind,
-             **({"schema_id": request.schema_id} if request.schema_id else {}),
-             **({"group_id": request.group_id} if request.group_id else {})}
-    prompt, table, truncated = await _paged_prompt(services, node_id, "insight_prompt", scope)
-    base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_insights = _builders("insight_prompt", "build_messages", "parse_insights")
-    insights = await _complete(base_url, api_key, model, build_messages(prompt, table=table), parse_insights)
-
-    saved = await invoke_resource_action(services, node_id, "insight_save",
-        ResourceActionRequest(arguments={**scope, "insights": insights,
-                                         "replace_drafts": request.replace_drafts}))
-    return {"insights": saved["insights"], "warnings": saved["warnings"],
-            "schema_ids": saved["schema_ids"], "truncated": truncated}
-
-
 @router.post("/knowledge/{node_id}/project-space")
 async def project_space(node_id: str, request: ProjectSpaceRequest, services=Depends(get_services)):
     return _stream(lambda progress: run_project_space(node_id, request, services, progress))
@@ -387,11 +354,6 @@ async def review_projection(node_id: str, request: ProjectionReviewRequest, serv
 @router.post("/knowledge/{node_id}/extract")
 async def extract(node_id: str, request: ExperimentExtractRequest, services=Depends(get_services)):
     return await run_experiment_extract(node_id, request, services)
-
-
-@router.post("/knowledge/{node_id}/insights")
-async def extract_insights(node_id: str, request: InsightExtractRequest, services=Depends(get_services)):
-    return await run_insight_extract(node_id, request, services)
 
 
 @router.post("/knowledge/{node_id}/schema-draft")

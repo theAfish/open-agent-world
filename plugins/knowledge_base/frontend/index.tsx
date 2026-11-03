@@ -1155,9 +1155,8 @@ export function Workspace({ host, card }: PluginViewProps) {
           <InsightsSection host={host} cardId={card.id} deployed={deployed} busy={busy} version={refreshVersion}
             schemas={experimentSchemas} schemaId={experimentSchemas.some(item => item.id === insightSchemaId) ? insightSchemaId : ""}
             onSchemaChange={setInsightSchemaId} publishedCounts={publishedCounts}
-            groupArgs={groupArgs} groupFilter={groupFilter} call={call} perform={perform} request={request}
-            labAgent={labAgents[0]} canRunAgent={canRunAgents} selectedModel={selectedModel}
-            modelSelect={modelSelect}
+            groupArgs={groupArgs} groupFilter={groupFilter} call={call} perform={perform}
+            labAgent={labAgents[0]} canRunAgent={canRunAgents}
             groupSelect={groupSelect} refreshControls={refreshControls} banner={<Banner error={error} notice={notice} />}
             setNotice={setNotice} setError={setError} onOpenRecord={jumpToRecord}
             onOpenExperiments={() => { setCategory("experiment"); setExperimentTab("experiments"); }}

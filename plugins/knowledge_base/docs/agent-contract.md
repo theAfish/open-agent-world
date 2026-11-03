@@ -17,8 +17,15 @@ value. The host follows Markdown windows and refuses to save success if the proj
 exceeds its direct-call input limit. An Agent can read the remaining windows through
 its tools. Failed or interrupted direct calls mark their owned runs failed.
 
-Experiment extraction and Insight bridges retain their record validation,
-source-evidence checks and human publication boundary.
+Experiment record extraction keeps its record validation, source-evidence checks and
+human publication boundary. Insights have no model bridge: they are an Agent's work.
+`knowledge_insight_prompt` returns the published records as raw JSON, paged
+(`has_more` / `next_offset`; each page is sized to stay under the roughly 8 KB an Agent
+sees inline), with each schema's definition and the Insights already
+published; it computes nothing. The Agent explores freely, does every calculation with
+its own tools (the Lab Manager preset connects a Sandbox for this), and saves drafts with
+`knowledge_insight_save`, recording how it got each number in `properties.method`. The
+plugin only checks that every cited record is a published record of the scope.
 
 ## Agent connections
 

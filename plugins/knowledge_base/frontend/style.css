@@ -373,12 +373,7 @@
 .knowledge-compact { max-height: 220px; }
 .knowledge-static-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 12px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 .knowledge-static-row small { color: var(--ink-soft); white-space: nowrap; }
-.knowledge-stats { max-height: 320px; }
-.knowledge-stats tbody th { font-weight: 500; }
 .knowledge-graphside .knowledge-insights .knowledge-kind { margin-right: 4px; }
-.knowledge-stats-block { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
-.knowledge-stats-block > h4, .knowledge-stats-block > h5 { margin: 0; }
-.knowledge-stats-block > h5 { font-size: 12px; color: var(--ink-soft); font-weight: 500; }
 .knowledge-insight-head .knowledge-chip-schema { font-size: 10px; color: var(--ink-soft); padding: 1px 6px; border-radius: 999px; background: var(--surface-raised); border: 1px solid var(--line); }
 
 /* Literature → Knowledge: the draft form, the element tables and their source chips. */

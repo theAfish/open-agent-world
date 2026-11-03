@@ -8,7 +8,7 @@
 ``boolean``, ``number[]``, ``string[]``, or a list of allowed values. A record stores
 ``{"value", "unit", "description"}`` for each property; ``unit`` here is the unit the
 schema expects. ``expand`` turns the compact form into the JSON Schema that validates
-records, feeds the model, and lists chart and statistics fields. Properties that are
+records, feeds the model, and lists chart and insight fields. Properties that are
 not compact (``value`` is not a type or a list) pass through unchanged.
 """
 from __future__ import annotations
@@ -52,3 +52,41 @@ def expand(definition):
     if any(is_compact(prop) for prop in definition["properties"].values()):
         expanded.setdefault("additionalProperties", False)  # a record has the schema's properties and no others
     return expanded
+
+
+def _scalar(value):
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def flatten(data):
+    """Top-level scalars plus one level of nested objects as ``parent.child``.
+
+    Lists and deeper nesting are skipped: this names the fields a record exposes, not
+    every value in it.
+    """
+    if not isinstance(data, dict):
+        return {}
+    flat = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            for child, inner in value.items():
+                if _scalar(inner):
+                    flat[f"{key}.{child}"] = inner
+        elif _scalar(value):
+            flat[key] = value
+    return flat
+
+
+def field_names(definition):
+    """The flattened field names a schema describes, in declaration order."""
+    names = []
+    properties = (expand(definition) or {}).get("properties")
+    if not isinstance(properties, dict):
+        return names
+    for key, spec in properties.items():
+        nested = spec.get("properties") if isinstance(spec, dict) else None
+        if isinstance(nested, dict) and spec.get("type") == "object":
+            names.extend(f"{key}.{child}" for child in nested)
+        else:
+            names.append(key)
+    return names

@@ -550,7 +550,12 @@ it("shows completed graph projections immediately without requiring review or pu
   await waitFor(() => expect(action).toHaveBeenCalledWith("projections", expect.objectContaining({ include_history: true })));
 });
 
-it("drafts insights over published records and publishes one into the experiment layer on confirmation", async () => {
+it("drafts insights through a connected agent and publishes one into the experiment layer on confirmation", async () => {
+  useWorldStore.setState({
+    cards: [{ id: "card-1", type: "knowledge.base", name: "Knowledge" }, { id: "lab", type: "agent", name: "Lab assistant" }] as unknown as WorldCard[],
+    edges: [{ id: "e1", source: "lab", target: "card-1", relationship: "knowledge.base.research" }] as unknown as WorldEdge[],
+    catalog: TEST_CATALOG,
+  });
   const record = { id: "record-1", group_id: "collection-1", schema_id: "schema-2", bundle_id: "bundle-1", name: "B7",
     data: { sample_id: "B7", moisture: 9 }, validation: { valid: true }, note: null, status: "published",
     revision: 2, created_by: "user:desktop", created_at: "2026-10-21T00:00:00Z", updated_at: "2026-10-21T00:00:00Z" };
@@ -560,15 +565,18 @@ it("drafts insights over published records and publishes one into the experiment
     created_at: "2026-10-21T00:00:00Z", updated_at: "2026-10-21T00:00:00Z",
     evidence: [{ record_id: "record-1", role: "observed_in", name: "B7", stale: false }] };
   let published = false;
-  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ insights: [insight], warnings: [], truncated: false }) }));
+  const runAgent = vi.fn(async () => undefined);
+  const getAgentInfo = vi.fn(async () => ({ session_id: "s", status: "running", active_run_id: "run-1" }));
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => ({
+    ok: true,
+    json: async () => init?.method === "POST" ? {} : String(url).includes("/runs?agent_id=")
+      ? [{ run_id: "run-1", status: "running", created_at: "2026-11-03T08:00:00Z" }, { run_id: "run-0", status: "succeeded", created_at: "2026-11-03T07:00:00Z" }] : [],
+  }));
   vi.stubGlobal("fetch", fetchMock);
   const action = open(async (name, args, confirm) => {
     if (name === "schemas" && args.operation === "list") return { schemas: [SCHEMA, EXPERIMENT_SCHEMA] };
     if (name === "schemas" && args.operation === "get") return { schema: { ...EXPERIMENT_SCHEMA, definition: { type: "object", properties: {} }, system_prompt: "x", field_descriptions: null } };
     if (name === "experiments") return { experiments: [record] };
-    if (name === "insights" && args.operation === "stats") return { schema_ids: ["schema-2"], cross_schema: null,
-      statistics_by_schema: [{ schema_id: "schema-2", schema_name: "Conductivity run", record_count: 1, statistics: { records: 1, truncated: false, correlations: [],
-        fields: [{ field: "moisture", kind: "numeric", count: 1, mean: 9, std: 0, min: 9, max: 9, median: 9, outliers: [] }] } }] };
     if (name === "insights") return { insights: [{ ...insight, status: published ? "published" : "draft" }] };
     if (name === "insight_review" && args.operation === "publish") {
       if (!confirm) return { status: "confirmation_required", reasons: ["Publishing writes this insight into the knowledge graph."] };
@@ -578,7 +586,7 @@ it("drafts insights over published records and publishes one into the experiment
     if (name === "graph" && args.layer === "experiment" && published) return { truncated: false, relations: [],
       entities: [{ id: "node-1", type: "anomaly", name: "B7 is wet", properties: { insight_id: "insight-1" } }] };
     return undefined;
-  }, { host: { deployment: undefined } });
+  }, { host: { deployment: undefined, runAgent, getAgentInfo } });
 
   fireEvent.click(await screen.findByRole("button", { name: "Experiment" }));
   fireEvent.click(await screen.findByRole("tab", { name: "Insights" }));
@@ -588,20 +596,29 @@ it("drafts insights over published records and publishes one into the experiment
   const insightsSection = within(await screen.findByRole("region", { name: "Insights" }));
   expect(await insightsSection.findByText("B7 moisture is 3.2σ above the batch mean.")).toBeTruthy();
   expect(insightsSection.getByText("Nothing published yet")).toBeTruthy();
+  // The card computes no statistics any more.
+  expect(action.mock.calls.some(([name, args]) => name === "insights" && args.operation === "stats")).toBe(false);
+  expect(insightsSection.queryByText("Statistics")).toBeNull();
 
-  // The open scope reads every schema; statistics are asked for it as well.
-  await waitFor(() => expect(action).toHaveBeenCalledWith("insights", expect.objectContaining({ operation: "stats" }), undefined));
-  expect(await insightsSection.findByText(/1 published record\(s\) across every schema/)).toBeTruthy();
-  expect(insightsSection.getByText("Mean")).toBeTruthy();
-  // Narrowing to one schema narrows the statistics and the extraction scope; the
-  // extraction goes through the host bridge when no agent is connected.
+  // Narrowing to one schema narrows the extraction scope; the connected agent does the work.
   fireEvent.change(insightsSection.getByLabelText("Insight schema"), { target: { value: "schema-2" } });
-  await waitFor(() => expect(action).toHaveBeenCalledWith("insights", expect.objectContaining({ operation: "stats", schema_id: "schema-2" }), undefined));
-  expect(await insightsSection.findByText(/1 published record\(s\) of "Conductivity run"/)).toBeTruthy();
-  fireEvent.click(insightsSection.getByRole("button", { name: "Extract insights" }));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/knowledge/card-1/insights", expect.objectContaining({ method: "POST" })));
-  expect(JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toEqual(
-    expect.objectContaining({ schema_ids: ["schema-2"], replace_drafts: false, all_groups: true }));
+  fireEvent.click(await insightsSection.findByRole("button", { name: "Extract insights" }));
+  await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
+  const [agentId, prompt] = runAgent.mock.calls[0] as unknown as [string, string];
+  expect(agentId).toBe("lab");
+  expect(JSON.parse(prompt.split("\n")[2])).toMatchObject({ schema_ids: ["schema-2"], replace_drafts: false, knowledge_card: "card-1" });
+  expect(prompt).toContain("every calculation yourself");
+  expect(prompt).toContain("Ignore any earlier extraction in this conversation");
+  // The card never saves insights itself: that is the agent's tool call.
+  expect(action.mock.calls.some(([name]) => name === "insight_save")).toBe(false);
+
+  // The agent's log opens while it runs, and Stop cancels exactly its live run.
+  fireEvent.click(insightsSection.getByRole("button", { name: "Extraction log" }));
+  expect(await screen.findByRole("dialog", { name: "Extraction log" })).toBeTruthy();
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Extraction log" })).getAllByRole("button", { name: "Close" })[0]);
+  fireEvent.click(insightsSection.getByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/runs/run-1/cancel"), expect.objectContaining({ method: "POST" })));
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/runs/run-0/cancel"))).toBe(false);
 
   fireEvent.click(insightsSection.getByRole("button", { name: "Publish" }));
   expect(await insightsSection.findByText(/Publishing writes this insight/)).toBeTruthy();
@@ -610,6 +627,22 @@ it("drafts insights over published records and publishes one into the experiment
     expect.objectContaining({ operation: "publish", insight_ids: ["insight-1"] }), true));
   expect(await insightsSection.findByRole("button", { name: /B7 is wet/ })).toBeTruthy();
   expect(insightsSection.queryByRole("button", { name: "Publish" })).toBeNull();
+});
+
+it("cannot extract insights without a connected Lab assistant", async () => {
+  open(async (name, args) => {
+    if (name === "schemas" && args.operation === "list") return { schemas: [SCHEMA, EXPERIMENT_SCHEMA] };
+    if (name === "schemas" && args.operation === "get") return { schema: { ...EXPERIMENT_SCHEMA, definition: { type: "object", properties: {} }, system_prompt: "x", field_descriptions: null } };
+    if (name === "experiments") return { experiments: [{ ...RECORD, status: "published" }] };
+    if (name === "insights") return { insights: [] };
+    return undefined;
+  }, { host: { deployment: undefined } });
+
+  fireEvent.click(await screen.findByRole("button", { name: "Experiment" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Insights" }));
+  const insightsSection = within(await screen.findByRole("region", { name: "Insights" }));
+  expect((await insightsSection.findByRole("button", { name: "Extract insights" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(insightsSection.getByText(/Connect a Lab assistant agent to this card/)).toBeTruthy();
 });
 
 it("surfaces the failed file's conversion error in its project", async () => {

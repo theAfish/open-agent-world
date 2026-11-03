@@ -1268,19 +1268,23 @@ def test_insights_are_drafted_from_published_records_and_published_into_the_grap
     insights, schema, records = _published_batch(card)
     outlier, draft = records["B7"], records["DRAFT"]
 
-    # The prompt: statistics the plugin computed, the records as a table, and the
-    # draft record nowhere in it.
+    # The prompt: schemas and the published records as raw JSON, the draft record
+    # nowhere in it, and nothing precomputed.
     prompt = run(card, insights.insight_prompt, schema_id=schema["id"])
     assert prompt["record_count"] == 8 and prompt["existing"] == []
     assert set(prompt["kinds"]) == {"anomaly", "rule", "trend", "correlation", "threshold", "note"}
-    stats = {item["field"]: item for item in prompt["statistics"]["fields"]}
-    assert [o["record_id"] for o in stats["moisture"]["outliers"]] == [outlier["id"]]
-    assert prompt["statistics"]["correlations"][0]["a"] == "temperature"
-    assert f"| {outlier['id']} | B7 |" in prompt["markdown"]
-    assert draft["id"] not in prompt["markdown"] and "| DRAFT |" not in prompt["markdown"]
-    assert prompt["has_more"] is False and "insights" in prompt["instruction"]
-    page = run(card, insights.insight_prompt, schema_id=schema["id"], limit=500)
-    assert page["has_more"] is True and page["total_characters"] == prompt["total_characters"]
+    assert not {"statistics", "statistics_by_schema", "cross_schema", "markdown"} & set(prompt)
+    shown = {item["name"]: item for item in prompt["records"]}
+    assert set(shown) == {f"B{i}" for i in range(8)} and shown["B7"]["data"]["moisture"] == 9.0
+    assert shown["B7"]["id"] == outlier["id"] and shown["B7"]["schema_id"] == schema["id"]
+    assert draft["id"] not in {item["id"] for item in prompt["records"]}
+    assert prompt["has_more"] is False and prompt["next_offset"] is None and "calculation" in prompt["instruction"]
+    first = run(card, insights.insight_prompt, schema_id=schema["id"], limit=3)
+    assert first["has_more"] is True and first["next_offset"] == 3 and len(first["records"]) == 3
+    rest = run(card, insights.insight_prompt, schema_id=schema["id"], limit=3, offset=first["next_offset"])
+    last = run(card, insights.insight_prompt, schema_id=schema["id"], limit=3, offset=rest["next_offset"])
+    assert [r["id"] for page in (first, rest, last) for r in page["records"]] == [r["id"] for r in prompt["records"]]
+    assert last["has_more"] is False
 
     # Evidence must be published records of this schema; fields are advisory.
     with pytest.raises(KnowledgeError):
@@ -1309,12 +1313,12 @@ def test_insights_are_drafted_from_published_records_and_published_into_the_grap
     counts = run(card, actions.overview)["counts"]
     assert counts["insights"] == 2 and counts["published_insights"] == 0
 
-    # Reading: list, get, stats — the agent's side of the tab.
+    # Reading: list and get — the agent's side of the tab.
     listed = run(card, insights.insights, schema_id=schema["id"], kind="anomaly")["insights"]
     assert [item["id"] for item in listed] == [anomaly["id"]]
     assert run(card, insights.insights, operation="get", insight_id=anomaly["id"])["insight"]["title"] == "B7 moisture high"
-    computed = run(card, insights.insights, operation="stats", schema_id=schema["id"])["statistics"]
-    assert computed == prompt["statistics"]
+    with pytest.raises(ValueError):
+        run(card, insights.insights, operation="stats", schema_id=schema["id"])
 
     # A person edits a draft; the published graph is still empty.
     edited = run(card, insights.insight_update, insight_id=anomaly["id"], title="B7 is wet",
@@ -1404,6 +1408,65 @@ XRD_SCHEMA = {"type": "object", "required": ["sample_id"],
                              "phase": {"type": "string"}}}
 
 
+def test_the_insight_prompt_hands_over_list_values_and_units_and_pages_by_size(card, monkeypatch):
+    from oaw_knowledge_base import insights
+
+    compact = {"required": ["batch_no"], "properties": {
+        "batch_no": {"value": "string"},
+        "particle_size": {"value": "number[]", "unit": "µm", "description": "D50 and D90"}}}
+    schema = run(card, actions.schema_manage, operation="create", name="PSD", definition=compact,
+                 system_prompt="x", kind="experiment")["schema"]
+    bundle = _bundle(card, schema, name="PSD log")
+    _upload(card, bundle, "log\n", "log.md")
+    saved = run(card, actions.experiment_save, bundle_id=bundle["id"], records=[
+        {"name": f"P{i}", "data": {"batch_no": {"value": f"P{i}"},
+                                   "particle_size": {"value": [3.0 + i, 7.5 + i], "unit": "µm"}}}
+        for i in range(3)])["records"]
+    card.confirmed = True
+    for record in saved:
+        run(card, actions.experiment_review, operation="publish", record_id=record["id"])
+    card.confirmed = False
+
+    prompt = run(card, insights.insight_prompt, schema_id=schema["id"])
+    assert prompt["records"][1]["data"]["particle_size"] == {"value": [4.0, 8.5], "unit": "µm"}
+    # The compact definition as stored, not its several-times-larger JSON Schema expansion.
+    assert prompt["schemas"][0]["definition"] == compact
+
+    monkeypatch.setattr(insights, "PAGE_CHARS", 1)
+    page = run(card, insights.insight_prompt, schema_id=schema["id"])
+    assert len(page["records"]) == 1 and page["has_more"] is True and page["next_offset"] == 1
+
+
+def test_every_insight_prompt_page_stays_small_enough_to_reach_the_agent_inline(card):
+    from oaw_knowledge_base import insights
+
+    compact = {"required": ["batch_no"], "properties": {
+        "batch_no": {"value": "string"}, "remarks": {"value": "string"}}}
+    schema = run(card, actions.schema_manage, operation="create", name="Log", definition=compact,
+                 system_prompt="x", kind="experiment")["schema"]
+    bundle = _bundle(card, schema, name="Log")
+    _upload(card, bundle, "log\n", "log.md")
+    saved = run(card, actions.experiment_save, bundle_id=bundle["id"], records=[
+        {"name": f"L{i}", "data": {"batch_no": {"value": f"L{i}"},
+                                   "remarks": {"value": "r" * 800, "description": "d" * 100}}}
+        for i in range(12)])["records"]
+    card.confirmed = True
+    for record in saved:
+        run(card, actions.experiment_review, operation="publish", record_id=record["id"])
+    card.confirmed = False
+
+    # An agent that copies the sibling prompts' character limit gets a clamped page, not an error.
+    seen, offset = [], 0
+    while True:
+        page = run(card, insights.insight_prompt, schema_id=schema["id"], limit=60000, offset=offset)
+        assert len(json.dumps(page, ensure_ascii=False)) < 8000
+        seen += [item["id"] for item in page["records"]]
+        if not page["has_more"]:
+            break
+        offset = page["next_offset"]
+    assert sorted(seen) == sorted(item["id"] for item in saved)
+
+
 def test_insights_can_span_several_schemas_matched_by_specimen_name(card):
     insights, synthesis, records = _published_batch(card, count=6)
     # A second schema describing the same specimens B0..B5, published too.
@@ -1422,18 +1485,14 @@ def test_insights_can_span_several_schemas_matched_by_specimen_name(card):
     run(card, actions.schema_manage, operation="create", name="Empty", definition=XRD_SCHEMA,
         system_prompt="x", kind="experiment")
 
-    # No schema named: every schema with published records, each with its own table
-    # and statistics, plus what the specimens shared by name show across them.
+    # No schema named: every schema with published records, the records of each in
+    # schema-name order, with the schema each record belongs to.
     prompt = run(card, insights.insight_prompt)
     assert [item["schema_name"] for item in prompt["schemas"]] == ["Electrolyte batch", "XRD"]
     # Presentation follows the schema names; the scope key is the sorted id set.
     assert prompt["schema_ids"] == sorted([synthesis["id"], xrd["id"]])
     assert "schema_id" not in prompt and prompt["record_count"] == 12
-    assert prompt["markdown"].index("# Schema: Electrolyte batch") < prompt["markdown"].index("# Schema: XRD")
-    assert prompt["cross_schema"]["matched"] == 6
-    assert {(c["a"], c["b"]) for c in prompt["cross_schema"]["correlations"]} >= {
-        ("Electrolyte batch.temperature", "XRD.crystallinity")}
-    assert len(prompt["statistics_by_schema"]) == 2
+    assert [item["schema_id"] for item in prompt["records"]] == [synthesis["id"]] * 6 + [xrd["id"]] * 6
     # Naming two schemas explicitly is the same scope; naming one narrows it.
     explicit = run(card, insights.insight_prompt, schema_ids=[xrd["id"], synthesis["id"]])
     assert explicit["schema_ids"] == prompt["schema_ids"]
@@ -1458,8 +1517,6 @@ def test_insights_can_span_several_schemas_matched_by_specimen_name(card):
     assert [i["id"] for i in run(card, insights.insights, schema_id=synthesis["id"])["insights"]] == [cross["id"]]
     assert [i["id"] for i in run(card, insights.insights, query="crystalline")["insights"]] == [cross["id"]]
     assert run(card, insights.insights, query="nothing like this")["insights"] == []
-    stats = run(card, insights.insights, operation="stats")
-    assert stats["cross_schema"]["matched"] == 6 and "statistics" not in stats
 
     card.confirmed = True
     published = run(card, insights.insight_review, operation="publish", insight_id=cross["id"])

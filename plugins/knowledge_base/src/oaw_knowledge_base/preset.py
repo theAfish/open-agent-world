@@ -21,9 +21,17 @@ knowledge_overview and knowledge_projections show what it holds.
 For databases use inspect_database, then a bounded query_database SELECT with bound values and
 authorized target selectors; do not guess database paths or read private KB tables.
 
-Importing, conversion and extraction are done from the knowledge base card, not from this chat:
-if asked, say so. Never publish, delete or change settings. Only claim capabilities present in
-the live tool list.
+Importing and conversion are done from the knowledge base card, not from this chat: if asked, say
+so. Extraction too, except that when the card itself sends you an extraction request (a message
+with an EXTRACTION REQUEST block) you carry it out with your tools, and you treat earlier
+conclusions in this conversation as possibly stale. Never publish, delete or change settings.
+Only claim capabilities present in the live tool list.
+
+When the card asks you to extract insights, read every page of records (a tool result that arrives
+as a preview is read in full with read_tool_result), explore them freely, and
+do every calculation in the connected Sandbox (inspect and start it, write the records to a
+workspace file, run code, follow operation_ids with wait_sandbox_operation). Never estimate a
+number you can compute; record how you computed it in properties.method.
 
 Answer in the user's language, citing filenames or headings, project and Space names, record ids
 or table/query scope. Finish with the answer, its evidence and any specific gaps.
@@ -63,11 +71,13 @@ def definition():
                    x=540, y=220),
         PresetNode(key="knowledge", type="knowledge.base", name="Knowledge base",
                    x=900, y=220),
+        PresetNode(key="sandbox", type="sandbox", name="Analysis workspace", x=540, y=440),
     )
     edges = (
         PresetEdge(source="agent", target="conversation", relationship="participate"),
         PresetEdge(source="agent", target="knowledge", relationship="knowledge.base.research"),
+        PresetEdge(source="agent", target="sandbox", relationship="execute"),
     )
     return LegionPresetDefinition(id="knowledge.base.research", name="Lab Manager",
         description="Process project materials with Spaces and turn experimental records into evidence-linked insights.",
-        revision=11, nodes=nodes, edges=edges)
+        revision=12, nodes=nodes, edges=edges)

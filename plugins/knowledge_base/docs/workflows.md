@@ -70,12 +70,16 @@ The output consists of structured JSON records, one per specimen, sample, run or
 case as appropriate. Records can be inspected in a table or edited as JSON/forms.
 They remain drafts until a person confirms publication.
 
-Insights are a subsequent operation over selected published JSON records, not a
-second reading of the original files. Statistics expose measured distributions,
-outliers and correlations; the model proposes evidence-linked insights. Each
-Insight cites record IDs, which in turn cite original source files. Publishing an
-Insight writes it and its evidence into the experiment graph. The model cannot
-publish records or Insights itself.
+Insights are a subsequent operation over published JSON records, not a second
+reading of the original files, and they are an Agent's work: connect a Lab assistant
+Agent (with tools for calculation, such as a Sandbox) and use **Extract insights**.
+The card computes no statistics and a deployment without a connected Agent cannot
+extract them, though it can still review, edit and publish drafts. The Agent reads all
+published records as JSON, looks for connections of any kind, does its own arithmetic
+and proposes evidence-linked insights. Each Insight cites record IDs, which in turn
+cite original source files, and notes how its numbers were obtained so a reviewer can
+reproduce them. Publishing an Insight writes it and its evidence into the experiment
+graph. The model cannot publish records or Insights itself.
 
 ## Deploying it as a locked application
 

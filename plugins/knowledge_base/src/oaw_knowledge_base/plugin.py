@@ -45,8 +45,8 @@ DEPLOYMENT_FIELDS = {
     'experiments': frozenset(['experiment', 'experiments']),
     'experiment_update': frozenset(['experiment']),
     'experiment_review': frozenset(['deleted', 'experiment', 'message', 'reasons', 'status']),
-    'insights': frozenset(['cross_schema', 'group_id', 'insight', 'insights', 'schema_id', 'schema_ids', 'schema_name', 'statistics', 'statistics_by_schema']),
-    'insight_prompt': frozenset(['cross_schema', 'definition', 'existing', 'field_descriptions', 'group_id', 'has_more', 'instruction', 'kinds', 'markdown', 'offset', 'record_count', 'roles', 'schema_id', 'schema_ids', 'schema_name', 'schema_version', 'schemas', 'statistics', 'statistics_by_schema', 'total_characters']),
+    'insights': frozenset(['insight', 'insights']),
+    'insight_prompt': frozenset(['existing', 'group_id', 'has_more', 'instruction', 'kinds', 'next_offset', 'offset', 'record_count', 'records', 'roles', 'schema_ids', 'schemas']),
     'insight_save': frozenset(['insights', 'schema_ids', 'warnings']),
     'insight_update': frozenset(['insight']),
     'insight_review': frozenset(['deleted', 'graph', 'insights', 'message', 'reasons', 'status']),
@@ -92,8 +92,8 @@ def _deployment():
             "experiments": _surface("overview", "jobs", "schemas", "schema_manage", "experiment_bundles",
                 "experiment_bundle_manage", "experiment_ingest", "experiment_extract_prompt", "experiment_save",
                 "experiments", "experiment_update", "experiment_review", config_fields={"default_model"}),
-            "insights": _surface("overview", "schemas", "experiments", "insights", "insight_prompt",
-                "insight_save", "insight_update", "insight_review", "graph", config_fields={"default_model"}),
+            "insights": _surface("overview", "schemas", "experiments", "insights", "insight_update",
+                "insight_review", "graph"),
         },
     )
 
