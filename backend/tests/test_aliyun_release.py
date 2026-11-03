@@ -671,6 +671,97 @@ def test_portable_build_is_offline_target_free_and_git_read_only(portable_build,
     assert f.original_git(f.repo, 'status', '--porcelain') == ''
 
 
+@pytest.fixture
+def ci_build(portable_build, tmp_path, monkeypatch):
+    f = portable_build
+    event = {
+        'number': 123, 'repository': {'id': 42, 'full_name': 'owner/repository'},
+        'pull_request': {'head': {'repo': {'id': 42}, 'sha': 'a' * 40},
+                         'base': {'repo': {'id': 42}, 'sha': 'b' * 40, 'ref': 'integration'}},
+    }
+    event_path = tmp_path / 'event.json'
+    client.write(event_path, event)
+    for name, value in {
+        'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'pull_request',
+        'GITHUB_EVENT_PATH': str(event_path), 'GITHUB_REPOSITORY_ID': '42',
+        'GITHUB_REPOSITORY': 'owner/repository', 'GITHUB_RUN_ID': '456',
+        'GITHUB_RUN_ATTEMPT': '2', 'GITHUB_SHA': f.record['commit'],
+    }.items():
+        monkeypatch.setenv(name, value)
+    def no_rebuild(*args, **kwargs):
+        raise AssertionError('CI packaging must not rebuild or rerun tests')
+    for name in ('npm', 'prepare_npm', 'test_scope'):
+        monkeypatch.setattr(client, name, no_rebuild)
+    return SimpleNamespace(**vars(f), event=event, event_path=event_path, candidate=tmp_path / 'candidate')
+
+
+def test_ci_package_preserves_the_tested_build_and_only_claims_provenance(ci_build):
+    f = ci_build
+    client.main(['ci-package', '--source', str(f.repo), '--output', str(f.candidate)])
+    assert {p.name for p in f.candidate.iterdir()} == {'bundle.tar.gz', 'release.json', 'candidate.json'}
+    record = client.read(f.candidate / 'release.json')
+    candidate = client.read(f.candidate / 'candidate.json')
+    assert candidate == {
+        'version': 1, 'repository': 'owner/repository', 'repository_id': 42,
+        'pull_request': 123, 'head_sha': 'a' * 40, 'base_sha': 'b' * 40,
+        'base_ref': 'integration', 'tested_commit': f.record['commit'],
+        'run_id': 456, 'run_attempt': 2, 'archive_sha256': record['archive_sha256'],
+    }
+    assert record['full_ci'] is False
+    manifest = client.verify_artifact(f.candidate, record)
+    assert manifest['checks'] == {'backend': [], 'frontend': [], 'full_ci': False}
+    with tarfile.open(f.candidate / 'bundle.tar.gz') as archive:
+        assert archive.extractfile('frontend/dist/index.html').read() == (f.repo / 'frontend/dist/index.html').read_bytes()
+
+
+@pytest.mark.parametrize('field,value,error', [
+    ('GITHUB_ACTIONS', 'false', 'pull_request job'),
+    ('GITHUB_EVENT_NAME', 'workflow_dispatch', 'pull_request job'),
+    ('GITHUB_SHA', 'c' * 40, 'Invalid PR build identity'),
+    ('GITHUB_RUN_ATTEMPT', '0', 'Invalid PR build identity'),
+])
+def test_ci_package_rejects_non_pr_or_mismatched_job_identity(ci_build, monkeypatch, field, value, error):
+    monkeypatch.setenv(field, value)
+    with pytest.raises(ValueError, match=error):
+        client.ci_package(ci_build.repo, ci_build.candidate)
+    assert not ci_build.candidate.exists()
+
+
+@pytest.mark.parametrize('side', ['head', 'base'])
+def test_ci_package_rejects_foreign_repository_claims(ci_build, side):
+    f = ci_build
+    f.event['pull_request'][side]['repo']['id'] = 99
+    client.write(f.event_path, f.event)
+    with pytest.raises(ValueError, match='same-repository PR'):
+        client.ci_package(f.repo, f.candidate)
+
+
+def test_ci_package_rejects_tracked_edits_and_missing_frontend_output(ci_build):
+    f = ci_build
+    source = f.repo / 'main.py'
+    original = source.read_bytes()
+    source.write_text('post-test source mutation')
+    with pytest.raises(ValueError, match='Worktree has changes'):
+        client.ci_package(f.repo, f.candidate)
+    source.write_bytes(original)
+    (f.repo / 'frontend/dist/index.html').unlink()
+    with pytest.raises(ValueError, match='Missing validated frontend build output'):
+        client.ci_package(f.repo, f.candidate)
+    assert not f.candidate.exists()
+
+
+def test_ci_package_rejects_missing_pack_build(ci_build, monkeypatch):
+    f = ci_build
+    manifest = f.repo / 'plugins/example/frontend/plugin.json'
+    client.write(manifest, {'pluginId': 'example', 'apiVersion': 1})
+    client.git(f.repo, 'add', str(manifest))
+    client.git(f.repo, 'commit', '-m', 'add Pack')
+    monkeypatch.setenv('GITHUB_SHA', client.git(f.repo, 'rev-parse', 'HEAD'))
+    with pytest.raises(ValueError, match='Missing validated Pack build'):
+        client.ci_package(f.repo, f.candidate)
+    assert not f.candidate.exists()
+
+
 def test_prepare_preserves_dirty_developer_checkout_in_detached_worktree(portable_build, monkeypatch):
     f = portable_build
     source = f.repo / 'main.py'

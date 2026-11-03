@@ -1,0 +1,23 @@
+[Unit]
+Description=Authorize validated GitHub PR builds for the private OAW Preview
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/oaw-preview-controller
+ExecStart=/usr/bin/python3 -I -S /opt/oaw-preview-controller/preview_controller.py --config /opt/oaw-preview-controller/config.json poll
+StateDirectory=oaw-preview-controller
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=3h
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/oaw-preview-controller /opt/oaw-preview-app /srv/oaw-preview-hosting /opt/oaw-preview-releases /opt/oaw-preview-execution /opt/oaw-release-operator-preview /etc/systemd/system /run
+InaccessiblePaths=-/opt/open-agent-world -/srv/oaw-hosting -/opt/oaw-releases -/opt/oaw-release-operator
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

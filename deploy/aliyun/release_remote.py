@@ -795,7 +795,7 @@ def restore(request, b):
     verify_files(app, previous['source_files'])
 
 
-def transaction(request, *, rollback=False):
+def transaction(request, *, rollback=False, before_switch=None):
     app, hosting, releases = paths(request)
     b = release_dir(request)
     helpers = []
@@ -837,6 +837,10 @@ def transaction(request, *, rollback=False):
                 resume(request, config=config)
                 return save(b, 'rolled-back')
             plan(request)
+            # Only an independently installed Python controller may supply this
+            # callback. JSON requests and downloaded artifacts cannot select it.
+            if before_switch is not None:
+                before_switch()
             stopped = True
             stop(request, config=config)
             save(b, 'stopped')

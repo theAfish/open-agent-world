@@ -256,3 +256,22 @@ def test_backend_ci_includes_aliyun_tests_in_existing_file_shards():
                              "tests", "backend/tests", "packs/codex/tests"]
     assert suite["run"].split("--shard ")[1].startswith("${{ matrix.shard }}/4 ")
     assert backend["strategy"]["matrix"]["shard"] == ["1", "2", "3", "4"]
+
+
+def test_preview_artifact_reuses_validated_output_and_is_bound_to_the_run_attempt():
+    workflow = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
+    steps = workflow['jobs']['frontend']['steps']
+    package = next(step for step in steps if 'ci-package' in step.get('run', ''))
+    upload = next(step for step in steps if step.get('with', {}).get('name', '').startswith('oaw-preview-'))
+    acceptance = next(step for step in steps if step.get('run') == 'npm run test:e2e:ui')
+    assert steps.index(acceptance) < steps.index(package) < steps.index(upload)
+    assert package['if'] == upload['if']
+    assert "github.event_name == 'pull_request'" in package['if']
+    assert "github.event.pull_request.base.ref == 'feat/aliyun-agentcore-poc'" in package['if']
+    assert 'github.event.pull_request.head.repo.full_name == github.repository' in package['if']
+    assert upload['with']['name'] == 'oaw-preview-${{ github.run_id }}-${{ github.run_attempt }}'
+    assert upload['with']['if-no-files-found'] == 'error'
+    assert upload['with']['path'].splitlines() == [
+        '.tmp/preview-candidate/bundle.tar.gz', '.tmp/preview-candidate/release.json',
+        '.tmp/preview-candidate/candidate.json',
+    ]
