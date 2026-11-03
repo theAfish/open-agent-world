@@ -161,7 +161,12 @@ def run_sandbox(request, config, mode, arguments, *, writable=None, readonly=(),
         run(*command, *arguments, log=log, timeout=3630)
     finally:
         # Wait for cgroup teardown before root inspects or promotes writable output.
-        run('systemctl', 'stop', unit, timeout=60)
+        loaded = run('systemctl', 'show', unit, '--property=LoadState', '--value', timeout=30).strip()
+        if loaded == 'not-found':
+            require(run('systemctl', 'show', unit, '--property=ActiveState', '--value', timeout=30).strip() == 'inactive',
+                    'A collected release sandbox must be inactive before inspecting its output')
+        else:
+            run('systemctl', 'stop', unit, timeout=60)
 
 
 def bundle_tree(root, *, immutable=False):

@@ -105,11 +105,33 @@ def test_failed_prepare_stops_entire_unit_before_output_can_be_promoted(registra
         calls.append(command)
         if command[0] == 'systemd-run':
             raise ValueError('preparation failed')
+        return 'loaded' if '--property=LoadState' in command else ''
     monkeypatch.setattr(remote, 'run', run)
     with pytest.raises(ValueError, match='preparation failed'):
         remote.run_sandbox(release_request, registration, 'prepare', [], log=Path('/private/log'))
     assert calls[-1][:2] == ('systemctl', 'stop')
     assert calls[-1][2].endswith('-prepare.service')
+
+
+@pytest.mark.parametrize('active', ['inactive', 'active'])
+def test_collected_sandbox_requires_inactive_state_before_promoting_output(registration, release_request, monkeypatch, active):
+    monkeypatch.setattr(remote, 'trusted_worker', lambda: Path('/opt/oaw-release-operator-preview/release_worker.py'))
+    calls=[]
+    def run(*command, **kwargs):
+        calls.append(command)
+        if '--property=LoadState' in command:
+            return 'not-found'
+        if '--property=ActiveState' in command:
+            return active
+        if command[:2] == ('systemctl', 'stop'):
+            pytest.fail('Collected transient units cannot be stopped again')
+        return ''
+    monkeypatch.setattr(remote, 'run', run)
+    if active == 'inactive':
+        remote.run_sandbox(release_request, registration, 'prepare', [], log=Path('/private/log'))
+    else:
+        with pytest.raises(ValueError, match='collected release sandbox must be inactive'):
+            remote.run_sandbox(release_request, registration, 'prepare', [], log=Path('/private/log'))
 
 
 def test_execution_registration_rejects_runtime_approval_shortcuts(registration, release_request, tmp_path, monkeypatch):
