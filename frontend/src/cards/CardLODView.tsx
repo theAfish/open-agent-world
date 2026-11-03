@@ -1,6 +1,7 @@
 import { memo, useRef, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { t, useLocale } from '../i18n';
+import { CardMoveGrip } from './CardMoveGrip';
 import { useWorldStore } from '../state/worldStore';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { ConnectionDropSurface } from './ConnectionDropSurface';
@@ -36,7 +37,7 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
   const design = authoring ?? (definition?.traits.includes('ui.factory-card.v1') ? card.config as unknown as PrintedDesign : undefined);
   const surface = design && (authoring ? faceStudio(design.face) : design.face.studio)?.modes[level];
   const lighting = useCardFinish(!workspace && !container && !surface && !contentPreview ? card.finish : 'normal', 'thumbnail');
-  return <article className={`world-card node-surface card-finish-surface card-lod-view world-card--${card.type} is-${level} ${surface ? 'factory-custom-surface' : ''} ${selected ? 'is-selected' : ''} ${container ? 'container-frame' : ''}`}
+  return <>{container && !card.ephemeral && <CardMoveGrip />}<article className={`world-card node-surface card-finish-surface card-lod-view world-card--${card.type} is-${level} ${surface ? 'factory-custom-surface' : ''} ${selected ? 'is-selected' : ''} ${container ? 'container-frame' : ''}`}
     style={{ '--card-kind': definition?.color, borderRadius: boundaryShape === 'ellipse' ? '50%' : NODE_SURFACE_RADIUS[level] } as CSSProperties}
     data-card-id={card.id} data-card-type={card.type} data-surface-level={level}
     data-card-shape={boundaryShape}
@@ -75,5 +76,5 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
     </header>
     {mid && level !== 'node' && !container && <CardStaticPreview card={card} definition={definition} workspace={workspace} width={width} height={height} />}
     {!workspace && !container && !contentPreview && <CardFinishLayer finish={card.finish} quality="thumbnail" />}</>}
-  </article>;
+  </article></>;
 });

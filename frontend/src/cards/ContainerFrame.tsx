@@ -13,6 +13,7 @@ import { useNodeActivity } from "../effects/useNodeActivity";
 import { useNodeGeneration } from "../effects/generation";
 import { CardFinishLayer } from "./CardFinishLayer";
 import { normalizeCardFinish } from "./cardFinish";
+import { CardMoveGrip } from './CardMoveGrip';
 
 /** Shared spatial shell. Plugin presentations provide their header and controls. */
 export function ContainerFrame({ card, selected, className, label, header, children }: {
@@ -36,6 +37,7 @@ export function ContainerFrame({ card, selected, className, label, header, child
     data-card-id={card.id} data-card-type={card.type} data-finish={normalizeCardFinish(card.finish)} data-activity={activity.phase} aria-label={label}
     onPointerMoveCapture={(event) => { if (spec.connectable && connectingNodeId !== card.id) updateConnectionHoverHint(event, frameRef.current); }}
     onPointerLeave={() => clearConnectionHoverHint(frameRef.current)}>
+    {!card.ephemeral && <CardMoveGrip />}
     <ActivityGlow phase={activity.phase} />
     {spec.connectable && ([[Position.Top, "top"], [Position.Right, "right"], [Position.Bottom, "bottom"], [Position.Left, "left"]] as const).map(([position, side]) =>
       <Handle key={side} type="source" id={`boundary-${side}`} position={position} className={`semantic-handle semantic-handle--${side}`} data-connection-side={side} aria-label={t("Connect {v0} {v1}", { v0: String(card.name), v1: String(side) })} />)}

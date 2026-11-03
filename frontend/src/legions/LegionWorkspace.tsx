@@ -24,6 +24,7 @@ import type { WorkspaceLayoutMetadata } from '../workspace/workspaceLayoutMetada
 import { WorkspaceNavigationContext, type WorkspaceNavigation } from '../workspace/WorkspaceNavigation';
 import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { useInteractionEnvironment } from '../interaction/environment';
 
 const CARD_MIME = 'application/x-oaw-workspace-view';
 type RegisteredSection = WorkspaceSectionRegistration & { card_id: string };
@@ -40,6 +41,7 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
   card: WorldCard; locked?: boolean; actions?: ReactNode; workspaces?: WorldCard[]; onSwitch?: (id: string) => void;
 }) {
   useLocale();
+  const compact = useInteractionEnvironment(state => state.compact);
   const dialog = useRef<HTMLDialogElement>(null);
   const stage = useRef<HTMLElement>(null);
   const cards = useWorldStore(s => s.cards);
@@ -62,7 +64,9 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const savingRef = useRef(false);
-  const [editing, setEditing] = useState(!locked && !baseline.root);
+  const [editing, setEditing] = useState(!locked && !baseline.root && !compact);
+  const [compactView, setCompactView] = useState<string>();
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [selected, setSelected] = useState<WorkspaceView | null>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -92,8 +96,15 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
   const assigned = new Set(placedViews.map(viewKey));
   const unplaced = members.filter(member => !assigned.has(viewKey({ card_id: member.id })));
   const drawerCard = unplaced.find(member => member.id === drawerId);
+  const compactViews = [...placedViews, ...(!locked && !access.deployed ? unplaced.map<WorkspaceView>(member => ({ card_id: member.id })) : [])]
+    .filter(view => !view.section_id || !access.deployed || access.permissions[view.card_id]?.includes(view.section_id));
+  const initialView = firstActiveView(visibleRoot);
+  const currentCompactView = compactViews.find(view => viewKey(view) === compactView)
+    ?? compactViews.find(view => drawerCard?.id === view.card_id && !view.section_id)
+    ?? compactViews.find(view => initialView && viewKey(view) === viewKey(initialView)) ?? compactViews[0];
   placedViews.forEach(view => mountedIds.current.add(view.card_id));
   if (drawerCard) mountedIds.current.add(drawerCard.id);
+  if (compact && currentCompactView) mountedIds.current.add(currentCompactView.card_id);
   // Stable hosts keep text drafts, terminals and plugin state mounted while a
   // card moves between branches or the user switches between edit and preview.
   const surfaceHosts = useRef(new Map<string, HTMLDivElement>());
@@ -241,6 +252,11 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
     if (access.deployed && requested.section_id && !access.permissions[requested.card_id]?.includes(requested.section_id)) return false;
     if (requested.section_id && !sections.has(viewKey(requested))) return false;
     const view = assigned.has(viewKey(requested)) ? requested : { card_id: requested.card_id };
+    if (compact) {
+      if (!compactViews.some(item => viewKey(item) === viewKey(view))) return false;
+      setCompactView(viewKey(view));
+      return true;
+    }
     if (!assigned.has(viewKey(view))) {
       if (locked) return false;
       setDrawerId(view.card_id);
@@ -252,8 +268,8 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
   };
   const navigation = useMemo<WorkspaceNavigation>(() => ({ activate: view => revealRef.current(view) }), []);
 
-  return <WorkspaceNavigationContext.Provider value={navigation}><dialog ref={dialog} className="legion-workspace" data-presentation="application" data-legion-workspace={card.id} aria-label={t('{v0} workspace mode', { v0: card.name })}
-    onCancel={event => { event.preventDefault(); if (event.target !== event.currentTarget) return; if (drawerCard) setDrawerId(null); else requestClose(); }} onKeyDown={event => event.stopPropagation()}
+  return <WorkspaceNavigationContext.Provider value={navigation}><dialog ref={dialog} className="legion-workspace" data-presentation="application" data-compact={compact || undefined} data-legion-workspace={card.id} aria-label={t('{v0} workspace mode', { v0: card.name })}
+    onCancel={event => { event.preventDefault(); if (event.target !== event.currentTarget) return; if (!compact && drawerCard) setDrawerId(null); else requestClose(); }} onKeyDown={event => event.stopPropagation()}
     onDragEnd={() => { setDragging(false); setSelected(null); }}>
     <header className="legion-window-titlebar" data-finish={normalizeCardFinish(card.finish)}>
       <span className="legion-window-mark"><LayoutTemplate size={16} /></span>
@@ -282,11 +298,24 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
       {pendingWorkspace && <button className="primary-button" disabled={busy || conflict} onClick={async () => { if (await save()) switchWorkspace(pendingWorkspace); }}>{t('Save and switch')}</button>}
       <button className="secondary-button" disabled={busy} onClick={() => pendingWorkspace ? switchWorkspace(pendingWorkspace) : close()}>{t(pendingWorkspace ? 'Discard and switch' : 'Discard layout and close')}</button>
     </div>}
+    {compact && <nav className="legion-compact-navigation" aria-label={t('Workspace views')}>
+      <select aria-label={t('Workspace views')} value={currentCompactView ? viewKey(currentCompactView) : ''} disabled={busy || !compactViews.length}
+        onChange={event => setCompactView(event.target.value)}>
+        {!compactViews.length && <option value="">{t('Workspace views')}</option>}
+        {compactViews.map(view => <option key={viewKey(view)} value={viewKey(view)}>{viewTitle(view)}</option>)}
+      </select>
+      <span className="legion-compact-count">{currentCompactView ? compactViews.findIndex(view => viewKey(view) === viewKey(currentCompactView)) + 1 : 0} / {compactViews.length}</span>
+      {editing && <button className="secondary-button" aria-expanded={sourcesOpen} aria-controls="legion-layout-sources" onClick={() => setSourcesOpen(value => !value)}><Plus size={14} />{t('Workspace cards')}</button>}
+    </nav>}
     <div data-tutorial="legion-layout" className={`legion-window-main ${editing ? 'is-editing' : ''}`}>
-      {editing && <aside className="legion-layout-palette" aria-label={t('Workspace cards')}>
+      {editing && (!compact || sourcesOpen) && <aside id="legion-layout-sources" className="legion-layout-palette" aria-label={t('Workspace cards')}>
         <header><strong>{t('Workspace cards')}</strong><span>{members.length - unplaced.length} / {members.length}</span></header>
-        <p>{t('Drop on a title bar to add a tab, or on a region edge to split. You can also select a card and use the docking buttons.')}</p>
-        <p>{t('Hover over a section to arrange or hide it. Restore sections from the card list.')}</p>
+        {!compact && <><p>{t('Drop on a title bar to add a tab, or on a region edge to split. You can also select a card and use the docking buttons.')}</p>
+        <p>{t('Hover over a section to arrange or hide it. Restore sections from the card list.')}</p></>}
+        {compact && !root && <div className="legion-compact-compose">
+          <button className="primary-button" disabled={busy || !members.length || members.length + draft.hidden_sections.length > 100} onClick={() => { startLayout('balanced'); setSourcesOpen(false); }}><LayoutTemplate size={14} />{t('Compose all cards')}</button>
+          {selected && <button className="secondary-button" disabled={busy} onClick={() => { place(selected, null, 'right'); setCompactView(viewKey(selected)); setSourcesOpen(false); }}>{t('Place selected card')}</button>}
+        </div>}
         <div className="legion-layout-card-list">
           {draft.hidden_sections.some(view => memberIds.has(view.card_id)) && <section className="legion-hidden-sections" aria-label={t('Hidden sections')}>
             <h3>{t('Hidden sections')}</h3>
@@ -315,7 +344,7 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
               .forEach(item => sectionViews.set(viewKey(item), item));
             return <div key={member.id} className="legion-palette-owner"><button className="legion-layout-card" data-workspace-source={member.id}
               draggable={!busy} disabled={busy} aria-pressed={selected !== null && viewKey(selected) === viewKey(view)}
-              onClick={() => setSelected(selected && viewKey(selected) === viewKey(view) ? null : view)}
+              onClick={() => { setSelected(selected && viewKey(selected) === viewKey(view) ? null : view); if (compact && root) setSourcesOpen(false); }}
               onDragStart={event => startDrag(event, view)}>
               <CatalogIcon definition={definition} size={18} />
               <span><strong>{member.name}</strong><small>{definition?.label ?? member.type}</small></span>
@@ -328,7 +357,7 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
                 const detached = assigned.has(key);
                 return <div key={key} className="legion-section-row">
                   <button draggable={!busy && !!section} disabled={busy || !section} aria-pressed={!!selected && viewKey(selected) === key}
-                    onDragStart={event => startDrag(event, item)} onClick={() => setSelected(item)}
+                    onDragStart={event => startDrag(event, item)} onClick={() => { setSelected(item); if (compact && root) setSourcesOpen(false); }}
                     title={viewTitle(item)}><GripVertical size={12} /><span>{section?.title ?? item.section_id}<small>{hidden ? t('Hidden') : detached ? t('In workspace') : t('In card')}</small></span></button>
                   {(hidden || detached) && <button disabled={busy} onClick={() => restoreSection(item)} title={t('Restore to card')}
                     aria-label={t('Restore {v0} to card', { v0: section?.title ?? item.section_id ?? '' })}><ArrowLeft size={13} /></button>}
@@ -338,11 +367,15 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
           })}
           {!members.length && <p>{t('Add cards to this Legion on the canvas first.')}</p>}
         </div>
-        <footer>{t('Unplaced cards are available in the bottom bar. All members keep their connections and continue working.')}</footer>
+        {!compact && <footer>{t('Unplaced cards are available in the bottom bar. All members keep their connections and continue working.')}</footer>}
       </aside>}
       <main ref={stage} className="legion-layout-stage" aria-label={t('Workspace layout')}>
-        <div className="legion-layout-root" style={{ minWidth: minimum.width, minHeight: minimum.height }}>
-          {visibleRoot ? <LayoutRegion node={visibleRoot} path="" members={members} hosts={hosts} viewTitle={viewTitle} viewLabel={viewLabel} viewLayout={viewLayout} editing={editing && !busy} resizable={!locked && !busy && !conflict} finishResize={finishResize} selected={selected} dragging={dragging}
+        <div className="legion-layout-root" style={compact ? undefined : { minWidth: minimum.width, minHeight: minimum.height }}>
+          {compact && currentCompactView ? compactViews.filter(view => mountedIds.current.has(view.card_id)).map(view => <div key={viewKey(view)} className="legion-compact-pane" hidden={viewKey(view) !== viewKey(currentCompactView)}>
+            <WorkspacePane leaf={{ kind: 'pane', view }} node={{ kind: 'pane', view }} path="" members={members} hosts={hosts} viewTitle={viewTitle} viewLabel={viewLabel} viewLayout={viewLayout}
+              editing={editing && !busy && assigned.has(viewKey(view))} resizable={false} finishResize={() => {}} selected={selected} dragging={false}
+              stack={stack} activate={next => setCompactView(viewKey(next))} selectable={!busy && !conflict} place={place} startDrag={startDrag} remove={remove} restore={restoreSection} resize={() => {}} />
+          </div>) : !compact && visibleRoot ? <LayoutRegion node={visibleRoot} path="" members={members} hosts={hosts} viewTitle={viewTitle} viewLabel={viewLabel} viewLayout={viewLayout} editing={editing && !busy} resizable={!locked && !busy && !conflict} finishResize={finishResize} selected={selected} dragging={dragging}
             stack={stack} activate={activate} selectable={!busy && !conflict}
             place={place} startDrag={startDrag} remove={remove} restore={restoreSection}
             resize={(path, ratio) => changeRoot(resizeSplit(root!, path, ratio))} />
@@ -360,7 +393,7 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
             </div>}
         </div>
       </main>
-      <section id="legion-card-drawer" className="legion-card-drawer" hidden={!drawerCard} aria-label={t('Unplaced card details')}>
+      {!compact && <section id="legion-card-drawer" className="legion-card-drawer" hidden={!drawerCard} aria-label={t('Unplaced card details')}>
         <header className="legion-drawer-titlebar card-finish-surface">
           {drawerCard && <><CatalogIcon definition={catalog.node_types.find(item => item.id === drawerCard.type)} size={14} /><strong>{drawerCard.name}</strong></>}
           <button className="legion-tab-close" aria-label={t('Collapse card details')} onClick={() => {
@@ -371,11 +404,11 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
         </header>
         {unplaced.filter(member => mountedIds.current.has(member.id)).map(member =>
           <PaneMount key={member.id} id={member.id} host={surfaceHosts.current.get(viewKey({ card_id: member.id }))} hidden={member.id !== drawerCard?.id} label={member.name} />)}
-      </section>
+      </section>}
     </div>
     <footer className="legion-window-footer"><span><i />{editing ? t('Layout editor') : t('Live workspace')}</span>
     <div className="legion-workspace-preferences" role="group" aria-label={t('Application preferences')}>{!locked && <SettingsButton />}<AppearanceButtons /></div>
-    {!locked && !!unplaced.length && <nav className="legion-unplaced-bar" aria-label={t('Unplaced workspace cards')}>
+    {!compact && !locked && !!unplaced.length && <nav className="legion-unplaced-bar" aria-label={t('Unplaced workspace cards')}>
       {unplaced.map(member => <button key={member.id} id={`legion-tray-${member.id}`} className="legion-unplaced-card card-finish-surface" data-finish={normalizeCardFinish(member.finish)}
         aria-label={member.name} title={`${member.name} · ${catalog.node_types.find(item => item.id === member.type)?.label ?? member.type}`}
         aria-expanded={drawerCard?.id === member.id} aria-controls="legion-card-drawer"
@@ -390,8 +423,12 @@ export function WorkspaceWindow({ card, locked = false, actions, workspaces, onS
     {members.filter(member => mountedIds.current.has(member.id)).map(member => <CardWorkspaceOwner key={member.id}
       member={member} host={surfaceHosts.current.get(viewKey({ card_id: member.id }))!} workspace={nodeSurfaceSupport(member.type, catalog).workspace}
       editing={editing && !busy} placedViews={placedViews} hiddenViews={draft.hidden_sections} register={registerSection}
-      select={setSelected} startDrag={startDrag} hide={remove} />)}
+      select={view => { setSelected(view); if (compact && root) setSourcesOpen(false); }} startDrag={startDrag} hide={remove} />)}
   </dialog></WorkspaceNavigationContext.Provider>;
+}
+
+function firstActiveView(node: WorkspaceNode | null): WorkspaceView | undefined {
+  return !node ? undefined : node.kind === 'split' ? firstActiveView(node.first) : activePaneView(node);
 }
 
 interface RegionProps {

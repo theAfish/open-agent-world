@@ -183,7 +183,7 @@ export function CardLibrary() {
     <div className="library-tab-row"><nav className="library-tabs" aria-label={t("Library sections")}>{([
       ["packs", t("Packs"), Archive], ["cards", t("Cards"), LibraryBig], ["store", t("Store"), Store],
     ] as const).filter(([id]) => !hosted || id !== 'store').map(([id, label, Icon]) => <button key={id} data-tutorial={`library-tab-${id}`} className={tab === id ? "is-active" : ""} aria-pressed={tab === id} onClick={() => { setTab(id); setReveal(null); setInspectedPack(null); }}>
-      <Icon size={16} />{label}{id !== "store" && <small>{id === "packs" ? currentPacks.length : allCards.length}</small>}
+      <Icon size={16} />{label}
     </button>)}</nav><div className="library-tab-actions" ref={setInstallAction} /></div>
     {library.error ? <div className="library-error" role="alert">{library.error}<button onClick={() => void library.refresh()}>{t("Refresh")}</button></div> : null}
     {!snapshot ? <div className="library-empty">{library.error ? t("Your collection could not be loaded.") : t("Loading your collection…")}</div> :

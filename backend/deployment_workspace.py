@@ -11,7 +11,7 @@ from backend.api.knowledge_bridge import (
 from backend.node_documents import DocumentActionRequest, read_document, invoke_document_action
 from backend.node_resources import ResourceActionRequest, invoke_resource_action
 from backend.plugins.deployment import default_deployment, project_document
-from backend.deployment_business import business_access, business_router
+from backend.deployment_business import business_access, business_router, projected_card
 from backend.deployments import published_workspaces
 from backend.publication_scope import PublicationScope, public_value
 
@@ -56,14 +56,15 @@ def workspace_snapshot(manifest, services):
     hidden = []
     for node_id, grants in manifest["permissions"].items():
         card = services.world.get_card(node_id)
-        # Only resource presentation metadata crosses the boundary, never config.
-        config = {key: card.config[key] for key in
-                  ("filename", "revision", "mime_type", "bytes", "image_width", "image_height")
-                  if key in card.config and card.type in {"text", "image"}}
         access = manifest.get("plugin_access", {}).get(node_id)
         if access is not None:
             config = {key: value for key, value in card.config.items() if key in access["config_fields"]}
-        cards.append({"id": card.id, "type": card.type, "name": card.name, "status": card.status,
+        else:
+            # Agent panels use the same published business projection as /world.
+            # Omitting their config here made the UI show defaults while runs
+            # consumed the saved values. Credential filtering remains identical.
+            config = projected_card(manifest, services, card)["config"]
+        cards.append({"id": card.id, "revision": card.revision, "type": card.type, "name": card.name, "status": card.status,
                       "parent_id": parents[node_id], "config": public_value(config), "state_scope": card.state_scope,
                       "finish": card.finish})
         sections = {"conversation": ("sessions", "conversation", "participants"),

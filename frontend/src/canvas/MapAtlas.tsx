@@ -1,15 +1,32 @@
 import { t, useLocale } from "../i18n";
 import { Panel, useReactFlow, useStore } from '@xyflow/react';
-import { MapPin, Trash2, X, Droplets } from 'lucide-react';
-import { useCallback, useEffect } from 'react';
+import { MapPin, Trash2, X, Droplets, Ellipsis, Map } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { shallow } from 'zustand/shallow';
 import { useWorldStore } from '../state/worldStore';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
+import { useInteractionEnvironment } from '../interaction/environment';
+import { CanvasZoomButtons } from './CanvasControls';
+import { LocalMiniMap } from './LocalMiniMap';
 
 export interface MapPinLocation { id: string; name: string; x: number; y: number; zoom: number }
 
 export function MapAtlas({ active, onActiveChange, glueActive, onGlueChange }: { active: boolean; onActiveChange: (active: boolean) => void; glueActive: boolean; onGlueChange: (active: boolean) => void }) {
   useLocale();
+  const compact = useInteractionEnvironment(state => state.compact);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [overview, setOverview] = useState(false);
+  const mobileTools = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!compact || !toolsOpen) return;
+    const outside = (event: PointerEvent) => {
+      if (!mobileTools.current?.contains(event.target as Node)) setToolsOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setToolsOpen(false); };
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); };
+  }, [compact, toolsOpen]);
   const pins = useWorldStore(state => state.mapPins);
   const { setCenter } = useReactFlow();
   // Closed tools have no screen-space markers to reposition during a pan.
@@ -22,7 +39,7 @@ export function MapAtlas({ active, onActiveChange, glueActive, onGlueChange }: {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (event.defaultPrevented || document.querySelector('.card-library-modal[open]') || event.isComposing || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
-        || target?.isContentEditable || target?.closest('input, textarea, select, [role="textbox"], .xterm, [role="dialog"]')
+        || target?.isContentEditable || target?.closest('input, textarea, select, [role="textbox"], .xterm, dialog, [role="dialog"]')
         || useNodeSurfaceStore.getState().dragging) return;
       if (event.key === 'Escape' && (active || glueActive)) {
         event.preventDefault();
@@ -45,10 +62,29 @@ export function MapAtlas({ active, onActiveChange, glueActive, onGlueChange }: {
         <MapPin size={25} /><span>{index + 1} · {pin.name}</span>
       </div>)}
     </div>}
-    <Panel position="bottom-right" className="map-tools nodrag nopan nowheel" data-tutorial="tools">
-      {active && <section className="map-atlas" aria-label={t("地图册")}>
+    {compact && overview && !toolsOpen && !active && !glueActive && <LocalMiniMap />}
+    <Panel position="bottom-right" className={`map-tools nodrag nopan nowheel ${compact ? 'mobile-canvas-tools' : ''}`} data-tutorial="tools">
+      {compact && <div ref={mobileTools} className="mobile-canvas-navigation">
+        <div className="mobile-canvas-toolbar" role="toolbar" aria-label={t('Canvas zoom controls')}>
+          <div className="world-controls"><CanvasZoomButtons /></div>
+          <button type="button" className="icon-button canvas-tools-toggle" aria-label={t('Canvas tools')} title={t('Canvas tools')}
+            aria-expanded={toolsOpen} aria-controls="mobile-canvas-options" onClick={() => setToolsOpen(value => !value)}>{toolsOpen ? <X size={19} /> : <Ellipsis size={20} />}</button>
+        </div>
+        {toolsOpen && <section className="mobile-canvas-options" id="mobile-canvas-options" aria-label={t('Canvas tools')}>
+          <p>{t('Hold the top to move a card. Hold the body to connect.')}</p>
+          <button type="button" aria-pressed={active} onClick={() => { onActiveChange(!active); setOverview(false); setToolsOpen(false); }}><MapPin size={18} />{t('图钉')}</button>
+          <button type="button" aria-pressed={glueActive} data-tutorial="tools" onClick={() => { onGlueChange(!glueActive); setOverview(false); setToolsOpen(false); }}><Droplets size={18} />{t('万能胶')}</button>
+          <button type="button" aria-pressed={overview && !active && !glueActive} onClick={() => {
+            const show = !overview || active || glueActive;
+            setOverview(show); if (show) { onActiveChange(false); onGlueChange(false); } setToolsOpen(false);
+          }}><Map size={18} />{t('Map overview')}</button>
+        </section>}
+      </div>}
+      {compact && glueActive && !toolsOpen && <div className="mobile-canvas-mode" role="status"><Droplets size={16} /><span>{t('万能胶')}</span>
+        <button type="button" onClick={() => onGlueChange(false)}>{t('Done')}</button></div>}
+      {active && (!compact || !toolsOpen) && <section className="map-atlas" aria-label={t("地图册")}>
         <header><strong>{t("地图册")}</strong><button className="icon-button" aria-label={t("关闭图钉工具")} onClick={() => onActiveChange(false)}><X size={16} /></button></header>
-        <p>{t("点击空白画布放置图钉 · 按 1–9 跳转 · Esc 收起")}</p>
+        <p>{t(compact ? 'Tap empty canvas to save a map pin.' : "点击空白画布放置图钉 · 按 1–9 跳转 · Esc 收起")}</p>
         <div className="map-atlas-list">
           {pins.length === 0 && <p>{t("还没有图钉，点击画布记录第一个位置。")}</p>}
           {pins.map((pin, index) => <div className="map-atlas-row" key={pin.id}>
@@ -59,11 +95,11 @@ export function MapAtlas({ active, onActiveChange, glueActive, onGlueChange }: {
           </div>)}
         </div>
       </section>}
-      {glueActive && <div className="glue-tool-hint">{t("万能胶已开启 · 拖动卡片靠近另一张卡片的边缘，出现胶水时松手粘合。选中后可从自由角缩放，或解除粘连。")}</div>}
-      <div className="map-toolbar" role="toolbar" aria-label={t("画布工具")}>
+      {glueActive && (!compact || !toolsOpen) && <div className="glue-tool-hint">{t("万能胶已开启 · 拖动卡片靠近另一张卡片的边缘，出现胶水时松手粘合。选中后可从自由角缩放，或解除粘连。")}</div>}
+      {!compact && <div className="map-toolbar" role="toolbar" aria-label={t("画布工具")}>
         <button className="icon-button" aria-label={t("图钉")} aria-pressed={active} aria-expanded={active} title={t("图钉 / 地图册")} onClick={() => onActiveChange(!active)}><MapPin size={18} /></button>
         <button className="icon-button" aria-label={t("万能胶")} data-tutorial="tools" aria-pressed={glueActive} title={t("万能胶 · 靠近边缘并松手粘合")} onClick={() => onGlueChange(!glueActive)}><Droplets size={18} /></button>
-      </div>
+      </div>}
     </Panel>
   </>;
 }

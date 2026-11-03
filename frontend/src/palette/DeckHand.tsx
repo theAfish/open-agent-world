@@ -1,8 +1,8 @@
 import { Children, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 /** Fixed interaction slots; only the pointer-transparent card surfaces move. */
-export function DeckHand({ children, className, style }: {
-  children: ReactNode; className: string; style: CSSProperties;
+export function DeckHand({ children, className, style, flat = false }: {
+  children: ReactNode; className: string; style: CSSProperties; flat?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState<number | null>(null);
@@ -15,7 +15,7 @@ export function DeckHand({ children, className, style }: {
     const surfaces = slots.map((slot) => slot.querySelector<HTMLElement>("[data-deck-visual]")!);
     const positions = slots.map(() => [0, 0, 0]);
     const velocities = slots.map(() => [0, 0, 0]);
-    const restingAngles = slots.map((_, index) => count < 2 ? 0 : (index / (count - 1) * 2 - 1) * Math.min(10, 3 + count * 0.8));
+    const restingAngles = slots.map((_, index) => flat || count < 2 ? 0 : (index / (count - 1) * 2 - 1) * Math.min(10, 3 + count * 0.8));
     let goals = slots.map(() => [0, 0, 0]);
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     let frame = 0;
@@ -30,8 +30,8 @@ export function DeckHand({ children, className, style }: {
         const distance = selected === null ? 0 : index - selected;
         slot.style.zIndex = String(selected === index ? count + 2 : selected === null ? index : count - Math.abs(distance));
         return [
-          selected === null || !distance ? 0 : Math.sign(distance) * 34 * Math.exp(-0.65 * (Math.abs(distance) - 1)),
-          selected === index ? -16 : 0,
+          flat || selected === null || !distance ? 0 : Math.sign(distance) * 34 * Math.exp(-0.65 * (Math.abs(distance) - 1)),
+          !flat && selected === index ? -16 : 0,
           selected === index ? 0 : restingAngles[index],
         ];
       });
@@ -61,7 +61,7 @@ export function DeckHand({ children, className, style }: {
       element.removeEventListener("deck-motion", wake);
       reduced.removeEventListener("change", wake);
     };
-  }, [count]);
+  }, [count, flat]);
 
   useEffect(() => { root.current?.dispatchEvent(new Event("deck-motion")); }, [active]);
 

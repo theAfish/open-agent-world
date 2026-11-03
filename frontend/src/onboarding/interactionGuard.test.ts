@@ -6,6 +6,17 @@ const scope = (id: string): InteractionScope => ({ active: true, busy: false, st
 function el(html: string) { document.body.innerHTML = html; return document.body.firstElementChild!; }
 afterEach(() => { document.body.innerHTML = ''; });
 describe('tutorial interaction ownership', () => {
+  it('permits picking up only the demonstrated card during a move, and blocks it while busy', () => {
+    const current = scope('move');
+    const remove = installTutorialInteractionGuard(() => current, () => {});
+    try {
+      expect(tutorialAllowsCanvasTarget('practice', 'move')).toBe(true);
+      expect(tutorialAllowsCanvasTarget('other', 'move')).toBe(false);
+      expect(tutorialAllowsCanvasTarget('practice', 'connect')).toBe(false);
+      current.busy = true;
+      expect(tutorialAllowsCanvasTarget('practice', 'move')).toBe(false);
+    } finally { remove(); }
+  });
   it('keeps help and its keyboard handling available during a demonstration', () => {
     const current = { ...scope('place'), busy: true };
     expect(tutorialAllows(el('<button data-help-trigger />'), current)).toBe(true);

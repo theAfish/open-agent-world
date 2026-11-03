@@ -11,7 +11,7 @@ export function Glyph({name}:{name:'close'|'down'|'elements'|'play'|'back'|'stop
 // Portal stays inside the transformed OAW window. All measurements are converted
 // back to this window's local coordinates, including its current canvas zoom.
 export function FocusLayer({anchor,kind,onClose,children,title="全谱拟合设置"}:{anchor:HTMLButtonElement;kind:'elements'|'engine'|'library'|'settings';onClose:()=>void;children:ReactNode|((dismiss:()=>void)=>ReactNode);title?:string}) {
-  const root=anchor.closest<HTMLElement>('.legion-workspace-pane, .node-workspace-window, article.world-card')??anchor.closest<HTMLElement>('.xrd-match-ui')!;
+  const [root]=useState(()=>anchor.closest<HTMLElement>('.legion-workspace-pane, .node-workspace-window, article.world-card')??anchor.closest<HTMLElement>('.xrd-match-ui')!);
   const layer=useRef<HTMLDivElement>(null), panel=useRef<HTMLDivElement>(null);
   const close=useRef(onClose);close.current=onClose;
   const closing=useRef(false);
@@ -132,7 +132,7 @@ export function MatchControls({config,schema,save,disabled,advanced,onInvalid}:{
   const matched=(e:typeof ELEMENTS[number])=>!query||`${e.number} ${e.symbol} ${e.name}`.toLowerCase().includes(query.toLowerCase());
   return <fieldset className="xrd-parameter-grid" disabled={disabled} aria-label="参数配置">
     <section className="xrd-zone xrd-zone-strategy"><h3>检索策略</h3><div className="xrd-zone-body">
-      <label className="xrd-engine-field"><span>检索方式</span><button className="xrd-engine-trigger" type="button" role="combobox" aria-label="谱库检索方式" aria-expanded={popup?.kind==='engine'} aria-haspopup="dialog" onClick={e=>open('engine',e.currentTarget)}>{mode?.label??String(config.library_engine)}<Glyph name="down"/></button></label>
+      <label className="xrd-engine-field"><span>检索方式</span><button className="xrd-engine-trigger" type="button" role="combobox" aria-label="谱库检索方式" title={mode?.value==='qualx'?'尺度搜索仅用于初筛候选；完整搜索请选择遍历检索。':undefined} aria-expanded={popup?.kind==='engine'} aria-haspopup="dialog" onClick={e=>open('engine',e.currentTarget)}>{mode?.label??String(config.library_engine)}<Glyph name="down"/></button></label>
       {numeric('library_top_n','候选数')}
 
     </div></section>
@@ -141,7 +141,7 @@ export function MatchControls({config,schema,save,disabled,advanced,onInvalid}:{
       <div className="xrd-element-summary"><small>已选择 {selected.length} 个元素</small>{selected.length>0&&<button type="button" onClick={()=>update([])}>清空</button>}</div>
     </div></section>
     <section className="xrd-zone xrd-zone-peaks"><h3>峰匹配</h3><div className="xrd-zone-body xrd-peaks-grid">
-      {numeric('wavelength','匹配波长 / Å')}{numeric('tolerance_deg','峰位容差 ± / °')}{numeric('prominence_fraction','峰突出度 / 最强峰')}{numeric('reference_min_intensity','标准峰最低相对强度')}
+      {numeric('wavelength','匹配波长 / Å')}{numeric('tolerance_deg','峰位容差 ± / °')}{numeric('cell_scale_percent','晶胞缩放范围 ± / %')}{numeric('prominence_fraction','峰突出度 / 最强峰')}{numeric('reference_min_intensity','标准峰最低相对强度')}
     </div></section>
     <section className="xrd-zone xrd-zone-advanced"><h3>高级设置</h3><div className="xrd-zone-body">
       <details><summary>检峰设置 <Glyph name="down"/></summary><div className="xrd-advanced-fields">{numeric('smoothing_deg','平滑宽度 / °','°')}{numeric('min_peak_distance','最小峰间距 / °','°')}<small>以约 1° 局部低值背景扣除后检峰。</small></div></details>{advanced}

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useLocale } from '../i18n';
 import { TEST_CATALOG } from '../state/catalog.fixture';
 import { buildCardDraft } from '../state/helpers';
@@ -11,6 +11,7 @@ import { useCardLibrary, type LibrarySnapshot } from '../state/cardLibrary';
 import { ProgressiveTutorials, TutorialMarkdown } from './ProgressiveTutorials';
 import { useProgressiveTutorials } from './store';
 import { tutorialOwner } from './catalog';
+import { useInteractionEnvironment } from '../interaction/environment';
 
 const definition = { id: 'intro', title: 'Text tutorial', summary: 'Write and share', document: '## Reference\nRead me offline.',
   steps: [{ id: 'edit', title: 'Write a note', body: 'Open the text card.' }, { id: 'share', title: 'Share the note', body: 'Connect an Agent.' }] };
@@ -27,7 +28,36 @@ beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks();
+  useInteractionEnvironment.setState({ compact: false, height: 0, top: 0 });
+});
+
+it('keeps compact automatic hints above the live Deck and defers them when the gap is too small', () => {
+  useInteractionEnvironment.setState({ compact: true, height: 800, top: 0 });
+  vi.stubGlobal('innerHeight', 800);
+  let reposition = () => {};
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { reposition = callback; }
+    observe() {} disconnect() {}
+  });
+  render(<><aside className="component-palette" data-testid="deck" /><aside className="map-tools" data-testid="tools" /><ProgressiveTutorials /></>);
+  let top = 600;
+  vi.spyOn(screen.getByTestId('deck'), 'getBoundingClientRect').mockImplementation(() => ({ top } as DOMRect));
+  vi.spyOn(screen.getByTestId('tools'), 'getBoundingClientRect').mockReturnValue({ bottom: 210 } as DOMRect);
+  act(() => useProgressiveTutorials.getState().encounter([tutorialOwner('card', 'text')]));
+  const panel = document.querySelector<HTMLElement>('.progressive-tutorial')!;
+  expect(panel.style.bottom).toBe('208px');
+  expect(panel.hidden).toBe(false);
+  top = 370;
+  act(reposition);
+  expect(panel.hidden).toBe(true);
+  expect(useProgressiveTutorials.getState().current).toBeTruthy();
+  top = 740;
+  act(reposition);
+  expect(panel.hidden).toBe(false);
+  expect(panel.style.bottom).toBe('68px');
+});
 
 it('does not prompt on background loading; an intentional encounter can be read and dismissed', () => {
   render(<ProgressiveTutorials />);

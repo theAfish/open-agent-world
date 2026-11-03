@@ -9,12 +9,48 @@ import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { useWorldStore } from '../state/worldStore';
 import type { WorldCard } from '../types/world';
 import { CardContent, WorldCardNode } from './CardFrame';
+import { useInteractionEnvironment } from '../interaction/environment';
+import { worldApi } from '../api/client';
 
 vi.mock('./AgentCard', () => ({ AgentCardBody: () => <div>Agent settings</div> }));
 vi.mock('./NodeWorkspace', () => ({ WorkspaceSurface: () => <div>Agent workspace</div> }));
 vi.mock('../plugins/PluginSurface', () => ({ PluginSurface: ({children,card}: {children?: React.ReactNode;card:WorldCard}) => card.type === 'test.instrument' ? <div>Instrument preview</div> : children }));
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover; useEquipmentPanel.setState({ openIds: [] }); });
+afterEach(() => {
+  cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover;
+  delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
+  delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
+  useEquipmentPanel.setState({ openIds: [] });
+  useInteractionEnvironment.setState({ compact: false });
+  useNodeSurfaceStore.setState({ mobileSurface: undefined });
+});
+
+it('moves one text editor outside the canvas and retains its draft across mobile close and reopen', async () => {
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
+  vi.spyOn(worldApi, 'getText').mockResolvedValue({ content: 'Original', revision: 1, history: [] });
+  const card: WorldCard = { id: 'mobile-text', type: 'text', name: 'Phone notes', status: 'available', config: {},
+    position: { x: 240, y: 180 }, size: { width: 300, height: 190 }, expanded: false };
+  useWorldStore.setState({ cards: [card], edges: [], events: [], catalog: TEST_CATALOG });
+  useNodeSurfaceStore.setState({ surfaceLevels: { [card.id]: 'preview' }, baseLevels: { [card.id]: 'preview' }, dragging: false, connectingNodeId: undefined });
+  useNodeSurfaceStore.getState().syncCards([card], TEST_CATALOG);
+  useInteractionEnvironment.setState({ compact: true });
+  const props = { id: card.id, data: { card }, selected: false, dragging: false } as ComponentProps<typeof WorldCardNode>;
+  const { container } = render(<ReactFlowProvider><div className="react-flow__viewport"><WorldCardNode {...props} /></div></ReactFlowProvider>);
+  act(() => useNodeSurfaceStore.getState().openPrimary(card.id));
+  const editor = await screen.findByDisplayValue('Original');
+  expect(editor.closest('dialog')).not.toBeNull();
+  expect(editor.closest('.react-flow__viewport')).toBeNull();
+  expect(container.querySelector('.world-card')?.getAttribute('data-surface-level')).toBe('preview');
+  fireEvent.change(editor, { target: { value: 'Unsaved phone draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Back to canvas' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  act(() => useNodeSurfaceStore.getState().openPrimary(card.id));
+  expect(screen.getByDisplayValue('Unsaved phone draft')).toBe(editor);
+  expect(screen.getAllByRole('textbox', { name: 'Contents' })).toHaveLength(1);
+});
 
 it('renders a preview-only content instrument without card print or title bars and retains rename/delete and handles', () => {
   Object.defineProperty(HTMLElement.prototype,'showPopover',{configurable:true,value:vi.fn()});

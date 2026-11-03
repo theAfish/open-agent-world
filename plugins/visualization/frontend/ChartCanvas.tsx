@@ -3,15 +3,52 @@ import { envelope, format, type Kind, type Plot } from './plot';
 
 const colors = ['#438ec0', '#d78c51', '#52a797', '#a27ac3', '#d16c84', '#a4a149'];
 type Hit = {x: number; y: number; text: string};
+type View = {zoom: number; x: number; y: number};
+type Pointer = {x: number; y: number; clientX: number; clientY: number};
 
 export function ChartCanvas({plot, kind, xLabel, yLabel}: {plot: Plot; kind: Exclude<Kind, 'graph'>; xLabel: string; yLabel: string}) {
   const canvas = useRef<HTMLCanvasElement>(null), frame = useRef<HTMLDivElement>(null), hits = useRef<Hit[]>([]);
   const [size, setSize] = useState({width: 600, height: 320}), [tip, setTip] = useState<Hit | null>(null);
   const [view, setView] = useState({zoom: 1, x: 0, y: 0});
+  const currentView = useRef(view); currentView.current = view;
   const [theme, setTheme] = useState(0);
-  const drag = useRef<{x: number; y: number; left: number; top: number} | null>(null);
+  const drag = useRef<{pointer: number; start: Pointer; view: View; moved: boolean; touch: boolean} | null>(null);
+  const pointers = useRef(new Map<number, Pointer>());
+  const pinch = useRef<{distance: number; anchor: number; view: View} | null>(null);
+  const changeView = (update: View | ((value: View) => View)) => {
+    const next = typeof update === 'function' ? update(currentView.current) : update;
+    currentView.current = next; setView(next);
+  };
+  const local = (event: {clientX: number; clientY: number}): Pointer => {
+    const rect = frame.current!.getBoundingClientRect();
+    return {x: (event.clientX - rect.left) * size.width / Math.max(1, rect.width), y: (event.clientY - rect.top) * size.height / Math.max(1, rect.height), clientX: event.clientX, clientY: event.clientY};
+  };
+  const inspect = (point: Pointer) => {
+    let nearest: Hit | null = null, distance = 25;
+    for (const hit of hits.current) { const next = Math.hypot(hit.x - point.x, hit.y - point.y); if (next < distance) { nearest = hit; distance = next; } }
+    setTip(nearest);
+  };
+  const release = (pointer: number) => { if (frame.current?.hasPointerCapture?.(pointer)) frame.current.releasePointerCapture(pointer); };
+  const clearGesture = () => {
+    const captured = new Set([...pointers.current.keys(), ...(drag.current ? [drag.current.pointer] : [])]);
+    pointers.current.clear(); drag.current = null; pinch.current = null;
+    captured.forEach(release);
+  };
+  const startPinch = () => {
+    const [a, b] = [...pointers.current.values()], view = currentView.current;
+    // Plots retain their existing fixed Y scale. Anchor the X domain to the
+    // moving midpoint, accounting for the 62px left axis and canvas ancestors.
+    pinch.current = {distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), anchor: ((a.x + b.x) / 2 - 62 - view.x) / view.zoom, view};
+    drag.current = null;
+  };
   const groups = useMemo(() => [...new Set(plot.points.map(p => p.series))], [plot, kind]);
-  useEffect(() => { setView({zoom: 1, x: 0, y: 0}); setTip(null); }, [plot]);
+  useEffect(() => { clearGesture(); changeView({zoom: 1, x: 0, y: 0}); setTip(null); }, [plot]);
+  useEffect(() => {
+    const cancel = () => { clearGesture(); setTip(null); };
+    const visibility = () => { if (document.hidden) cancel(); };
+    window.addEventListener('blur', cancel); document.addEventListener('visibilitychange', visibility);
+    return () => { window.removeEventListener('blur', cancel); document.removeEventListener('visibilitychange', visibility); clearGesture(); };
+  }, []);
   useEffect(() => {
     const observer = new MutationObserver(() => setTheme(value => value + 1));
     observer.observe(document.documentElement, {attributes:true, attributeFilter:['data-theme','class','style']});
@@ -81,23 +118,59 @@ export function ChartCanvas({plot, kind, xLabel, yLabel}: {plot: Plot; kind: Exc
   return <div className="viz-canvas" ref={frame} tabIndex={0} onKeyDown={e=>{
     if(!['+','=','-','Home','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;
     e.preventDefault(); e.stopPropagation();
-    setView(v=>e.key==='Home'?{zoom:1,x:0,y:0}:{zoom:e.key==='+'||e.key==='='?Math.min(20,v.zoom*1.2):e.key==='-'?Math.max(1,v.zoom/1.2):v.zoom,x:v.x+(e.key==='ArrowLeft'?-25:e.key==='ArrowRight'?25:0),y:v.y+(e.key==='ArrowUp'?-25:e.key==='ArrowDown'?25:0)});
-  }} onDoubleClick={e=>{e.stopPropagation();setView({zoom:1,x:0,y:0});}}
-    onWheel={e => {e.stopPropagation(); setTip(null); const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2; setView(v => ({...v, zoom: Math.max(1, Math.min(20, v.zoom * factor))}));}}
-    onPointerDown={e => {e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = {x:e.clientX,y:e.clientY,left:view.x,top:view.y};}}
-    onPointerUp={e => {drag.current = null; if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}}
-    onPointerCancel={() => {drag.current = null;}}
-    onPointerLeave={() => setTip(null)}
+    clearGesture(); changeView(v=>e.key==='Home'?{zoom:1,x:0,y:0}:{zoom:e.key==='+'||e.key==='='?Math.min(20,v.zoom*1.2):e.key==='-'?Math.max(1,v.zoom/1.2):v.zoom,x:v.x+(e.key==='ArrowLeft'?-25:e.key==='ArrowRight'?25:0),y:v.y+(e.key==='ArrowUp'?-25:e.key==='ArrowDown'?25:0)});
+  }} onDoubleClick={e=>{e.stopPropagation();clearGesture();changeView({zoom:1,x:0,y:0});}}
+    onWheel={e => {e.stopPropagation(); clearGesture(); setTip(null); const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2; changeView(v => ({...v, zoom: Math.max(1, Math.min(20, v.zoom * factor))}));}}
+    onPointerDown={e => {
+      if (e.button !== 0) return;
+      e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); setTip(null);
+      const point = local(e);
+      if (e.pointerType === 'touch') {
+        pointers.current.set(e.pointerId, point);
+        if (pointers.current.size >= 2) { if (pointers.current.size === 2) startPinch(); return; }
+      }
+      drag.current = {pointer: e.pointerId, start: point, view: currentView.current, moved: false, touch: e.pointerType === 'touch'};
+    }}
+    onPointerUp={e => {
+      if (!pointers.current.has(e.pointerId) && drag.current?.pointer !== e.pointerId) return;
+      const active = drag.current;
+      pointers.current.delete(e.pointerId);
+      if (pinch.current) {
+        pinch.current = null; drag.current = null;
+        if (pointers.current.size >= 2) startPinch();
+        else if (pointers.current.size === 1) {
+          const [pointer, start] = [...pointers.current][0];
+          drag.current = {pointer, start, view: currentView.current, moved: true, touch: true};
+        }
+      } else if (active?.pointer === e.pointerId) {
+        drag.current = null;
+        if (active.touch && !active.moved) inspect(local(e));
+      }
+      release(e.pointerId);
+    }}
+    onPointerCancel={() => {clearGesture(); setTip(null);}}
+    onLostPointerCapture={e => { if (pointers.current.has(e.pointerId) || drag.current?.pointer === e.pointerId) { clearGesture(); setTip(null); } }}
+    onPointerLeave={e => {if (e.pointerType !== 'touch') setTip(null);}}
     onPointerMove={e => {
-      const rect = e.currentTarget.getBoundingClientRect(), sx = size.width / rect.width, sy = size.height / rect.height;
-      if (drag.current) { const d = drag.current; setView(v => ({...v, x:d.left+(e.clientX-d.x)*sx, y:d.top+(e.clientY-d.y)*sy})); return; }
-      const x = (e.clientX - rect.left)*sx, y = (e.clientY - rect.top)*sy;
-      let nearest: Hit | null = null, distance = 25;
-      for (const p of hits.current) { const d = Math.hypot(p.x-x,p.y-y); if(d<distance){nearest=p;distance=d;} } setTip(nearest);
+      const point = local(e);
+      if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, point);
+      if (pinch.current && pointers.current.has(e.pointerId)) {
+        e.preventDefault(); e.stopPropagation();
+        const [a, b] = [...pointers.current.values()], start = pinch.current;
+        const zoom = Math.max(1, Math.min(20, start.view.zoom * Math.hypot(a.x - b.x, a.y - b.y) / start.distance));
+        changeView({...start.view, zoom, x: (a.x + b.x) / 2 - 62 - start.anchor * zoom}); return;
+      }
+      if (drag.current?.pointer === e.pointerId) {
+        const d = drag.current;
+        if (!d.moved && Math.hypot(point.clientX - d.start.clientX, point.clientY - d.start.clientY) < 5) return;
+        d.moved = true; e.preventDefault(); e.stopPropagation(); setTip(null);
+        changeView({...d.view, x: d.view.x + point.x - d.start.x, y: d.view.y + point.y - d.start.y}); return;
+      }
+      if (e.pointerType !== 'touch') inspect(point);
     }}>
     <canvas ref={canvas} role="img" aria-label={`${kind} chart: ${plot.points.length} points`} />
     {tip && <div className="viz-tooltip" style={{left: Math.min(tip.x + 12, size.width - 190), top: Math.max(4, tip.y - 32)}}>{tip.text}</div>}
-    {view.zoom !== 1 || view.x !== 0 || view.y !== 0 ? <button className="viz-reset" onPointerDown={e=>e.stopPropagation()} onClick={()=>setView({zoom:1,x:0,y:0})}>↺ 1:1</button> : null}
+    {view.zoom !== 1 || view.x !== 0 || view.y !== 0 ? <button className="viz-reset" onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();clearGesture();changeView({zoom:1,x:0,y:0});setTip(null);}}>↺ 1:1</button> : null}
     {groups.some(Boolean) && <div className="viz-legend">{groups.slice(0, 8).map((group,i)=><span key={group}><i style={{background:colors[i%colors.length]}}/>{group}</span>)}{groups.length > 8 && <span>+{groups.length-8}</span>}</div>}
   </div>;
 }

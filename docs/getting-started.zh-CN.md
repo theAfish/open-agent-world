@@ -26,6 +26,8 @@ bash scripts/start.sh
 
 安装脚本会安装后端开发依赖、Google ADK 和 LiteLLM 适配器、前端依赖，并构建生产版前端。`start` 通过 Python 后端提供构建好的页面，并打开本地应用地址。按 Ctrl+C 停止启动器。修改前端后，使用 `npm --prefix frontend run build` 重新构建。
 
+日常前端开发请使用下文的 dev 热更新流程。
+
 Shell 启动器直接使用已安装的后端环境，只有安装和重新构建时才需要 Node.js 和 uv。支持传递启动参数，例如 `bash scripts/start.sh --mode preview --profile demo` 或 `bash scripts/start.sh --port 38474`。无法自动打开浏览器时，可在同一台机器上手动打开输出的本地地址。使用 WSL2 时，请在 Linux 发行版内安装前置工具并运行这两个脚本。
 
 Windows 桌面安装包自带 Python 运行时，并在独立的 Tauri 窗口中打开应用。安装包构建和开发配置目录详见[桌面安装与开发（英文）](desktop.md)。
@@ -38,22 +40,30 @@ Windows 桌面安装包自带 Python 运行时，并在独立的 Tauri 窗口中
 2. 打开 **Pack & Card Library（卡包与卡牌库）**，打开已安装的卡包，将收集的卡牌加入当前牌组。全新安装时，卡包尚未打开，牌组为空。
 3. 从底部托盘放置 Agent，设置指令和模型，并连接希望它使用的资源。[核心概念（英文）](concepts.md) 介绍了可用的关系类型。也可以跟随[交互教程](tutorial.md) 操作。
 
-## 不配置模型凭据也能体验
+## 前端开发与热更新
 
-需要结果可重复的本地调试时，可以使用 mock 运行时：
+各平台修改前端时都应使用开发服务器。首次准备开发 profile，再启动 dev：
 
 ```powershell
 ./scripts/setup.ps1 -Profile default -SkipBuild
-./scripts/dev.ps1 -AgentRuntime mock
+./scripts/dev.ps1
 ```
 
 也可以使用跨平台启动器：
 
 ```bash
 bash scripts/setup.sh --profile default --skip-build
-bash scripts/dev.sh --agent-runtime core.mock
+bash scripts/dev.sh
 ```
 
+编辑时保持 dev 运行：宿主前端会热更新，修改过的 Pack 前端会自动重新构建。
+拉取源码更新后，按需重启 dev；仅在新建 profile 或依赖缺失、变更时重新运行 setup。
+普通前端修改不需要 setup、生产构建或部署。`start.ps1` / `start.sh` 提供已有的生产构建，不会热更新。
+
+## 不配置模型凭据也能体验
+
+需要不配置模型凭据、结果可重复的本地调试时，Windows 添加 `-AgentRuntime mock`，
+跨平台启动器添加 `--agent-runtime core.mock`。
 mock 运行时是调试替代品，不是语言模型。真实的智能体回复需要配置模型服务。已有 Agent 如果明确选择了运行时，会保留原来的选择。
 
 ## 启动与问题排查

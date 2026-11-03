@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SelectMenuLayer } from './SelectMenuLayer';
+import { useInteractionEnvironment } from '../interaction/environment';
 
 beforeEach(() => {
   // jsdom has no browser top layer; real positioning is covered in Playwright.
@@ -10,6 +11,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  useInteractionEnvironment.setState({ height: 0, top: 0 });
   delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover;
 });
 
@@ -23,6 +25,19 @@ function Form({ change = vi.fn() }: { change?: (value: string) => void }) {
 }
 
 describe('shared select menus', () => {
+  it('repositions an open menu inside the keyboard-adjusted visible viewport', () => {
+    render(<Form />);
+    const select = screen.getByLabelText('Choice');
+    vi.spyOn(select, 'getBoundingClientRect').mockReturnValue({ top: 280, bottom: 310, left: 20, width: 180 } as DOMRect);
+    fireEvent.click(select);
+    expect(screen.getByRole('listbox').style.top).toBe('314px');
+    act(() => useInteractionEnvironment.setState({ height: 220, top: 40 }));
+    const menu = screen.getByRole('listbox');
+    expect(menu.style.top).toBe('252px');
+    expect(menu.style.maxHeight).toBe('204px');
+    expect(menu.style.transform).toBe('translateY(-100%)');
+  });
+
   it('uses an application list for native fields and preserves React changes and focus', () => {
     const change = vi.fn();
     render(<Form change={change} />);

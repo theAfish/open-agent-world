@@ -1,15 +1,32 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as hostedAuth from '../auth/hostedSession';
 import { deploymentRequest } from './api';
 import { RuntimeApp } from './RuntimeApp';
 import { configureWorkspaceApi } from '../api/client';
 import { TEST_CATALOG } from '../state/catalog.fixture';
+import { useWorldStore } from '../state/worldStore';
 
 vi.mock('./api', () => ({ deploymentRequest: vi.fn() }));
 vi.mock('../legions/LegionWorkspace', () => ({ WorkspaceWindow: ({ actions }: { actions: React.ReactNode }) => <section aria-label="Published workspace">{actions}</section> }));
 afterEach(() => { cleanup(); vi.restoreAllMocks(); configureWorkspaceApi(false); });
+
+it('keeps edits made while a workspace refresh is in flight', async () => {
+  const workspace = { id: 'published', cards: [{ id: 'match', type: 'xrd.match', revision: 4,
+    config: { library_engine: 'qualx' } }], legion: { id: 'workspace', type: 'legion' }, catalog: TEST_CATALOG, permissions: {} };
+  let refresh!: (value: typeof workspace) => void;
+  let poll!: () => void;
+  vi.spyOn(window, 'setInterval').mockImplementation(callback => { poll = callback as () => void; return 1; });
+  vi.mocked(deploymentRequest).mockResolvedValueOnce(workspace).mockImplementationOnce(() => new Promise(resolve => { refresh = resolve; }));
+  render(<RuntimeApp name="Research" />);
+  await screen.findByRole('region', { name: 'Published workspace' });
+  act(() => poll());
+  act(() => useWorldStore.setState(state => ({ cards: state.cards.map(card => card.id === 'match'
+    ? { ...card, revision: 5, config: { library_engine: 'native' } } : card) })));
+  await act(async () => { refresh(workspace); });
+  expect(useWorldStore.getState().cards.find(card => card.id === 'match')?.config.library_engine).toBe('native');
+});
 
 const session: hostedAuth.HostedSession = { hosted: true, authenticated: true, login_methods: ['password'],
   user: { id: 'alice', username: 'alice', display_name: 'Alice' },
