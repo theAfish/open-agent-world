@@ -1,5 +1,9 @@
 # 阿里云适配 POC
 
+English developer workflow and gated installation plan:
+[Ali integration delivery](POST_MERGE.md). Production activation requires separate
+approval and successful controlled deployment/rollback acceptance.
+
 2026-10-30：[AgenticFS 长期文件工作区](PERSISTENT_WORKSPACES.md)已接通独立用户持久存储；新增部署时的资源就绪 hook、保留同一工作区的数据升级，以及不依赖 ACR 的科学环境模板。当前多用户入口见 [ECS 部署](ECS.md)；下文保留早期直接托管路径的说明。
 
 2026-10-20：新增 [ECS 多用户画布测试路径](ECS.md)，复用最新 `dev` 的账号和独立用户后台。

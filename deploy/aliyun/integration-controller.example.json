@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "repository": "theAfish/open-agent-world",
+  "repository_id": 1351393176,
+  "base_branch": "feat/aliyun-agentcore-poc",
+  "environment": "aliyun-integration",
+  "trusted_revision": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_PHASE3B_COMMIT",
+  "enabled_after": "REPLACE_WITH_APPROVED_ACTIVATION_TIME_IN_UTC",
+  "token_file": "/opt/oaw-integration-controller/github-token",
+  "controller_files": {
+    "preview_controller.py": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+    "preview_deploy.py": "REPLACE_WITH_REVIEWED_FILE_SHA256"
+  },
+  "access_instructions": "Use the existing Ali integration service and existing account credentials.",
+  "activation": {
+    "mode": "disabled",
+    "approved_run": null,
+    "accepted_revision": null
+  }
+}

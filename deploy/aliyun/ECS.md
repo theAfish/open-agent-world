@@ -1,5 +1,10 @@
 # ECS 多用户 Workspace 测试
 
+> For the current English developer and operator procedure, see
+> [Ali integration delivery](POST_MERGE.md). After the approved Phase 3B boundary
+> installation, older application-venv root provisioning/setup commands below
+> must not be used; they can restore the unsafe root import path.
+
 日常从 dev 合并、构建、更新线上及回滚，使用[发布脚本说明](RELEASING.md)。
 
 本方案使用 ECS 承载 OAW HTTPS 网关及每用户独立后台，复用 `backend.hosting`

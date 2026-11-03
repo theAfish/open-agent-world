@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "operator": "/opt/oaw-release-operator",
+  "source_directory": "/opt/oaw-operator-review-phase3b",
+  "operator_files": {
+    "bootstrap.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256",
+    "release_remote.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256",
+    "release_worker.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256",
+    "release_verify.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256",
+    "provisioner_guard.py": "REPLACE_WITH_INDEPENDENTLY_REVIEWED_SHA256"
+  },
+  "production_origin": "https://your-existing-origin.example",
+  "production_target": {
+    "app": "/opt/open-agent-world",
+    "hosting": "/srv/oaw-hosting",
+    "releases": "/opt/oaw-releases",
+    "service": "oaw-hosted"
+  },
+  "execution": {
+    "version": 1,
+    "environment": "production",
+    "target": {
+      "app": "/opt/open-agent-world",
+      "hosting": "/srv/oaw-hosting",
+      "releases": "/opt/oaw-releases",
+      "service": "oaw-hosted"
+    },
+    "sandbox_root": "/opt/oaw-production-execution",
+    "python": "/usr/bin/python3.12",
+    "build_user": "oaw-production-build",
+    "verify_user": "oaw-production-verify"
+  },
+  "approved_artifacts": []
+}

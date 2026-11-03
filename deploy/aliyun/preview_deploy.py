@@ -1,4 +1,4 @@
-"""Preview admission adapter; all switching stays in the installed operator.
+"""Deployment admission adapter; all switching stays in the installed operator.
 
 The caller owns the durable host-wide controller lease. This module never loads
 application code, starts an asynchronous deployment, or accepts target paths from
@@ -27,6 +27,15 @@ TARGET = {'app': '/opt/oaw-preview-app', 'hosting': '/srv/oaw-preview-hosting',
           'releases': '/opt/oaw-preview-releases', 'service': 'oaw-preview'}
 RELEASE_ID = re.compile(r'[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}-[a-f0-9]{8}')
 TERMINAL = {'complete', 'already-current', 'failed', 'failed-rolled-back', 'rolled-back', 'seeded'}
+
+
+def integration_target():
+    """Select fixed installation paths; never accept paths from build metadata."""
+    global OPERATOR, STATE, TARGET
+    OPERATOR = Path('/opt/oaw-release-operator')
+    STATE = Path('/var/lib/oaw-integration-controller')
+    TARGET = {'app': '/opt/open-agent-world', 'hosting': '/srv/oaw-hosting',
+              'releases': '/opt/oaw-releases', 'service': 'oaw-hosted'}
 
 
 def require(condition, message):
@@ -67,8 +76,10 @@ def load_operator():
             'Run the controller as root with Python -I -S')
     installation = json.loads(trusted(OPERATOR / 'installation.json').read_text(encoding='utf-8'))
     files = installation.get('operator_files')
-    require(isinstance(files, dict) and set(files) ==
-            {'bootstrap.py', 'release_remote.py', 'release_worker.py', 'release_verify.py'},
+    expected = {'bootstrap.py', 'release_remote.py', 'release_worker.py', 'release_verify.py'}
+    if OPERATOR == Path('/opt/oaw-release-operator'):
+        expected.add('provisioner_guard.py')
+    require(isinstance(files, dict) and set(files) == expected,
             'Installed operator inventory is invalid')
     for name, expected in files.items():
         require(isinstance(expected, str) and re.fullmatch('[a-f0-9]{64}', expected)
@@ -203,13 +214,17 @@ def deploy(operator, candidate, archive, before_switch):
         require_idle(operator)
         recover_policy(operator)
         baseline = operator['dispatch']({**TARGET, 'action': 'status'})
+        if 'baseline_commit' in candidate:
+            require(baseline['commit'] == candidate['baseline_commit']
+                    and baseline['receipt'] == candidate['baseline_receipt'],
+                    'Installed baseline changed after trusted admission')
         try:
             before_switch()
         except Exception:
             installed = operator['dispatch']({**TARGET, 'action': 'status'})
             require(installed['commit'] == baseline['commit'] and installed['receipt'] == baseline['receipt'],
                     'Installed baseline changed during rejected admission; inspect before recovery')
-            return {'state': {'phase': 'failed', 'error': 'Preview admission rejected; installed Preview unchanged'},
+            return {'state': {'phase': 'failed', 'error': 'Admission rejected; installed service unchanged'},
                     'receipt': installed}
     identifier = (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' +
                   candidate['tested_commit'][:12] + '-' + uuid4().hex[:8])
@@ -236,7 +251,7 @@ def deploy(operator, candidate, archive, before_switch):
                 require(installed['commit'] == baseline['commit'] and installed['receipt'] == baseline['receipt'],
                         'Installed baseline changed during failed preparation; inspect before recovery')
                 directory = operator['release_dir'](request)
-                message = 'Preview preparation failed; installed Preview unchanged; inspect the private release log'
+                message = 'Release preparation failed; installed service unchanged; inspect the private release log'
                 if directory.exists():
                     with (directory / 'failure.log').open('a', encoding='utf-8') as stream:
                         traceback.print_exc(file=stream)
