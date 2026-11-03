@@ -27,7 +27,9 @@ def prepare(source, previous, scratch, bundle, *, preview=False):
     for declaration in sorted((source / 'plugins').glob('*/oaw.pack.toml')):
         spec = read_source_pack(declaration.parent)
         try:
-            activate_source_adapter(spec, bundle)
+            # Materialize the candidate's own receipt/wheels even when this
+            # build runtime already has a usable adapter in its read-only base.
+            prepare_source_adapter(spec, bundle)
         except (ValueError, RuntimeError, ImportError):
             wheelhouse = None
             old_path = previous / declaration.parent.relative_to(source)
@@ -41,6 +43,7 @@ def prepare(source, previous, scratch, bundle, *, preview=False):
                     for wheel, path in zip(adapter.wheels, prepared_adapter_paths(adapter, root, read_only=True)):
                         (wheelhouse / Path(wheel.path).name).write_bytes((path / '.oaw-wheel.whl').read_bytes())
             prepare_source_adapter(spec, bundle, dependency_wheels=wheelhouse)
+        activate_source_adapter(spec, bundle)
         for name, environment in spec.environments.items():
             if environment.target == 'host-worker' and environment.prepare == 'install':
                 state = environment_status(spec.owner, name, environment, spec.source_root, bundle)
