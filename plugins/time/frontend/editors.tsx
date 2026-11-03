@@ -57,4 +57,3 @@ export function CountEditor({ count, busy, zh, onCancel, onSave }: EditorProps &
     <EditorActions busy={busy} zh={zh} onCancel={onCancel}/>
   </form>;
 }
-
