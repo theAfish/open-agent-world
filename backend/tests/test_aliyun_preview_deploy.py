@@ -114,6 +114,26 @@ def test_deployment_failure_reports_restored_receipt_and_removes_temporary_appro
     assert f.policy.read_bytes() == f.original_policy and not f.journal.exists()
 
 
+def test_later_manual_rollback_requires_reapproval_after_controller_authority_is_removed(deployment):
+    f = deployment
+    result = adapter.deploy(f.operator, f.candidate, f.archive, lambda: None)
+    assert result['state']['phase'] == 'complete'
+    request = {**adapter.TARGET, 'release': result['receipt']['release']}
+    (f.existing.data / 'document.txt').write_text('synthetic post-deployment write')
+    before = list(f.existing.commands)
+    with pytest.raises(ValueError, match='not been approved'):
+        remote.transaction(request, rollback=True)
+    assert f.existing.commands == before
+    assert remote.receipt(f.existing.app)[0]['source_commit'] == f.candidate['tested_commit']
+    # This models a separately reviewed, temporary exact-archive authorization;
+    # completed CI/controller approval must never become permanent root authority.
+    with adapter.approval(f.operator, f.candidate):
+        assert remote.transaction(request, rollback=True)['phase'] == 'rolled-back'
+    assert remote.receipt(f.existing.app)[0]['source_commit'] == 'a' * 40
+    assert (f.existing.data / 'document.txt').read_text() == 'user data before release'
+    assert f.policy.read_bytes() == f.original_policy and not f.journal.exists()
+
+
 def test_preparation_failure_restores_policy_without_starting_transaction(deployment, monkeypatch):
     f = deployment
 
@@ -218,3 +238,25 @@ def test_operator_loader_checks_reviewed_inventory_before_executing_code(tmp_pat
     monkeypatch.setattr(adapter.runpy, 'run_path', lambda path: pytest.fail('Unreviewed operator was executed'))
     with pytest.raises(ValueError, match='reviewed inventory'):
         adapter.load_operator()
+
+
+def test_controller_approved_baseline_is_enforced_by_real_transaction_adapter(deployment):
+    f = deployment
+    baseline = f.operator['dispatch']({**adapter.TARGET, 'action': 'status'})
+    f.candidate.update(baseline_commit=baseline['commit'], baseline_receipt=baseline['receipt'])
+    result = adapter.deploy(f.operator, f.candidate, f.archive, lambda: None)
+    assert result['state']['phase'] == 'complete'
+    assert result['receipt']['commit'] == f.candidate['tested_commit']
+    assert f.policy.read_bytes() == f.original_policy
+
+
+@pytest.mark.parametrize('field', ['baseline_commit', 'baseline_receipt'])
+def test_changed_installed_baseline_cannot_consume_production_approval(deployment, field):
+    f = deployment
+    baseline = f.operator['dispatch']({**adapter.TARGET, 'action': 'status'})
+    f.candidate.update(baseline_commit=baseline['commit'], baseline_receipt=baseline['receipt'])
+    f.candidate[field] = '0' * len(f.candidate[field])
+    with pytest.raises(ValueError, match='baseline changed after trusted admission'):
+        adapter.deploy(f.operator, f.candidate, f.archive, lambda: pytest.fail('Rejected admission callback'))
+    assert f.policy.read_bytes() == f.original_policy and not f.journal.exists()
+    assert not any(command[:2] == ('systemctl', 'stop') for command in f.existing.commands)

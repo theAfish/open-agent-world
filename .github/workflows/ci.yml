@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [dev, main, feat/aliyun-agentcore-poc]
   push:
-    branches: [dev, main]
+    branches: [dev, main, feat/aliyun-agentcore-poc]
   workflow_dispatch:
 
 permissions:
@@ -198,6 +198,21 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+      - name: Package the validated integration revision
+        if: github.repository == 'theAfish/open-agent-world' && github.event_name == 'push' && github.ref == 'refs/heads/feat/aliyun-agentcore-poc'
+        run: python scripts/aliyun_release.py ci-package --output .tmp/integration-candidate
+      - name: Upload the integration release candidate
+        if: github.repository == 'theAfish/open-agent-world' && github.event_name == 'push' && github.ref == 'refs/heads/feat/aliyun-agentcore-poc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: oaw-integration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .tmp/integration-candidate/bundle.tar.gz
+            .tmp/integration-candidate/release.json
+            .tmp/integration-candidate/candidate.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@v4

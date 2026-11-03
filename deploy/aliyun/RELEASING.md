@@ -1,9 +1,14 @@
 # ECS 发布与 PR CI 边界
 
-> **Phase 2:** See [PREVIEW.md](PREVIEW.md) for the current trusted bootstrap,
+> **Phase 3B:** See [POST_MERGE.md](POST_MERGE.md) for the English developer
+> workflow, independent production provisioner boundary, disabled post-merge
+> controller, and the installation/controlled-acceptance approval procedure.
+> Nothing in this implementation authorizes a live production change.
+>
+> **Phase 2 history:** See [PREVIEW.md](PREVIEW.md) for the trusted Preview bootstrap,
 > first Preview installation, and acceptance gates. The new operator requires
-> independent execution registration and blocks production deployment while the
-> root provisioner imports application code. The Phase 1 commands below are
+> independent execution registration. Production remains blocked unless the
+> independently reviewed Phase 3B provisioner boundary is installed. The Phase 1 commands below are
 > historical context, not an instruction to upgrade or restart the live service.
 
 `scripts/aliyun_release.py` 用于已经按照 [ECS.md](ECS.md) 安装的原生多用户服务。

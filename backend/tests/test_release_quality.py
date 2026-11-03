@@ -209,7 +209,8 @@ def test_aliyun_target_runs_existing_pr_checks_for_every_change(filename):
     events = workflow["on"]
     assert set(events["pull_request"]["branches"]) == {"dev", "main", "feat/aliyun-agentcore-poc"}
     assert not {"paths", "paths-ignore", "branches-ignore"} & events["pull_request"].keys()
-    assert set(events["push"]["branches"]) == {"dev", "main"}
+    assert set(events["push"]["branches"]) == {"dev", "main", "feat/aliyun-agentcore-poc"}
+    assert not {"paths", "paths-ignore", "branches-ignore"} & events["push"].keys()
     assert not {"pull_request_target", "workflow_run"} & events.keys()
 
 
@@ -275,3 +276,30 @@ def test_preview_artifact_reuses_validated_output_and_is_bound_to_the_run_attemp
         '.tmp/preview-candidate/bundle.tar.gz', '.tmp/preview-candidate/release.json',
         '.tmp/preview-candidate/candidate.json',
     ]
+
+
+def test_integration_artifact_packages_the_current_push_after_acceptance_without_deployment_credentials():
+    workflow = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
+    steps = workflow['jobs']['frontend']['steps']
+    package = next(step for step in steps if step.get('name') == 'Package the validated integration revision')
+    upload = next(step for step in steps if step.get('with', {}).get('name', '').startswith('oaw-integration-'))
+    acceptance = next(step for step in steps if step.get('run') == 'npm run test:e2e:ui')
+    assert steps.index(acceptance) < steps.index(package) < steps.index(upload)
+    assert package['if'] == upload['if'] == (
+        "github.repository == 'theAfish/open-agent-world' && github.event_name == 'push' && "
+        "github.ref == 'refs/heads/feat/aliyun-agentcore-poc'"
+    )
+    # A push job's default checkout tests github.sha, which is the resulting merged
+    # revision. There is no PR artifact download or alternate checkout in this job.
+    checkout = next(step for step in steps if step.get('uses', '').startswith('actions/checkout@'))
+    assert 'ref' not in checkout['with']
+    assert not any(step.get('uses', '').startswith('actions/download-artifact@') for step in steps)
+    assert package['run'] == 'python scripts/aliyun_release.py ci-package --output .tmp/integration-candidate'
+    assert upload['uses'] == 'actions/upload-artifact@v4'
+    assert upload['with']['name'] == 'oaw-integration-${{ github.run_id }}-${{ github.run_attempt }}'
+    assert upload['with']['if-no-files-found'] == 'error'
+    assert upload['with']['path'].splitlines() == [
+        '.tmp/integration-candidate/bundle.tar.gz', '.tmp/integration-candidate/release.json',
+        '.tmp/integration-candidate/candidate.json',
+    ]
+    assert 'overwrite' not in upload['with']

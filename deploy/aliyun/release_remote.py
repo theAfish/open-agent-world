@@ -114,19 +114,60 @@ def execution_config(request):
 def require_execution(request, *, deploying=False):
     config = execution_config(request)
     if deploying:
-        # The current production provisioner imports the application as root.
-        # A digest or a boolean approval does not close that transitive boundary.
-        require(config['environment'] == 'preview',
-                'Production deployment is blocked until the root provisioner and its complete import closure '
-                'are replaced by an independently installed trusted broker')
-        for suffix in ('.timer', '.service'):
-            unit = request['service'] + '-provisioner' + suffix
-            state = run('systemctl', 'show', unit,
-                        '--property=LoadState', '--value').strip()
-            require(state in {'masked', 'not-found'}, 'Preview application provisioner must be absent or masked')
-            active = run('systemctl', 'show', unit, '--property=ActiveState', '--value').strip()
-            require(active in {'inactive', 'failed'}, 'Preview application provisioner must not be running')
+        if config['environment'] == 'production':
+            production_provisioner(request, config)
+        else:
+            for suffix in ('.timer', '.service'):
+                unit = request['service'] + '-provisioner' + suffix
+                state = run('systemctl', 'show', unit,
+                            '--property=LoadState', '--value').strip()
+                require(state in {'masked', 'not-found'}, 'Preview application provisioner must be absent or masked')
+                active = run('systemctl', 'show', unit, '--property=ActiveState', '--value').strip()
+                require(active in {'inactive', 'failed'}, 'Preview application provisioner must not be running')
     return config
+
+
+def production_provisioner(request, config):
+    """Check the complete independent import closure and effective installed units."""
+    import importlib.util
+    helper = trusted_file(OPERATOR / 'provisioner_guard.py')
+    spec = importlib.util.spec_from_file_location('oaw_trusted_provisioner_guard', helper)
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    registration = guard.configuration({key: request[key] for key in TARGET_KEYS},
+                                       excluded=(config['sandbox_root'],), verify_user=config['verify_user'])
+    # Render through a short-lived sealed root process. The controller/operator
+    # retain their stdlib-only import paths; this command never provisions data.
+    worker_sockets = json.loads(run('/usr/bin/python3', '-I', '-S', str(helper), 'socket-units'))
+    profile_ids = [identifier for identifier, _ in profiles(Path(request['hosting']))]
+    require(isinstance(worker_sockets, dict) and set(worker_sockets) == {
+        f'{request["service"]}-worker-{identifier}.socket' for identifier in profile_ids},
+        'Independent provisioner socket inventory differs from registered workers')
+    expected_units = {**guard.units(registration), **worker_sockets}
+    for filename, expected in expected_units.items():
+        path = trusted_file(UNITS / filename)
+        require(path.read_text(encoding='utf-8') == expected,
+                'Production provisioner unit differs from the independent reviewed boundary')
+        for property, expected_value in (('FragmentPath', str(path)), ('DropInPaths', ''), ('NeedDaemonReload', 'no')):
+            actual = run('systemctl', 'show', filename, '--property=' + property, '--value').strip()
+            require(actual == expected_value, 'Production provisioner has unreviewed effective systemd configuration')
+    if profile_ids:
+        import pwd
+        gateway = 'oaw-' + hashlib.sha256((request['service'] + ':gateway').encode()).hexdigest()[:24]
+        gateway_user = pwd.getpwnam(gateway)
+        verifier_user = pwd.getpwnam(config['verify_user'])
+    for identifier in profile_ids:
+        socket = Path('/run') / request['service'] / (identifier + '.sock')
+        if socket.exists() or socket.is_symlink():
+            metadata = socket.lstat()
+            require(stat.S_ISSOCK(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o660
+                    and metadata.st_uid == gateway_user.pw_uid and metadata.st_gid == verifier_user.pw_gid,
+                    'Production worker socket must retain its gateway owner and dedicated verification group')
+        else:
+            active = run('systemctl', 'show', f'{request["service"]}-worker-{identifier}.socket',
+                         '--property=ActiveState', '--value').strip()
+            require(active in {'inactive', 'failed'}, 'Active production worker socket is unavailable')
+    return registration
 
 
 def sandbox_command(request, config, mode, *, writable=None, readonly=()):
@@ -712,15 +753,16 @@ def worker_unit(original, app, helper, service, *, preview=False):
                                          'ExecReload=', 'ExecCondition=', 'PermissionsStartOnly=')) for line in lines),
             'Worker unit differs from the hardened hosted deployment')
     require(len(root_directories) <= 1, 'Worker unit has ambiguous filesystem isolation')
-    mapped_helper = '/workspace/release_worker.py' if root_directories else str(helper)
+    # The operator directory is private to root. Bind only the public helper
+    # into the existing worker namespace instead of opening that directory.
+    mapped_helper = '/workspace/release_worker.py' if root_directories else f'/run/{service}-release-worker.py'
     result = []
     for line in original.splitlines():
         if line.startswith(('Requires=', 'After=', 'RestartSec=', 'Sockets=', 'Type=', 'TimeoutStartSec=')):
             continue
         if line == '[Service]':
             result.extend([line, 'Type=oneshot', 'TimeoutStartSec=300'])
-            if root_directories:
-                result.append(f'BindReadOnlyPaths={helper}:{mapped_helper}')
+            result.append(f'BindReadOnlyPaths={helper}:{mapped_helper}')
         elif line.startswith('ExecStart='):
             result.append(f'ExecStart={app}/backend/.venv/bin/python -I {mapped_helper} migrate --source {app} '
                           f'--config /var/lib/{service}-profile/worker.json'
@@ -744,11 +786,11 @@ def public_parents(path, root):
 def stop(request, *, config=None):
     _, hosting, _ = paths(request)
     name = request['service']
-    units = [name + '-gateway.service', name + '-gateway.socket', *[f'{name}-worker-{p}{suffix}' for p, _ in profiles(hosting)
-                                         for suffix in ('.service', '.socket')]]
     config = config or require_execution(request, deploying=True)
     if config['environment'] != 'preview':
         run('systemctl', 'stop', name + '-provisioner.timer', name + '-provisioner.service')
+    units = [name + '-gateway.service', *([name + '-gateway.socket'] if config['environment'] == 'preview' else []),
+             *[f'{name}-worker-{p}{suffix}' for p, _ in profiles(hosting) for suffix in ('.service', '.socket')]]
     run('systemctl', 'stop', name + '.target', *units)
 
 
@@ -759,8 +801,11 @@ def resume(request, *, gateway=True, config=None):
     # Socket activation avoids restarting every historical workspace concurrently.
     run('systemctl', 'start', *[f'{name}-worker-{p}.socket' for p, _ in profiles(hosting)])
     if gateway:
-        run('systemctl', 'start', name + '-gateway.socket', name + '-gateway.service')
-        require(config['environment'] == 'preview', 'Production provisioner broker is not installed')
+        run('systemctl', 'start', *([name + '-gateway.socket'] if config['environment'] == 'preview' else []),
+            name + '-gateway.service')
+        if config['environment'] == 'production':
+            production_provisioner(request, config)
+            run('systemctl', 'start', name + '-provisioner.timer')
 
 
 def backup(request, b, manifest):
@@ -818,9 +863,10 @@ def transaction(request, *, rollback=False, before_switch=None):
             for identifier, _ in profiles(hosting):
                 original = (UNITS / f'{request["service"]}-worker-{identifier}.service').read_text()
                 checked_worker_identity(original)
-                require([line for line in original.splitlines() if line.startswith('RootDirectory=')]
-                        == [f'RootDirectory={config["sandbox_root"]}'],
-                        'Preview workers must use the independently prepared registered filesystem boundary')
+                if config['environment'] == 'preview':
+                    require([line for line in original.splitlines() if line.startswith('RootDirectory=')]
+                            == [f'RootDirectory={config["sandbox_root"]}'],
+                            'Preview workers must use the independently prepared registered filesystem boundary')
                 migrations[identifier] = worker_unit(original, app, helper, request['service'],
                                                      preview=config['environment'] == 'preview')
             if rollback:

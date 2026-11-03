@@ -338,32 +338,50 @@ def package(cfg, tree, commit, comparison, *, routine=False, tests=(), frontend=
 
 
 def ci_package(tree, output):
-    """Package this PR job's already tested build; claims never grant deployment authority."""
-    if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
-        raise ValueError('ci-package requires a GitHub Actions pull_request job')
+    """Package already tested CI output; claims never grant deployment authority."""
+    event_name = os.environ.get('GITHUB_EVENT_NAME')
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or event_name not in {'pull_request', 'push'}:
+        raise ValueError('ci-package requires a GitHub Actions pull_request job or integration push job')
     event = read(os.environ['GITHUB_EVENT_PATH'])
-    pr, repository = event['pull_request'], event['repository']
+    repository = event['repository']
     repository_id = int(os.environ['GITHUB_REPOSITORY_ID'])
     repository_name = os.environ['GITHUB_REPOSITORY']
-    if (repository['id'] != repository_id or repository['full_name'] != repository_name
-            or pr['head']['repo']['id'] != repository_id or pr['base']['repo']['id'] != repository_id):
-        raise ValueError('Preview artifacts require a same-repository PR')
+    if repository['id'] != repository_id or repository['full_name'] != repository_name:
+        raise ValueError('CI event repository differs from the build identity')
+    if event_name == 'pull_request':
+        pr = event['pull_request']
+        if pr['head']['repo']['id'] != repository_id or pr['base']['repo']['id'] != repository_id:
+            raise ValueError('Preview artifacts require a same-repository PR')
+    else:
+        expected_ref = 'refs/heads/feat/aliyun-agentcore-poc'
+        if (repository_name != 'theAfish/open-agent-world' or repository_id != 1351393176
+                or event.get('ref') != expected_ref or os.environ.get('GITHUB_REF') != expected_ref
+                or event.get('deleted') is not False or event.get('after') != os.environ['GITHUB_SHA']):
+            raise ValueError('Integration artifacts require the exact repository and integration branch push')
     if Path(git(tree, 'rev-parse', '--show-toplevel')).resolve() != tree.resolve():
         raise ValueError('Build source must be the root of its Git checkout')
     clean(tree)
     commit = git(tree, 'rev-parse', 'HEAD')
     candidate = {
         'version': 1, 'repository': repository_name, 'repository_id': repository_id,
-        'pull_request': int(event['number']), 'head_sha': pr['head']['sha'],
-        'base_sha': pr['base']['sha'], 'base_ref': pr['base']['ref'],
         'tested_commit': commit, 'run_id': int(os.environ['GITHUB_RUN_ID']),
         'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
     }
+    if event_name == 'pull_request':
+        candidate.update(pull_request=int(event['number']), head_sha=pr['head']['sha'],
+                         base_sha=pr['base']['sha'], base_ref=pr['base']['ref'])
+        comparison = candidate['base_sha']
+    else:
+        candidate.update(event='push', head_sha=commit, base_ref='feat/aliyun-agentcore-poc')
+        comparison = event.get('before', commit)
+        if not isinstance(comparison, str) or not re.fullmatch(r'[a-f0-9]{40}', comparison) or comparison == '0' * 40:
+            comparison = commit
     if (commit != os.environ['GITHUB_SHA']
             or any(not re.fullmatch(r'[a-f0-9]{40}', candidate[key])
-                   for key in ('head_sha', 'base_sha', 'tested_commit'))
-            or any(candidate[key] < 1 for key in ('repository_id', 'pull_request', 'run_id', 'run_attempt'))):
-        raise ValueError('Invalid PR build identity')
+                   for key in ('head_sha', 'tested_commit', *(['base_sha'] if event_name == 'pull_request' else [])))
+            or any(candidate[key] < 1 for key in ('repository_id', 'run_id', 'run_attempt',
+                                                *(['pull_request'] if event_name == 'pull_request' else [])))):
+        raise ValueError('Invalid PR build identity' if event_name == 'pull_request' else 'Invalid integration build identity')
     required = [tree / 'frontend/dist/index.html']
     for manifest in sorted((tree / 'plugins').glob('*/frontend/plugin.json')):
         dist = manifest.parent / 'dist'
@@ -378,7 +396,7 @@ def ci_package(tree, output):
             required.append(dist / path)
     if any(not path.is_file() or path.stat().st_size == 0 for path in required):
         raise ValueError('Missing validated frontend build output')
-    directory = package({}, tree, commit, candidate['base_sha'], directory=output)
+    directory = package({}, tree, commit, comparison, directory=output)
     candidate['archive_sha256'] = read(directory / 'release.json')['archive_sha256']
     write(directory / 'candidate.json', candidate)
     (directory / 'release-manifest.json').unlink()
@@ -551,7 +569,7 @@ def main(argv=None):
     build_parser.add_argument('--source', type=Path, default=Path.cwd())
     build_parser.add_argument('--output', type=Path, required=True)
     build_parser.add_argument('--python', default=sys.executable)
-    ci_parser = commands.add_parser('ci-package', help='Package this PR job\'s prebuilt output; no tests, rebuild or deployment')
+    ci_parser = commands.add_parser('ci-package', help='Package this CI job\'s prebuilt output; no tests, rebuild or deployment')
     ci_parser.add_argument('--source', type=Path, default=Path.cwd())
     ci_parser.add_argument('--output', type=Path, required=True)
     for command in (prepare_parser, build_parser):

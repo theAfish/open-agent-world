@@ -1,5 +1,6 @@
 """Authoritative GitHub admission and shared-slot reporting, without cloud access."""
 from copy import deepcopy
+from contextlib import nullcontext
 import hashlib
 import importlib.util
 import io
@@ -160,6 +161,86 @@ def test_pending_required_checks_are_retried_instead_of_authorized(cfg):
     api.runs[101].update(status='in_progress', conclusion=None)
     with pytest.raises(controller.Pending, match='still running'):
         controller.admit(api, cfg, 100, 1)
+
+
+def test_protected_pipeline_exclusion_reports_no_attempt_and_preserves_the_slot(cfg, tmp_path, monkeypatch):
+    api = GitHubFixture()
+    api.proposed_sha = '0' * 40
+    with pytest.raises(controller.PreviewExcluded):
+        controller.admit(api, cfg, 100, 1)
+    monkeypatch.setattr(controller, 'STATE', tmp_path)
+    monkeypatch.setattr(controller, 'host_lease', nullcontext)
+    comments, statuses = [], []
+    monkeypatch.setattr(controller, 'upsert_comment', lambda api, number, marker, body:
+                        comments.append((number, marker, body)))
+    monkeypatch.setattr(controller, 'commit_status', lambda api, candidate, phase, text:
+                        statuses.append((phase, text)))
+    api.download = lambda *a: pytest.fail('Excluded candidates cannot be downloaded')
+    api.post = lambda *a: pytest.fail('Excluded candidates cannot create a deployment')
+    prior = {'installed_commit': BASE, 'created_at': START,
+             'candidate': {'head_sha': BASE, 'run_id': 90}}
+    state = controller.load_state()
+    state['slot'] = prior
+    controller.save_state(state)
+    adapter = {'load_operator': lambda: {}, 'recover': lambda operator: None,
+               'deploy': lambda *a: pytest.fail('Excluded candidates cannot reach the operator')}
+    controller.poll(api, cfg, adapter)
+    current = controller.load_state()
+    assert current['slot'] == prior and current['inflight'] is None and current['generation'] == 0
+    assert 'trusted validation entrypoint' in current['seen']['100:1']
+    assert statuses == [('failure', 'Preview not eligible; no deployment attempted: '
+                         'PR changes a trusted validation entrypoint: .github/workflows/ci.yml')]
+    assert comments[0][:2] == (80, '<!-- oaw-preview-eligibility -->')
+    assert '**No Preview deployment was attempted.**' in comments[0][2]
+    assert 'no neutral/skipped state' in comments[0][2] and 'not a blocker for merging a properly reviewed' in comments[0][2]
+
+
+def test_untrusted_provenance_rejection_is_not_classified_as_an_expected_exclusion(cfg, monkeypatch):
+    api = GitHubFixture()
+    api.permission = 'read'
+    with pytest.raises(controller.Rejected) as failure:
+        controller.admit(api, cfg, 100, 1)
+    assert not isinstance(failure.value, controller.PreviewExcluded)
+    monkeypatch.setattr(controller, 'exclusion_comment', lambda *a: pytest.fail('Authorization failure is not an exclusion'))
+    statuses = []
+    monkeypatch.setattr(controller, 'commit_status', lambda api, candidate, phase, text: statuses.append((phase, text)))
+    controller.report_rejection(api, cfg, {'slot': None}, api.runs[100], str(failure.value))
+    assert statuses[0][0] == 'failure' and statuses[0][1].startswith('Preview rejected: Contributor')
+
+
+@pytest.mark.parametrize('stale', ['head', 'installed_slot'])
+def test_exclusion_cannot_comment_on_an_obsolete_or_already_installed_candidate(cfg, monkeypatch, stale):
+    api = GitHubFixture()
+    state = {'slot': None}
+    if stale == 'head':
+        api.pr['head']['sha'] = '0' * 40
+    else:
+        state['slot'] = {'candidate': {'head_sha': HEAD, 'run_id': 101}}
+    monkeypatch.setattr(controller, 'exclusion_comment', lambda *a: pytest.fail('Stale exclusion must not be reported'))
+    monkeypatch.setattr(controller, 'commit_status', lambda *a: pytest.fail('Stale exclusion must not replace a result'))
+    controller.report_rejection(api, cfg, state, api.runs[100], 'protected pipeline', excluded=True)
+
+
+def test_exclusion_comment_updates_only_the_reporters_own_marker(cfg):
+    class Comments:
+        def __init__(self):
+            self.writes = []
+        def pages(self, suffix, key):
+            assert suffix == 'issues/80/comments' and key is None
+            return [{'id': 1, 'user': {'id': 999}, 'body': '<!-- oaw-preview-eligibility --> forged'},
+                    {'id': 2, 'user': {'id': 12}, 'body': '<!-- oaw-preview-eligibility --> prior'}]
+        def request(self, path):
+            assert path == '/user'
+            return {'id': 12}
+        def patch(self, suffix, body):
+            self.writes.append((suffix, body))
+        def post(self, *a):
+            pytest.fail('Existing owned comment must be updated')
+    api = Comments()
+    controller.exclusion_comment(api, {'pull_request': 80, 'head_sha': HEAD, 'run_id': 100, 'run_attempt': 1},
+                                 'PR changes a trusted validation entrypoint: .github/workflows/ci.yml')
+    assert api.writes[0][0] == 'issues/comments/2'
+    assert HEAD in api.writes[0][1]['body'] and 'attempt 1' in api.writes[0][1]['body']
 
 
 def test_new_attempt_of_older_required_run_cannot_be_hidden_by_newer_success(cfg):

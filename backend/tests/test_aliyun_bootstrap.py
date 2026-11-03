@@ -57,6 +57,20 @@ def test_default_plan_copies_or_executes_nothing(config, tmp_path):
     assert commands['initialize'][-1] == '/srv/oaw-preview-hosting.passwords.json'
 
 
+def test_production_example_pins_the_guard_without_installing_or_starting_services(config):
+    value = json.loads((ROOT / 'deploy/aliyun/bootstrap.production.example.json').read_text(encoding='utf-8'))
+    value['source_directory'] = config['source_directory']
+    guard = Path(config['source_directory']) / 'provisioner_guard.py'
+    guard.write_text('independently reviewed guard')
+    value['operator_files'] = {**config['operator_files'], guard.name: bootstrap.digest(guard)}
+    result = bootstrap.plan(value)
+    assert result['execution']['environment'] == 'production'
+    assert result['execution']['target'] == value['production_target']
+    assert set(result['operator_files']) == bootstrap.CORE_FILES | {'provisioner_guard.py'}
+    assert result['apply'] is result['start_services'] is result['enable_services'] is False
+    assert 'preview_preparation' not in result
+
+
 @pytest.mark.parametrize('key,value', [
     ('app', '/opt/open-agent-world/preview'),
     ('hosting', '/srv/oaw-hosting'),
@@ -146,6 +160,9 @@ def test_private_preview_keeps_https_production_and_distinct_cookie_hostname(con
 def test_production_cannot_contain_private_preview_setup(config):
     config['execution'].update(environment='production', target=config['production_target'])
     config['operator'] = bootstrap.OPERATOR_ROOTS['production']
+    guard = Path(config['source_directory']) / 'provisioner_guard.py'
+    guard.write_text('independently reviewed guard')
+    config['operator_files'][guard.name] = bootstrap.digest(guard)
     config['preview'].update(public_origin='http://127.0.0.1:8765', allow_local_http=True)
     with pytest.raises(ValueError, match='cannot contain Preview setup'):
         bootstrap.plan(config)

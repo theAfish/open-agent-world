@@ -43,7 +43,7 @@ def release_request(registration):
 
 
 def test_privileged_operator_and_verifier_have_only_stdlib_imports():
-    for name in ('release_remote', 'release_verify'):
+    for name in ('release_remote', 'release_verify', 'provisioner_guard'):
         tree = ast.parse((ROOT / 'deploy/aliyun' / (name + '.py')).read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -145,6 +145,9 @@ def test_execution_registration_rejects_runtime_approval_shortcuts(registration,
 def test_production_deploy_refuses_unclosed_provisioner_before_service_operations(registration, release_request, monkeypatch):
     registration['environment'] = 'production'
     monkeypatch.setattr(remote, 'execution_config', lambda _: registration)
+    def missing(*args, **kwargs):
+        raise ValueError('Independent provisioner complete import closure is not installed')
+    monkeypatch.setattr(remote, 'trusted_file', missing)
     monkeypatch.setattr(remote, 'run', lambda *a, **kw: pytest.fail('production service operation before closure'))
     assert remote.require_execution(release_request) is registration
     with pytest.raises(ValueError, match='complete import closure'):
