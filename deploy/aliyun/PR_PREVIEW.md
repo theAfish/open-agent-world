@@ -76,6 +76,19 @@ attempts, expired/ambiguous artifacts and failed checks are rejected. Pipeline
 updates require independent review and a controller policy update to the exact
 new trusted revision.
 
+For a reviewed validation-pipeline update, stop the timer and let the active
+transaction finish before changing `trusted_revision`. Verify the current PR/run
+again under the new policy. If that attempt was previously recorded in `seen`
+only because its validation entrypoint changed, remove only that rejection to
+allow fresh admission. Preserve completed results, slot generation and in-flight
+state; never clear an unrelated rejection or replay an uncertain transaction.
+
+The service-generator compatibility guard permits verified copies that differ
+only by CRLF/LF line endings, as can occur between an initial Windows build and
+Linux CI. Raw payload/source inventory hashes remain mandatory. Any other
+generator byte change, including removal, still requires an explicit service
+upgrade. Python dependency/runtime compatibility checks remain unchanged.
+
 ## Exact installation change plan: approval required
 
 Before approval, fill the pins below from the reviewed implementation commit and
