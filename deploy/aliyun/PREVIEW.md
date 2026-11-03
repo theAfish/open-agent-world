@@ -154,7 +154,7 @@ Its configured Python (for example `/usr/bin/python3.12`) must be executable.
 Create these empty bind placeholders inside that root, using the sample paths:
 
 ```text
-/workspace/source/                  /workspace/previous/
+/bin/                              /workspace/source/                  /workspace/previous/
 /workspace/scratch/                 /workspace/sockets/
 /workspace/release_worker.py        /workspace/release_verify.py
 /workspace/verification.json
@@ -176,6 +176,11 @@ from the actual restricted service identity before starting the gateway.
 Preparing these offline bundles is an explicit prerequisite; bootstrap does not install
 packages, fetch dependencies, construct a chroot, or run root `pip`/application
 setup. Do not bind production's runtime or venv into Preview.
+
+Create `/bin` as a real directory before the first systemd probe: systemd may
+otherwise create a usr-merge symlink, which the trusted runtime correctly rejects.
+Materialize the standalone distribution's private Tcl libraries as part of its
+ELF closure when including `_tkinter`; dependency wheels alone are insufficient.
 
 Initialization is a one-time, nonroot action in a new empty Preview hosting root:
 

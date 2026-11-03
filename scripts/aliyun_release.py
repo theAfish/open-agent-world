@@ -408,7 +408,7 @@ def verify_public(origin, *, allow_local_http=False):
             if error.code not in {502, 503, 504} or time.monotonic() >= deadline:
                 raise
             time.sleep(2)
-        except (URLError, ConnectionError) as error:
+        except (URLError, ConnectionError, TimeoutError) as error:
             # Before a private gateway is ready, SSH accepts the local TCP
             # connection but cannot yet open its remote Unix socket.
             if not allow_local_http or time.monotonic() >= deadline:

@@ -532,6 +532,15 @@ def extract_bundle(archive, output, *, source_commit=None, request=None):
                         f'File integrity check failed: {name}')
         tar.extractall(output, filter='data')
     verify_payload(output, manifest)
+    # tarfile creates implicit directories using root's private umask. The
+    # nonroot preparer needs to traverse its read-only source bind; the release
+    # parent remains private, so this exposes no request/backup/credential files.
+    output.chmod(0o755)
+    for path in output.rglob('*'):
+        if path.is_dir():
+            path.chmod(0o755)
+        else:
+            path.chmod(0o755 if path.stat().st_mode & 0o100 else 0o644)
     return manifest
 
 

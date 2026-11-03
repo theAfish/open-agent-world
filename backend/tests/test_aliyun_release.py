@@ -129,8 +129,9 @@ def test_private_entry_verification_bypasses_proxies_retries_and_rejects_redirec
         thread.join(timeout=5)
 
 
-def test_private_entry_retries_ssh_socket_startup_without_deploying(monkeypatch):
-    responses = iter([client.URLError('gateway socket not ready'),
+@pytest.mark.parametrize('unready', [client.URLError('gateway socket not ready'), TimeoutError('gateway starting')])
+def test_private_entry_retries_ssh_socket_startup_without_deploying(monkeypatch, unready):
+    responses = iter([unready,
                       io.BytesIO(b'{"hosted":true,"authenticated":false}')])
     def fetch(*args, **kwargs):
         response = next(responses)
