@@ -213,6 +213,28 @@ def test_untrusted_prepared_hardlink_is_rejected_before_privileged_freeze(tmp_pa
         remote.bundle_tree(root)
 
 
+def test_existing_scientific_bundle_fits_bounded_runtime_budget(tmp_path, monkeypatch):
+    root = tmp_path / 'bundle'
+    root.mkdir()
+    payload = root / 'scientific-runtime'
+    payload.write_bytes(b'runtime')
+    original = Path.lstat
+    size = 6 * 1024**3
+
+    def metadata(path, *args, **kwargs):
+        value = original(path, *args, **kwargs)
+        if path != payload:
+            return value
+        return SimpleNamespace(st_mode=value.st_mode, st_nlink=value.st_nlink,
+                               st_size=size, st_uid=value.st_uid)
+
+    monkeypatch.setattr(Path, 'lstat', metadata)
+    assert payload in remote.bundle_tree(root)
+    size = remote.MAX_RUNTIME_BUNDLE_BYTES + 1
+    with pytest.raises(ValueError, match='exceeds limits'):
+        remote.bundle_tree(root)
+
+
 def test_preparation_only_mutates_a_private_clone_before_immutable_promotion(tmp_path, registration, release_request, monkeypatch):
     app = tmp_path / 'app'
     current = app / 'backend/.venv/oaw-runtime-bundle'
