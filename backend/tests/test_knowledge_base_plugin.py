@@ -38,7 +38,7 @@ from oaw_knowledge_base import artifact_import  # noqa: E402
 NODE_TYPE = "knowledge.base"
 # Raw upload bodies, broad management actions and publication remain desktop-only.
 # Research agents use reference-based imports and separate bounded preparation tools.
-DESKTOP_ONLY = {"project_import_preview", "settings",
+DESKTOP_ONLY = {"project_import_preview", "project_file_remove", "project_delete", "schema_sample", "settings",
                 "experiment_ingest", "experiment_bundle_manage", "experiment_review", "insight_review"}
 
 

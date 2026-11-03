@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -144,12 +145,14 @@ it("imports a new project without renaming an already selected project", async (
     return materialData(name, args);
   });
   fireEvent.click(await screen.findByLabelText("Select Sintering project"));
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByLabelText("Project files or archives"), { target: { files: [new File(["hello"], "new.md")] } });
-  await screen.findByText("Organize import");
-  fireEvent.change(screen.getByLabelText("Project name for new.md"), { target: { value: "New report" } });
+  await screen.findByText("new.md");
+  expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue("");
+  fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "New report" } });
   fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
   await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({
-    projects: [{ key: "new.md", name: "New report" }], auto_process: true })));
+    projects: [{ key: "new.md", name: "New report" }], auto_process: true }), undefined));
   expect(action.mock.calls.some(([name]) => name === "project_manage")).toBe(false);
 });
 
@@ -236,7 +239,7 @@ it("keeps project data visible when experiment data is outside the release grant
   expect(await screen.findByRole("button", { name: "sintering.md" })).toBeTruthy();
 });
 
-it("imports a selected file and requests conversion only after its project preview is confirmed", async () => {
+it("imports a selected file and requests conversion only after its project intake is confirmed", async () => {
   let imported = false;
   const action = open(async (name, args) => {
     if (name === "projects") return args.project_id ? { project: PROJECT } : { projects: imported ? [PROJECT] : [] };
@@ -244,25 +247,33 @@ it("imports a selected file and requests conversion only after its project previ
     if (name === "project_import_commit") { imported = true; return { projects: [PROJECT] }; }
     return materialData(name, args);
   });
+  fireEvent.click(within(screen.getByRole("group", { name: "Projects" })).getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByLabelText("Project files or archives"), { target: { files: [new File(["hello"], "new.md")] } });
-  await screen.findByText("Organize import");
-  expect(action.mock.calls.some(([name]) => name === "project_import_commit")).toBe(false);
+  await screen.findByText("new.md");
+  expect(action.mock.calls.some(([name]) => name === "project_import_preview" || name === "project_import_commit")).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({ token: PREVIEW.token, auto_process: true })));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({ token: PREVIEW.token, auto_process: true }), undefined));
   fireEvent.click(await screen.findByRole("button", { name: "sintering.md" }));
   expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
   expect(action.mock.calls.some(([name]) => name === "process")).toBe(false);
 });
 
 it("snapshots selected files before resetting the input clears its FileList", async () => {
-  const action = open(async (name, args) => name === "project_import_preview" ? PREVIEW : materialData(name, args));
+  const action = open(async (name, args) => name === "project_import_preview" ? PREVIEW
+    : name === "project_import_commit" ? { projects: [PROJECT] } : materialData(name, args));
+  fireEvent.click(within(screen.getByRole("group", { name: "Projects" })).getByRole("button", { name: "New project" }));
   const input = screen.getByLabelText("Project files or archives") as HTMLInputElement;
   let files: File[] = [new File(["first"], "first.md"), new File(["second"], "second.md")];
   Object.defineProperty(input, "files", { configurable: true, get: () => files });
   Object.defineProperty(input, "value", { configurable: true, set: () => { files = []; }, get: () => "" });
   fireEvent.change(input);
+  await screen.findByText("first.md");
+  await screen.findByText("second.md");
+  expect(files).toHaveLength(0);
+  expect(action.mock.calls.some(([name]) => name === "project_import_preview")).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
   await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_preview", expect.objectContaining({
-    files: [expect.objectContaining({ filename: "first.md" }), expect.objectContaining({ filename: "second.md" })] })));
+    files: [expect.objectContaining({ filename: "first.md" }), expect.objectContaining({ filename: "second.md" })] }), undefined));
 });
 
 it("keeps converted projects visible and retries only the project with a failed file", async () => {
@@ -274,7 +285,7 @@ it("keeps converted projects visible and retries only the project with a failed 
   fireEvent.click(await screen.findByRole("button", { name: /Scanned report/ }));
   expect((await screen.findByRole("alert")).textContent).toContain("OCR connection unavailable");
   fireEvent.click(screen.getByRole("button", { name: "Convert pending files" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("project_process", { project_ids: ["project-2"] }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_process", { project_ids: ["project-2"] }, undefined));
   expect(screen.getByRole("button", { name: /Sintering project/ })).toBeTruthy();
 });
 
@@ -292,7 +303,7 @@ it("enables a converting project file when polling reports its Markdown is ready
   await waitFor(() => expect(screen.getByRole("button", { name: "sintering.md" }).hasAttribute("disabled")).toBe(false), { timeout: 4000 });
   fireEvent.click(screen.getByRole("button", { name: "sintering.md" }));
   await screen.findByRole("heading", { name: "Sintering of Si3N4" });
-  expect(action).toHaveBeenCalledWith("markdown", expect.objectContaining({ source_id: SOURCE.id }));
+  expect(action).toHaveBeenCalledWith("markdown", expect.objectContaining({ source_id: SOURCE.id }), undefined);
 });
 
 it("routes empty results to projects and empty Spaces to an editable schema", async () => {
@@ -316,7 +327,7 @@ it("searches converted project files and opens attributable source excerpts", as
   expect(screen.getByText("Methods")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /sintering.md/ }));
   expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
-  expect(action).toHaveBeenCalledWith("search", { query: "1750", all_groups: true });
+  expect(action).toHaveBeenCalledWith("search", { query: "1750", all_groups: true }, undefined);
 });
 
 it("shows project search failures inline and preserves the project list", async () => {
@@ -380,7 +391,7 @@ it.each(["extract", "research"])("projects through a %s agent and excludes a rea
   const [agentId, prompt] = runAgent.mock.calls[0] as unknown as [string, string];
   expect(agentId).toBe("researcher"); expect(prompt).toContain("new-run"); expect(prompt).not.toContain("existing-run");
   expect(prompt).toContain("knowledge_projection_prompt"); expect(prompt).toContain("knowledge_projection_save");
-  expect(action).toHaveBeenCalledWith("projection_prepare", { project_ids: [PROJECT.id], space_id: SPACE.id, rerun: false });
+  expect(action).toHaveBeenCalledWith("projection_prepare", { project_ids: [PROJECT.id], space_id: SPACE.id, rerun: false }, undefined);
 });
 
 it("observes a failed agent run and releases its unfinished projection for retry", async () => {
@@ -399,7 +410,7 @@ it("observes a failed agent run and releases its unfinished projection for retry
   }, { host: { runAgent: vi.fn(async () => { launched = true; }) } });
   await chooseProject(); fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
   await waitFor(() => expect(action).toHaveBeenCalledWith("projection_fail", expect.objectContaining({
-    projection_id: RESULT.id, error: "Model connection unavailable" })), { timeout: 5000 });
+    projection_id: RESULT.id, error: "Model connection unavailable" }), undefined), { timeout: 5000 });
   fireEvent.click(await screen.findByRole("button", { name: /Sintering project.*Process data/ }));
   expect(await screen.findByRole("button", { name: "Retry extraction" })).toBeTruthy();
 });
@@ -458,7 +469,8 @@ it("keeps graph relation evidence and original file provenance visible in a proj
   await openResult();
   expect(screen.getByLabelText("Knowledge graph map")).toBeTruthy();
   fireEvent.click(screen.getByText("Result JSON"));
-  expect(screen.getByText(/Si3N4 powder is densified by pressureless sintering/)).toBeTruthy();
+  fireEvent.click(screen.getByText("Entities and relationships", { selector: "summary" }));
+  expect(screen.getByText("Si3N4 powder is densified by pressureless sintering.")).toBeVisible();
   fireEvent.click(screen.getByText("Source files"));
   fireEvent.click(screen.getByRole("button", { name: "sintering.md" }));
   expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
@@ -548,7 +560,7 @@ it("shows completed graph projections immediately without requiring review or pu
   expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
   expect(action.mock.calls.some(([name]) => ["projection_revise", "knowledge_review"].includes(name))).toBe(false);
   fireEvent.click(screen.getByLabelText("Show history"));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("projections", expect.objectContaining({ include_history: true })));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("projections", expect.objectContaining({ include_history: true }), undefined));
 });
 
 it("drafts insights through a connected agent and publishes one into the experiment layer on confirmation", async () => {
