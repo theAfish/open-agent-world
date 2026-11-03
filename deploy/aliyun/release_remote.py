@@ -28,6 +28,7 @@ OPERATOR = (Path('/opt/oaw-release-operator-preview')
             else Path('/opt/oaw-release-operator'))
 TARGET_KEYS = ('app', 'hosting', 'releases', 'service')
 PROTOCOL_VERSION = 2
+MAX_RUNTIME_BUNDLE_BYTES = 8 * 1024**3
 
 def require(condition, message):
     if not condition:
@@ -221,7 +222,7 @@ def bundle_tree(root, *, immutable=False):
                 trusted_metadata(metadata, directory=path.is_dir())
             size += metadata.st_size if path.is_file() else 0
             result.append(path)
-            require(len(result) <= 200000 and size <= 4 * 1024**3, 'Prepared runtime bundle exceeds limits')
+            require(len(result) <= 200000 and size <= MAX_RUNTIME_BUNDLE_BYTES, 'Prepared runtime bundle exceeds limits')
     return result
 
 

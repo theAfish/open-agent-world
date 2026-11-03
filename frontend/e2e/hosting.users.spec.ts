@@ -138,7 +138,9 @@ test('hosted accounts isolate runtime data, invalidate other tabs and share auth
     await page.getByRole('button', { name: 'Close settings', exact: true }).click();
     await page.getByRole('button', { name: 'Open Pack and Card Library', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Install Pack from File...', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Store', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Store', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Pack Store', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Install Pack from File...', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Close Library', exact: true }).click();
     await expect(page.locator('.card-library-modal')).not.toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('hosting-canvas.png'), fullPage: true });

@@ -26,7 +26,8 @@ export function updateConnectionHoverHint(event: ReactPointerEvent<HTMLElement>,
   const cornerRadius = Number.parseFloat(style.borderTopLeftRadius) || 0;
   const boundaryWidth = Number.parseFloat(style.getPropertyValue("--connection-boundary-width"));
   const anchor = roundedRectAnchor(
-    { x: 0, y: 0, width: element.offsetWidth, height: element.offsetHeight },
+    { x: 0, y: 0, width: element.offsetWidth, height: element.offsetHeight,
+      shape: element.dataset.cardShape === 'ellipse' ? 'ellipse' : undefined },
     pointer,
     cornerRadius,
   );

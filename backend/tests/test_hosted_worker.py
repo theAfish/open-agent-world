@@ -120,7 +120,8 @@ def test_hosted_denies_host_management_and_native_execution_config(tmp_path, mon
         supplied = headers(worker)
         for method, path in (("get", "/api/diagnostics"), ("get", "/api/settings/storage"),
                              ("post", "/api/desktop/inspect-path"), ("post", "/api/packs/install"),
-                             ("get", "/api/store/packs"), ("put", "/api/settings/sandbox"),
+                             ("post", "/api/store/packs/test.greeter/versions/0.1.0/install"),
+                             ("put", "/api/settings/sandbox"),
                              ("post", "/api/packs/factory/example/run"), ("post", "/api/runtime/python/plugins/reconcile")):
             assert getattr(client, method)(path, headers=supplied).status_code == 403, path
         for payload in ({"type": "sandbox", "config": {"workspace_path": "/other-user"}},
@@ -162,6 +163,38 @@ def test_hosted_denies_host_management_and_native_execution_config(tmp_path, mon
         assert client.post("/api/nodes", json={"type": "text", "content": "Hello"}, headers=supplied).status_code == 201
     with pytest.raises(ValueError, match="remote Sandbox"):
         config(tmp_path / "native", sandbox_runtime="auto")
+
+
+def test_hosted_store_browses_remote_metadata_without_installation_authority(tmp_path):
+    import httpx
+    from backend.official_marketplace import OFFICIAL_MARKETPLACE_URL
+    from backend.packs.marketplace import MarketplaceClient
+    from backend.tests.test_marketplace import FakeMarketplace
+
+    worker = config(tmp_path)
+    fake = FakeMarketplace()
+    with TestClient(create_worker_app(worker)) as client:
+        assert client.app.state.services.marketplace.url == OFFICIAL_MARKETPLACE_URL
+        client.app.state.services.marketplace = MarketplaceClient(
+            OFFICIAL_MARKETPLACE_URL, transport=httpx.MockTransport(fake))
+        supplied = headers(worker)
+        assert client.get('/api/store/packs').status_code == 401
+        response = client.get('/api/store/packs', params={'query': 'Greeter', 'limit': 1}, headers=supplied)
+        assert response.status_code == 200, response.text
+        assert response.json()['items'][0]['id'] == 'test.greeter'
+        assert fake.calls[-1].url.params['query'] == 'Greeter'
+        assert fake.calls[-1].headers.get('authorization') is None
+        for path in ('/test.greeter', '/test.greeter/versions', '/test.greeter/versions/0.1.0'):
+            result = client.get('/api/store/packs' + path, headers=supplied)
+            assert result.status_code == 200, result.text
+        before = len(fake.calls)
+        for method in ('post', 'put', 'patch', 'delete'):
+            result = getattr(client, method)('/api/store/packs/test.greeter/versions/0.1.0/install',
+                headers={**supplied, 'X-OAW-Pack-Install': '1'})
+            assert result.status_code == 403, result.text
+        assert len(fake.calls) == before
+        assert not any(request.url.path.endswith('/download') for request in fake.calls)
+        assert client.app.state.services.pack_installations.status()['versions'] == []
 
 
 def test_hosted_deployment_uses_verified_identity_without_shared_login(tmp_path):

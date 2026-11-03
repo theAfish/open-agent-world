@@ -1,5 +1,5 @@
 import { BookOpen, ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,7 @@ import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { tutorialText } from './catalog';
 import { observeTutorialEncounters } from './observe';
 import { currentStep, useProgressiveTutorials } from './store';
+import { useInteractionEnvironment } from '../interaction/environment';
 import './tutorials.css';
 
 /** Links are explicit external navigation; images/HTML cannot issue hidden requests. */
@@ -46,6 +47,33 @@ function TutorialReader() {
   const entry = state.entries.find(item => item.key === state.current);
   const heading = useRef<HTMLHeadingElement>(null);
   const panel = useRef<HTMLElement>(null);
+  const compact = useInteractionEnvironment(state => state.compact);
+  const viewportHeight = useInteractionEnvironment(state => state.height);
+  const viewportTop = useInteractionEnvironment(state => state.top);
+  useLayoutEffect(() => {
+    const element = panel.current;
+    if (!element || !compact || state.view !== 'hint' || element.closest('dialog')) return;
+    const deck = document.querySelector<HTMLElement>('.component-palette:not(.palette-drag-preview)');
+    if (!deck) return;
+    const tools = [...document.querySelectorAll<HTMLElement>('.top-bar, .world-controls, .map-tools')];
+    const position = () => {
+      const top = deck.getBoundingClientRect().top;
+      const upper = Math.max(viewportTop + 12, ...tools.map(tool => tool.getBoundingClientRect().bottom)) + 8;
+      const available = Math.max(0, top - upper - 8);
+      element.style.bottom = `${Math.max(0, window.innerHeight - top + 8)}px`;
+      element.style.maxHeight = `${available}px`;
+      // A tip can wait for the tray to close; it must not steal its controls.
+      element.hidden = available < 192;
+    };
+    position();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(position) : undefined;
+    [deck, ...tools].forEach(target => observer?.observe(target));
+    window.addEventListener('resize', position);
+    return () => {
+      observer?.disconnect(); window.removeEventListener('resize', position);
+      element.style.removeProperty('bottom'); element.style.removeProperty('max-height'); element.hidden = false;
+    };
+  }, [compact, viewportHeight, viewportTop, state.view]);
   useEffect(() => {
     if (state.view === 'hint') return;
     const previous = document.activeElement as HTMLElement | null;

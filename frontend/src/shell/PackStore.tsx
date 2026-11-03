@@ -17,7 +17,7 @@ function InstallationStatus({ state }: { state: StoreState }) {
   </span>;
 }
 
-export function PackStore({ installations }: { installations?: PackInstallations }) {
+export function PackStore({ installations, readOnly = false }: { installations?: PackInstallations; readOnly?: boolean }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState<StorePage>();
   const [loading, setLoading] = useState(false);
@@ -80,7 +80,7 @@ export function PackStore({ installations }: { installations?: PackInstallations
     finally { if (!controller.signal.aborted) setLoading(false); }
   };
   const install = async (pack: StorePack) => {
-    if (!pack.available_version || installRequest.current) return;
+    if (readOnly || !pack.available_version || installRequest.current) return;
     const controller = new AbortController(); installRequest.current = controller;
     setInstalling(pack.id); setInstallError('');
     try {
@@ -91,6 +91,7 @@ export function PackStore({ installations }: { installations?: PackInstallations
   };
   const merged = (pack: StorePack): StorePack => ({ ...pack, ...installed[pack.id] });
   const action = (pack: StorePack) => {
+    if (readOnly) return <p>{t('Pack installation is managed by your hosting administrator.')}</p>;
     const pending = installations?.operations?.some(item => item.pack_id === pack.id && packOperationPending(item));
     const selectedVersion = installations?.versions.some(item => item.id === pack.id && item.version === pack.available_version && item.selected);
     return <button className="secondary-button" disabled={Boolean(installing) || pending || selectedVersion || !pack.can_install || Boolean(version?.plan?.blockers.length)}
@@ -113,8 +114,8 @@ export function PackStore({ installations }: { installations?: PackInstallations
             {shown.summary && <p className="pack-detail-summary">{shown.summary}</p>}
           </div>
         </header>
-        <aside className="pack-detail-panel" aria-label={t('Install Pack')}>
-          <div className="pack-detail-panel-heading"><h4>{t('Install Pack')}</h4><span className="pack-tag">.oawpack</span></div>
+        <aside className="pack-detail-panel" aria-label={t(readOnly ? 'Pack details' : 'Install Pack')}>
+          <div className="pack-detail-panel-heading"><h4>{t(readOnly ? 'Pack details' : 'Install Pack')}</h4><span className="pack-tag">.oawpack</span></div>
           {version && <><dl className="pack-detail-facts">
             <dt>{t('Version')}</dt><dd><span className="pack-tag pack-version-tag">v{version.version}</span></dd>
             <dt>{t('OAW compatibility')}</dt><dd><span className="pack-tag">{version.manifest.compatibility.oaw}</span></dd>

@@ -37,15 +37,18 @@ it('keeps the IDE in collapsed developer tools and returns to the Library after 
 const installedContentPack = { id: 'local.research', name: 'Research kit', version: '1.0.0', selected: true, loaded: false,
   kind: 'content' as const, environment: null };
 
-it('keeps hosted collections available without exposing plugin installation or store controls', async () => {
+it('opens the hosted Store while keeping server Pack management unavailable', async () => {
   vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
+  vi.spyOn(worldApi, 'getStorePacks').mockResolvedValue({ items: [], next_cursor: null });
   useCardLibrary.setState({ snapshot: snapshot(), open: true, tab: 'store', refresh: async () => {} });
   useWorldStore.setState({ legions: [] });
   await act(async () => { render(<CardLibrary />); });
-  expect(screen.queryByRole('button', { name: 'Store' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Store' }).getAttribute('aria-pressed')).toBe('true');
+  expect(await screen.findByText('No matching packs')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Install Pack from File...' })).toBeNull();
   expect(screen.queryByLabelText('Pack file')).toBeNull();
   expect(worldApi.getInstalledPacks).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Packs/ }));
   expect(screen.getByRole('heading', { name: 'Pack inventory' })).toBeTruthy();
 });
 

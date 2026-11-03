@@ -28,8 +28,9 @@ from sqlalchemy import Column, Integer, LargeBinary, MetaData, String, Table, Te
 
 from .actions import (
     ACTIVE_JOBS, MAX_UPLOAD_BYTES, Request, _actor, _bounded, _client,
-    _record_link, _uuid, process_sources,
+    _record_link, _uuid, process_sources, project_removed,
 )
+from . import projection_graph
 from .errors import KnowledgeError
 from .pipelines import PIPELINE_NAME
 
@@ -198,7 +199,8 @@ def projects(context, arguments):
         return _bounded({"project": project, "projects": [project]})
     page = kb.collections.list(limit=request.limit + 1, offset=request.offset)
     has_more = len(page) > request.limit
-    return _bounded({"projects": [_project_json(kb, item) for item in page[:request.limit]],
+    return _bounded({"projects": [_project_json(kb, item) for item in page[:request.limit]
+                                  if not project_removed(item)],
                      "offset": request.offset, "has_more": has_more,
                      "next_offset": request.offset + request.limit if has_more else None})
 
@@ -229,6 +231,68 @@ def project_manage(context, arguments):
             metadata["description"] = request.description
         project = kb.collections.update(project.id, name=name, metadata=metadata)
     return _bounded({"project": _project_json(kb, project, details=True)})
+
+
+def _live_project(kb, project_id):
+    project = kb.collections.require(_uuid(project_id, "project_id"))
+    if project_removed(project):
+        raise KnowledgeError("This project was deleted")
+    return project
+
+
+class ProjectFileRemove(Request):
+    project_id: str
+    source_ids: list[str] = Field(min_length=1, max_length=MAX_FILES)
+
+
+def project_file_remove(context, arguments):
+    """Take files out of a project's active inventory, so search, extraction and the
+    graph stop seeing them. The immutable source bytes stay as evidence."""
+    request = ProjectFileRemove.model_validate(arguments)
+    kb = _client(context)
+    project = _live_project(kb, request.project_id)
+    wanted = {str(_uuid(value, "source_id")) for value in request.source_ids}
+    current = {str(source.id) for source in project_sources(kb, project.id)}
+    present = wanted & current
+    converting = [job for source_id, job in _conversion_jobs(kb, present).items() if job.status in ACTIVE_JOBS]
+    if converting:
+        raise KnowledgeError("Wait for conversion to finish before removing these files")
+    if present and not context.confirmed:
+        return {"status": "confirmation_required",
+                "reasons": [f"Removing {len(present)} file(s) hides them from search and extraction; "
+                            "results that used them are marked out of date."],
+                "message": f'Remove {len(present)} file(s) from "{project.name}"?'}
+    with kb.oaw_engine.begin() as connection:
+        connection.execute(delete(_FILES).where(_FILES.c.project_id == str(project.id),
+                                                _FILES.c.source_id.in_(present)))
+    return _bounded({"project": _project_json(kb, project, details=True), "removed": len(present)})
+
+
+class ProjectDelete(Request):
+    project_id: str
+
+
+def project_delete(context, arguments):
+    """Delete a project: its file inventory and results go, the graph is rebuilt, and the
+    collection is renamed and tombstoned so the name can be used again."""
+    request = ProjectDelete.model_validate(arguments)
+    kb = _client(context)
+    project = _live_project(kb, request.project_id)
+    sources = project_sources(kb, project.id)
+    if any(job.status in ACTIVE_JOBS for job in _conversion_jobs(kb, {str(s.id) for s in sources}).values()):
+        raise KnowledgeError("Wait for conversion to finish before deleting this project")
+    if not context.confirmed:
+        return {"status": "confirmation_required",
+                "reasons": [f"Deleting the project removes its {len(sources)} file(s) and every result extracted "
+                            "from them, and rebuilds the knowledge graph without them."],
+                "message": f'Delete project "{project.name}"?'}
+    with kb.oaw_engine.begin() as connection:
+        connection.execute(delete(_FILES).where(_FILES.c.project_id == str(project.id)))
+    kb.oaw_projections.delete_for_project(str(project.id))
+    projection_graph.sync(kb)
+    kb.collections.update(project.id, name=f"{project.name} (deleted {str(project.id)[:8]})",
+                          metadata={**(project.metadata or {}), "removed": True})
+    return _bounded({"deleted": True, "project_id": str(project.id)})
 
 
 class ProjectProcess(Request):

@@ -1,5 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import type { LucideIcon } from "lucide-react";
+import { useInteractionEnvironment } from '../interaction/environment';
+import { hapticFeedback } from '../interaction/feedback';
 
 interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "aria-label"> {
   icon: LucideIcon;
@@ -22,6 +24,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       onClick={(event) => {
         event.stopPropagation();
         onClick?.(event);
+        if (onClick && !event.defaultPrevented && event.detail > 0 && useInteractionEnvironment.getState().input === 'touch') hapticFeedback('selection');
       }}>
       <Icon size={iconSizes[size]} strokeWidth={1.7} aria-hidden="true" focusable="false" />
     </button>

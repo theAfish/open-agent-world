@@ -1,11 +1,14 @@
-import { t, WorkspaceEmptyState, WorkspaceToolbar } from "@oaw/plugin-api";
+import { hostApiBase, t, WorkspaceEmptyState, WorkspaceToolbar } from "@oaw/plugin-api";
 import type { PluginViewProps } from "@oaw/plugin-api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowRight, Check, CheckCircle2, LoaderCircle, Network, Pencil, Sparkles, Table2 } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, LoaderCircle, Network, Pencil, ScrollText, Sparkles, Square, Table2 } from "lucide-react";
 import { GraphMap } from "./GraphMap";
 import type { Entity, Relation } from "./GraphMap";
+import { RunLogModal } from "./RunLogModal";
 import "./ResultsFlow.css";
+
+const LIVE_RUN = ["created", "running", "waiting"];
 
 /** One insight as ``knowledge_insights`` returns it, evidence included. */
 export type Insight = {
@@ -17,19 +20,6 @@ export type Insight = {
 };
 export type InsightKind = "anomaly" | "rule" | "trend" | "correlation" | "threshold" | "note";
 export const KINDS: InsightKind[] = ["anomaly", "rule", "trend", "correlation", "threshold", "note"];
-type FieldStats = {
-  field: string; kind: "numeric" | "categorical" | "text" | "empty"; count: number;
-  mean?: number | null; std?: number | null; min?: number; max?: number; median?: number | null;
-  outliers?: { record_id: string; name: string | null; value: number; z: number }[];
-  counts?: Record<string, number>; distinct?: number;
-};
-type Correlation = { a: string; b: string; r: number; n: number };
-export type Statistics = { records: number; truncated: boolean; fields: FieldStats[]; correlations: Correlation[] };
-type SchemaStatistics = { schema_id: string; schema_name: string; record_count: number; statistics: Statistics };
-type CrossSchema = { schemas: string[]; matched: number; matched_names: string[]; correlations: Correlation[] };
-/** ``knowledge_insights`` with operation="stats": one block per schema in scope, and
- * what the specimens several schemas share by name show across them. */
-type ScopeStatistics = { schema_ids: string[]; statistics_by_schema: SchemaStatistics[]; cross_schema: CrossSchema | null };
 type Graph = { entities: Entity[]; relations: Relation[]; truncated: boolean };
 type Pending = { args: Record<string, unknown>; reasons: string[]; ids: string[] };
 type Schema = { id: string; name: string };
@@ -45,9 +35,8 @@ type Props = {
   groupArgs: () => Record<string, unknown>; groupFilter: () => Record<string, unknown>;
   call: (action: string, args?: Record<string, unknown>, confirm?: boolean) => Promise<Record<string, unknown>>;
   perform: (work: () => Promise<void>) => Promise<void>;
-  request: (path: string, body: unknown, deployed: boolean) => Promise<Record<string, unknown>>;
-  labAgent?: Agent; canRunAgent: boolean; selectedModel: string;
-  modelSelect: ReactNode; groupSelect: ReactNode; refreshControls: ReactNode; banner: ReactNode;
+  labAgent?: Agent; canRunAgent: boolean;
+  groupSelect: ReactNode; refreshControls: ReactNode; banner: ReactNode;
   setNotice: (value: string) => void; setError: (value: string) => void;
   /** Jump to one record where it lives (Experiments, or Literature → Records). */
   onOpenRecord: (recordId: string) => void;
@@ -62,17 +51,14 @@ type Props = {
 const shortId = (value: string) => value.length > 13 ? `${value.slice(0, 8)}…` : value;
 const num = (value: number | null | undefined, digits = 3) =>
   value === null || value === undefined ? "—" : Number.isInteger(value) ? String(value) : value.toFixed(digits);
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export function InsightsSection({
   host, cardId, deployed, busy, version, schemas, schemaId, onSchemaChange, publishedCounts,
-  groupArgs, groupFilter, call, perform, request, labAgent, canRunAgent, selectedModel,
-  modelSelect, groupSelect, refreshControls, banner, setNotice, setError, onOpenRecord, onOpenExperiments, kindLabel,
+  groupArgs, groupFilter, call, perform, labAgent, canRunAgent,
+  groupSelect, refreshControls, banner, setNotice, setError, onOpenRecord, onOpenExperiments, kindLabel,
   schemaKind = "experiment", embedded = false,
 }: Props) {
   const [insights, setInsights] = useState<Insight[]>([]);
-  const [stats, setStats] = useState<ScopeStatistics>();
-  const [statsError, setStatsError] = useState("");
   const [graph, setGraph] = useState<Graph>();
   const [entity, setEntity] = useState("");
   const [kindFilter, setKindFilter] = useState<"" | InsightKind>("");
@@ -82,33 +68,29 @@ export function InsightsSection({
   const [replace, setReplace] = useState(false);
   // A running agent extraction: which agent to watch until it is idle again.
   const [extracting, setExtracting] = useState<{ agent_id: string; schema_id: string }>();
-  const [requesting, setRequesting] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const generation = useRef(0);
   const draftPanel = useRef<HTMLElement>(null);
   const publishedPanel = useRef<HTMLElement>(null);
 
-  // "" is the open scope: every experiment schema with published records, read
-  // together, with cross-schema statistics over the specimens they share by name.
+  // "" is the open scope: every experiment schema with published records, read together.
   const currentSchema = schemas.find(item => item.id === schemaId);
   const published = currentSchema ? (publishedCounts[currentSchema.id] ?? 0)
     : Object.values(publishedCounts).reduce((sum, count) => sum + count, 0);
-  const processing = !!extracting || requesting;
+  const processing = !!extracting;
   const scopeArgs = useCallback((): Record<string, unknown> =>
     schemaId ? { schema_id: schemaId } : { schema_kind: schemaKind }, [schemaId, schemaKind]);
 
   const load = useCallback(async () => {
     const current = ++generation.current;
-    const [list, map, computed] = await Promise.allSettled([
+    const [list, map] = await Promise.allSettled([
       call("insights", { operation: "list", limit: 200, ...scopeArgs(), ...groupArgs() }),
       call("graph", { layer: "experiment", limit: 500, ...groupFilter() }),
-      call("insights", { operation: "stats", ...scopeArgs(), ...groupArgs() }),
     ]);
     if (generation.current !== current) return;
     if (list.status === "fulfilled") setInsights((list.value.insights as Insight[]) ?? []);
     if (map.status === "fulfilled") setGraph(map.value as unknown as Graph);
-    if (computed.status === "fulfilled") {
-      setStats(computed.value as unknown as ScopeStatistics); setStatsError("");
-    } else { setStats(undefined); setStatsError(message(computed.reason)); }
     const failure = [list, map].find(result => result.status === "rejected");
     if (failure) throw (failure as PromiseRejectedResult).reason;
   }, [call, scopeArgs, groupArgs, groupFilter]);
@@ -116,46 +98,32 @@ export function InsightsSection({
   useEffect(() => { void perform(load); }, [load, perform, version]);
   useEffect(() => () => { generation.current += 1; }, []);
 
-  // Two ways to extract, as for records: a connected Lab assistant is a real Agent run
-  // the card watches until idle; otherwise one JSON-mode call through the host bridge.
+  // Extraction is a connected Lab assistant's Agent run, which the card watches until idle.
   const scopeLabel = currentSchema ? currentSchema.name : t("all schemas");
   const extract = () => perform(async () => {
+    if (!labAgent || !host.runAgent || deployed) throw new Error(t("Connect a Lab assistant agent to this card to extract insights"));
     const scope = { schema_ids: currentSchema ? [currentSchema.id] : [], schema_kind: schemaKind, ...groupArgs() };
-    if (labAgent && host.runAgent && !deployed) {
-      const requestBody = { ...scope, schema_names: currentSchema ? [currentSchema.name] : schemas.map(item => item.name),
-        knowledge_card: cardId, replace_drafts: replace };
-      await host.runAgent(labAgent.id, [
-        "Perform the insight extraction described by the JSON data below.",
-        "INSIGHT EXTRACTION REQUEST", JSON.stringify(requestBody), "END INSIGHT EXTRACTION REQUEST",
-        "Call knowledge_insight_prompt with exactly these schema_ids (an empty list means every schema of schema_kind with published records), schema_kind and group_id / all_groups,",
-        "read every table (follow has_more with offset), propose insights grounded in the statistics and the records — including what the cross-schema",
-        "statistics show — citing record_ids as evidence, and save them in one knowledge_insight_save call with the same scope",
-        `and replace_drafts=${replace ? "true" : "false"}, then report what you proposed and what was unclear.`,
-      ].join("\n"));
-      setExtracting({ agent_id: labAgent.id, schema_id: schemaId });
-      setNotice(t("{v0} is extracting insights over {v1}…", { v0: labAgent.name, v1: scopeLabel }));
-      return;
-    }
-    if (!selectedModel) throw new Error(deployed
-      ? t("This deployment has no default model configured yet")
-      : t("Configure a model connection first, or connect a Lab assistant agent"));
-    setRequesting(true);
-    const result = await request(`knowledge/${cardId}/insights`, { ...scope, model: selectedModel, replace_drafts: replace }, deployed)
-      .finally(() => setRequesting(false));
-    const saved = result.insights as unknown[];
-    const warnings = result.warnings as string[];
-    setNotice(result.truncated
-      ? t("Proposed {v0} insight(s) from the first part of a very long record table", { v0: saved.length })
-      : warnings.length
-        ? t("Proposed {v0} insight(s) · {v1}", { v0: saved.length, v1: warnings.join("; ") })
-        : t("Proposed {v0} insight(s) over {v1} · review and publish them below", { v0: saved.length, v1: scopeLabel }));
-    await load();
+    const requestBody = { ...scope, schema_names: currentSchema ? [currentSchema.name] : schemas.map(item => item.name),
+      knowledge_card: cardId, replace_drafts: replace };
+    await host.runAgent(labAgent.id, [
+      "Perform the insight extraction described by the JSON data below.",
+      "INSIGHT EXTRACTION REQUEST", JSON.stringify(requestBody), "END INSIGHT EXTRACTION REQUEST",
+      "Call knowledge_insight_prompt with exactly these schema_ids (an empty list means every schema of schema_kind with published records), schema_kind and group_id / all_groups,",
+      "and follow its instruction. Read every page of records (has_more / next_offset) before concluding. A result that arrives as a preview",
+      "is read in full with read_tool_result; never conclude a scope is empty or unpublished from a preview. The card computes nothing:",
+      "explore the records for connections and do every calculation yourself with your own tools. Then save the insights in one",
+      `knowledge_insight_save call with the same scope and replace_drafts=${replace ? "true" : "false"}, and report what you proposed and what was unclear.`,
+    ].join("\n"), true);
+    setExtracting({ agent_id: labAgent.id, schema_id: schemaId });
+    setNotice(t("{v0} is extracting insights over {v1}…", { v0: labAgent.name, v1: scopeLabel }));
   });
 
   useEffect(() => {
     if (!extracting) return;
     let active = true;
     const timer = window.setInterval(() => {
+      // Drafts appear as the agent saves them, not only when it finishes.
+      void load().catch(() => undefined);
       host.getAgentInfo(extracting.agent_id).then(async info => {
         const state = info as { status?: string; active_run_id?: string | null };
         if (!active || state.status === "running" || state.active_run_id) return;
@@ -167,6 +135,24 @@ export function InsightsSection({
     }, 2500);
     return () => { active = false; window.clearInterval(timer); };
   }, [extracting, host, perform, load, setNotice]);
+
+  const stop = async () => {
+    if (!labAgent) return;
+    setStopping(true);
+    try {
+      const runs = await (await fetch(`${hostApiBase}/runs?agent_id=${encodeURIComponent(labAgent.id)}`)).json() as { run_id: string; status: string }[];
+      for (const run of runs) {
+        if (!LIVE_RUN.includes(run.status.toLowerCase())) continue;
+        const response = await fetch(`${hostApiBase}/runs/${encodeURIComponent(run.run_id)}/cancel`, { method: "POST" });
+        if (!response.ok) throw new Error(t("The run could not be stopped"));
+      }
+      setExtracting(undefined);
+      setNotice(t("Extraction stopped"));
+      await perform(load);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally { setStopping(false); }
+  };
 
   const beginEdit = (item: Insight) => {
     setEditingId(item.id);
@@ -214,7 +200,7 @@ export function InsightsSection({
   const expand = (id: string) => {
     setEntity(id);
     void perform(async () => {
-      const result = await call("graph", { operation: "traverse", entity_id: id, max_depth: 2, layer: "experiment", ...groupFilter() });
+      const result = await call("graph", { operation: "traverse", entity_id: id, max_depth: 2, layer: "experiment", full: true, ...groupFilter() });
       setGraph(result as unknown as Graph);
     });
   };
@@ -229,11 +215,9 @@ export function InsightsSection({
   const blocker = !published ? (currentSchema ? t("Publish some records of this schema {v0} first.", { v0: where })
       : t("Publish some records {v0} first.", { v0: where }))
     : processing ? t("An extraction is already running.")
-    : (!canRunAgent && !selectedModel) ? (deployed ? t("This deployment has no default model configured yet.")
-      : t("Configure a model connection in OAW Settings, or connect an Agent to this card with the Knowledge experiment relationship."))
+    : (!canRunAgent || !labAgent) ? (deployed ? t("Insights are proposed by a connected Lab assistant, which a deployment does not have.")
+      : t("Connect a Lab assistant agent to this card with the Knowledge experiment relationship to extract insights."))
     : "";
-  const statBlocks = (stats?.statistics_by_schema ?? []).filter(block => block.statistics.records > 0);
-  const totalRecords = statBlocks.reduce((sum, block) => sum + block.statistics.records, 0);
 
   const evidenceChips = (item: Insight) => <span className="knowledge-insight-evidence">
     {item.evidence.map(link => <button key={link.record_id} type="button" className="knowledge-chip" disabled={busy}
@@ -292,74 +276,25 @@ export function InsightsSection({
         <span>{t("{v0} published record(s)", { v0: published })}{currentSchema ? ` · ${currentSchema.name}` : ""}</span></div>
       <button type="button" className="knowledge-primary" disabled={busy || !!blocker} onClick={() => void extract()}>
         <Sparkles size={14} />{processing ? t("Extracting…") : t("Extract insights")}</button>
+      {!deployed && labAgent && <button type="button" onClick={() => setLogOpen(true)}><ScrollText size={14} />{t("Extraction log")}</button>}
+      {processing && <button type="button" className="project-stop" disabled={stopping} onClick={() => void stop()}>
+        <Square size={13} />{stopping ? t("Stopping…") : t("Stop")}</button>}
       {processing && <progress aria-label={t("Extracting insights")} />}
     </div>}
 
     {!!published && <details className="knowledge-disclosure knowledge-workflow knowledge-results-setup">
       <summary>{t("Extraction options")}</summary>
       <p className="knowledge-meta">{currentSchema
-        ? t("{v0} published record(s) of \"{v1}\" are read as one table, with statistics the card computes over them.", { v0: published, v1: currentSchema.name })
-        : t("{v0} published record(s) across every schema are read together — one table per schema, plus what specimens that appear in several schemas (matched by name) show across them. Pick one schema in the toolbar to narrow the scope.", { v0: published })}</p>
+        ? t("The connected Lab assistant reads the {v0} published record(s) of \"{v1}\" as JSON.", { v0: published, v1: currentSchema.name })
+        : t("The connected Lab assistant reads the {v0} published record(s) across every schema together, and can link specimens that appear in several schemas by name. Pick one schema in the toolbar to narrow the scope.", { v0: published })}</p>
       <p className="knowledge-meta">{canRunAgent && labAgent
-        ? t("Runs the connected {v0}, which reads the table and the statistics and proposes draft insights itself.", { v0: labAgent.name })
-        : t("Extraction runs as one model call through the selected model.")}</p>
-      {!canRunAgent && !deployed && modelSelect}
-      {deployed && <p className="knowledge-meta">{t("Model: {v0}", { v0: selectedModel || t("none configured") })}</p>}
+        ? t("{v0} explores the records, does its own calculations and proposes draft insights; the card computes no statistics.", { v0: labAgent.name })
+        : t("Extraction needs a connected Lab assistant agent with tools for calculation.")}</p>
       <div className="knowledge-formbar">
         <label className="knowledge-checkrow"><input type="checkbox" checked={replace} disabled={busy || processing} onChange={event => setReplace(event.target.checked)} />
           {currentSchema ? t("Replace this schema's draft insights (published ones stay)") : t("Replace the cross-schema draft insights (published ones stay)")}</label>
       </div>
       {blocker && <p className="knowledge-empty">{blocker}</p>}
-    </details>}
-
-    {(!!published || !!statsError) && <details className="knowledge-disclosure knowledge-results-statistics">
-      <summary>{t("Statistics")} {stats && <span className="knowledge-total">{totalRecords}</span>}</summary>
-      {statsError && <p role="alert" className="knowledge-error">{statsError}</p>}
-      {stats && !totalRecords && <p className="knowledge-empty">{t("No published records yet.")}</p>}
-      {!!totalRecords && <p className="knowledge-meta">{t("Over {v0} published record(s). Computed by the card, not a model.", { v0: totalRecords })}</p>}
-      {stats?.cross_schema && statBlocks.length > 1 && <section className="knowledge-stats-block">
-        <h4>{t("Across schemas")}</h4>
-        <p className="knowledge-meta">{t("{v0} specimen(s) appear in more than one schema, matched by record name.", { v0: stats.cross_schema.matched })}</p>
-        {!stats.cross_schema.correlations.length
-          ? <p className="knowledge-empty">{stats.cross_schema.matched < 5
-            ? t("At least five shared specimens are needed before fields of different schemas can be correlated.")
-            : t("No correlation with |r| ≥ 0.6 between fields of different schemas.")}</p>
-          : <ul className="knowledge-list knowledge-compact">
-            {stats.cross_schema.correlations.map(item => <li key={`${item.a}:${item.b}`} className="knowledge-static-row">
-              <span>{item.a} ↔ {item.b}</span><small>r = {num(item.r, 2)} · n = {item.n}</small></li>)}
-          </ul>}
-      </section>}
-      {statBlocks.map(block => {
-        const numericFields = block.statistics.fields.filter(item => item.kind === "numeric");
-        const categoricalFields = block.statistics.fields.filter(item => item.kind === "categorical");
-        const outliers = numericFields.flatMap(item => (item.outliers ?? []).map(outlier => ({ ...outlier, field: item.field })));
-        return <section key={block.schema_id} className="knowledge-stats-block">
-          {statBlocks.length > 1 && <h4>{block.schema_name} <span className="knowledge-total">{block.statistics.records}</span></h4>}
-          {block.statistics.truncated && <p className="knowledge-meta">{t("Only the first 500 records are counted.")}</p>}
-          {!!numericFields.length && <div className="knowledge-record-grid knowledge-stats"><table>
-            <thead><tr><th>{t("Field")}</th><th>{t("n")}</th><th>{t("Mean")}</th><th>{t("Std")}</th><th>{t("Min")}</th>
-              <th>{t("Median")}</th><th>{t("Max")}</th><th>{t("Outliers")}</th></tr></thead>
-            <tbody>{numericFields.map(item => <tr key={item.field}>
-              <th scope="row">{item.field}</th><td>{item.count}</td><td>{num(item.mean)}</td><td>{num(item.std)}</td>
-              <td>{num(item.min)}</td><td>{num(item.median)}</td><td>{num(item.max)}</td><td>{item.outliers?.length ?? 0}</td>
-            </tr>)}</tbody>
-          </table></div>}
-          {!!outliers.length && <><h5>{t("Outliers (|z| > 2.5)")}</h5><ul className="knowledge-list knowledge-compact">
-            {outliers.map(item => <li key={`${item.field}:${item.record_id}`}>
-              <button type="button" disabled={busy} onClick={() => onOpenRecord(item.record_id)}>
-                <span>{item.name ?? shortId(item.record_id)} · {item.field} = {num(item.value)}</span><small>z = {num(item.z, 2)}</small></button>
-            </li>)}
-          </ul></>}
-          {!!block.statistics.correlations.length && <><h5>{t("Correlations (|r| ≥ 0.6)")}</h5><ul className="knowledge-list knowledge-compact">
-            {block.statistics.correlations.map(item => <li key={`${item.a}:${item.b}`} className="knowledge-static-row">
-              <span>{item.a} ↔ {item.b}</span><small>r = {num(item.r, 2)} · n = {item.n}</small></li>)}
-          </ul></>}
-          {!!categoricalFields.length && <><h5>{t("Categories")}</h5><ul className="knowledge-list knowledge-compact">
-            {categoricalFields.map(item => <li key={item.field} className="knowledge-static-row">
-              <span>{item.field}</span><small>{Object.entries(item.counts ?? {}).map(([value, count]) => `${value} ×${count}`).join(" · ")}</small></li>)}
-          </ul></>}
-        </section>;
-      })}
     </details>}
 
     {!!insights.length && <section ref={draftPanel} className="knowledge-insight-block knowledge-result-review">
@@ -472,5 +407,7 @@ export function InsightsSection({
           </div>
         </>}
     </section>}
+    {logOpen && labAgent && <RunLogModal agentId={labAgent.id} events={[]} stopping={stopping} canStop={processing}
+      onStop={() => void stop()} onClose={() => setLogOpen(false)} />}
   </>;
 }

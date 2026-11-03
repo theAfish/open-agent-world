@@ -1,0 +1,127 @@
+/* An explicit tray on phones and touch devices; wide layouts retain hover. */
+.component-palette.is-touch .deck-tabs { grid-template-columns: minmax(0, 1fr) auto auto; }
+.component-palette.is-touch .deck-tool-button { width: 44px; min-width: 44px; height: 44px; flex-basis: 44px; touch-action: manipulation; }
+.component-palette.is-touch .deck-expand-button { color: var(--ink-soft); }
+.component-palette.is-touch:not(.is-touch-expanded):not(.is-library-open):not([data-tutorial-highlight]):not(:has([data-tutorial-highlight])) .deck-stage {
+  min-height: 0;
+  max-height: 0;
+  margin-top: 0;
+  padding-block: 0;
+  visibility: hidden;
+  opacity: 0;
+  border-width: 0;
+  pointer-events: none;
+  transform: translateY(16px) scale(.975);
+}
+.component-palette.is-touch.is-touch-expanded .deck-stage {
+  min-height: var(--deck-open-height);
+  max-height: var(--deck-open-height);
+  margin-top: 5px;
+  padding: 8px 14px 8px 12px;
+  visibility: visible;
+  opacity: 1;
+  border-width: 1px;
+  pointer-events: auto;
+  transform: none;
+  transition-delay: 0s;
+}
+.component-palette.is-touch .palette-items {
+  display: flex;
+  justify-content: flex-start;
+  gap: 12px;
+  padding-inline: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  touch-action: pan-x;
+}
+.component-palette.is-touch .palette-items > .deck-hover-slot {
+  flex: 0 0 var(--compact-card-width);
+  width: var(--compact-card-width);
+  scroll-snap-align: start;
+}
+.component-palette.is-touch .deck-hover-button { touch-action: pan-x; }
+.component-palette.is-touch .deck-hover-button::before { inset: 0; }
+.component-palette.is-touch .deck-stage.is-editor {
+  --deck-open-height: min(220px, calc(var(--app-height) - 116px));
+  align-items: stretch;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.component-palette.is-touch .deck-editor { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; align-content: start; }
+.component-palette.is-touch .deck-editor-heading { grid-column: auto; grid-row: auto; align-items: center; padding-right: 0; border-right: 0; }
+.component-palette.is-touch .deck-editor-heading strong { font-size: 13px; }
+.component-palette.is-touch .deck-editor-heading > button { width: 44px; height: 44px; flex-basis: 44px; }
+.component-palette.is-touch .deck-name-field { grid-column: auto; grid-row: auto; grid-template-columns: 68px minmax(0, 1fr); }
+.component-palette.is-touch .deck-name-field > span { font-size: 11px; }
+.component-palette.is-touch .deck-quick-create { grid-column: auto; grid-row: auto; }
+.component-palette.is-touch .deck-create-button { flex: 0 0 110px; height: 44px; font-size: 12px; }
+.component-palette.is-touch .deck-editor > .deck-delete-button { grid-column: auto; min-height: 44px; font-size: 12px; }
+@media (max-width: 620px) {
+  .component-palette.is-touch.is-touch-expanded .deck-stage { padding-inline: 9px; }
+}
+
+/* A phone tray is a single navigation row. Keep the same 44px targets without
+   stacking an icon, count and caption into a miniature desktop tab. */
+:root[data-layout="compact"] .component-palette {
+  padding: 5px;
+  border-radius: 14px;
+  background: var(--chrome);
+  box-shadow: 0 3px 12px var(--shadow);
+}
+:root[data-layout="compact"] .component-palette:is(:hover, :has(:focus-visible, .deck-editor:focus-within)) {
+  box-shadow: 0 3px 12px var(--shadow);
+}
+:root[data-layout="compact"] .component-palette .deck-tabs { gap: 2px; }
+:root[data-layout="compact"] .component-palette .deck-tab-scroll {
+  gap: 2px;
+  padding: 0;
+  scroll-padding: 3px;
+  scrollbar-width: none;
+  align-items: center;
+}
+:root[data-layout="compact"] .component-palette .deck-tab-scroll::-webkit-scrollbar { display: none; }
+:root[data-layout="compact"] .component-palette .deck-tab-scroll > button {
+  flex: 1 0 104px;
+  flex-direction: row;
+  gap: 6px;
+  height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+  background: transparent;
+}
+:root[data-layout="compact"] .component-palette .deck-tab-scroll > button:is(.is-active, .is-drop-target) {
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+:root[data-layout="compact"] .component-palette .deck-tab-summary { display: contents; }
+:root[data-layout="compact"] .component-palette .deck-tab-summary > svg { order: 0; flex: 0 0 16px; width: 16px; height: 16px; }
+:root[data-layout="compact"] .component-palette .deck-tab-label {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  line-height: 18px;
+  text-align: start;
+}
+:root[data-layout="compact"] .component-palette .deck-tab-summary > small {
+  order: 2;
+  flex: 0 0 auto;
+  min-width: 18px;
+  height: 18px;
+  padding-inline: 3px;
+  background: transparent;
+  font-size: 10px;
+}
+:root[data-layout="compact"] .component-palette .deck-stage { border-radius: 10px; background: var(--surface-soft); box-shadow: none; }
+:root[data-layout="compact"] .component-palette .deck-stage::after { display: none; }
+:root[data-layout="compact"] .component-palette.is-library-open:not(.is-touch-expanded) .deck-stage {
+  min-height: var(--library-deck-peek-height);
+  max-height: var(--library-deck-peek-height);
+  overflow: hidden;
+}

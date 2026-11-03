@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Interaction foundation fixture</title>
+</head>
+<body><div id="root"></div>
+<script type="module">
+  import { createElement as h, useState } from 'react';
+  import { createRoot } from 'react-dom/client';
+  import { Plus } from 'lucide-react';
+  import '@xyflow/react/dist/style.css';
+  import '/src/theme.css';
+  import '/src/components/controls.css';
+  import '/src/interaction/foundation.css';
+  import { startInteractionEnvironment } from '/src/interaction/environment';
+  import { useTouchHold } from '/src/interaction/useTouchHold';
+  import { IconButton } from '/src/components/IconButton';
+  window.interactions = [];
+  startInteractionEnvironment();
+  function Fixture() {
+    const [clicks, setClicks] = useState(0);
+    const record = name => point => window.interactions.push({ name, x: point?.clientX });
+    const hold = useTouchHold({ onHold: record('hold'), onMove: record('move'), onRelease: record('release'), onCancel: record('cancel') });
+    return h('main', { className: 'world-shell' },
+      h('aside', { className: 'top-bar' }, h('div', { className: 'world-status' }),
+        h('div', { className: 'top-actions' }, h(IconButton, { icon: Plus, label: 'Add', onClick: () => setClicks(value => value + 1) }))),
+      h('div', { style: { position: 'absolute', top: 180, left: 80, right: 24 } },
+        h('button', { ...hold.bind, 'data-touch-hold': hold.phase, onClick: record('click'), style: { width: '100%', height: 120, touchAction: 'none' } }, 'Hold card'),
+        h('input', { 'aria-label': 'Draft', placeholder: 'Draft', style: { width: '100%', marginTop: 20 } }),
+        h('p', { id: 'clicks' }, String(clicks))),
+      h('div', { className: 'world-controls react-flow__controls' }, ...[1, 2, 3].map(id => h('button', { key: id, className: 'react-flow__controls-button' }, '+'))),
+      h('div', { className: 'map-tools react-flow__panel' }, h('div', { className: 'map-toolbar' }, h(IconButton, { icon: Plus, label: 'Map tool' }))))
+  }
+  createRoot(document.getElementById('root')).render(h(Fixture));
+</script></body></html>

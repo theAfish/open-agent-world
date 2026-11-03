@@ -37,6 +37,20 @@ it('uses authored packaging in the catalog and the reviewed version preview in d
   expect(install).not.toHaveBeenCalled();
 });
 
+it('browses remote Pack details in hosted read-only mode without offering installation', async () => {
+  vi.spyOn(worldApi, 'getStorePacks').mockResolvedValue({ items: [pack], next_cursor: null });
+  vi.spyOn(worldApi, 'getStorePack').mockResolvedValue(detail);
+  vi.spyOn(worldApi, 'getStoreVersion').mockResolvedValue(version);
+  const install = vi.spyOn(worldApi, 'installStorePack');
+  render(<PackStore readOnly />);
+  fireEvent.click(await screen.findByRole('button', { name: 'View Greeter details' }));
+  expect(await screen.findByText('colorama==0.4.6')).toBeTruthy();
+  expect(screen.getByText('Pack installation is managed by your hosting administrator.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Get' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Update' })).toBeNull();
+  expect(install).not.toHaveBeenCalled();
+});
+
 it('searches and paginates with the server cursor', async () => {
   const catalog = vi.spyOn(worldApi, 'getStorePacks').mockResolvedValueOnce({ items: [pack], next_cursor: pack.id })
     .mockResolvedValueOnce({ items: [{ ...pack, id: 'example.next', name: 'Next' }], next_cursor: null })

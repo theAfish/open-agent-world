@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from . import actions, insights, projects, spaces
+from . import actions, insights, projects, schema_draft, spaces
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation("markdown", actions.markdown, actions.Markdown, tool_name="knowledge_markdown",
         description="Read the markdown extracted from one source, by source_id or record_id. Long documents are windowed: use offset and limit and follow has_more to page through."),
     Operation("search", actions.search, actions.Search, tool_name="knowledge_document_search",
-        description="Full-text search across every converted document's markdown. Returns ranked excerpts, each with the source filename and the heading it falls under — raw document text, not a verified fact. Use this to answer document-level questions across many sources at once instead of reading one document from the top with knowledge_markdown."),
+        description="Full-text search across every converted document's markdown. Returns ranked excerpts, each with the source filename and the heading it falls under — raw document text, not a verified fact. Use it AFTER knowledge_graph, for exact wording, numbers or tables, or when the graph has nothing on the question; for questions about concepts and how they relate, start with knowledge_graph. Prefer it to reading one document from the top with knowledge_markdown."),
     Operation("schemas", actions.schemas, actions.SchemaRead, tool_name="knowledge_schemas",
         description="List or read custom schemas for experiment JSON records. Use knowledge_spaces for direct project projections. Creating or changing an experiment schema requires knowledge_schema_manage."),
     Operation("experiment_bundles", actions.experiment_bundles, actions.ExperimentBundles,
@@ -64,7 +64,7 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Get everything needed to project one experiment upload onto its schema: the schema's system prompt and JSON Schema definition, the uploader's notes, and every file's markdown joined into one document (windowed: follow has_more with offset). Produce one record per specimen, then submit them with knowledge_experiment_save."),
     Operation("experiment_save", actions.experiment_save, actions.ExperimentSave,
         tool_name="knowledge_experiment_save",
-        description="Store the records projected from one experiment upload as drafts, each validated against the schema and linked to the files it was read from. Pass replace_drafts=true when re-extracting so earlier drafts are replaced; published records are never touched. A draft is a candidate until a person publishes it."),
+        description="Store the records projected from one experiment upload as drafts, each validated against the schema and linked to the files it was read from. Pass replace_drafts=true when re-extracting so earlier drafts are replaced; published records are never touched. A draft is a candidate until a person publishes it. Every record must match the schema exactly (its property names and structure, no extra properties); if any record does not, nothing is saved and the errors are returned: correct the records and call again."),
     Operation("experiments", actions.experiments, actions.Experiments,
         tool_name="knowledge_experiments",
         description="List or read structured records — structured JSON extracted from an experiment upload. Filter by schema, upload (bundle_id), source (source_id) or status: a published record is approved data; a draft is still being reviewed."),
@@ -72,10 +72,10 @@ OPERATIONS: tuple[Operation, ...] = (
         tool_name="knowledge_experiment_update",
         description="Edit one draft experiment record's name, data or note, when a person asks for the change. Refuses published records. Never publishes: that is the person's click."),
     Operation("insights", insights.insights, insights.Insights, tool_name="knowledge_insights",
-        description="Read the insights of this knowledge base: meta-knowledge (anomaly, rule, trend, correlation, threshold, note) that was extracted from published experiment records — of one schema or across several — and reviewed by a person, each evidence-linked to the records it rests on. Use this whenever someone asks what the experiments show as a whole: any anomalies, what drives a property, which rules hold. Filter by schema_id, kind, status or a free-text query over titles and statements; a published insight is in the knowledge graph's experiment layer, a draft is still being reviewed. operation=\"stats\" returns deterministic statistics over published records — per schema the field distributions, outliers and correlations, and across schemas the correlations between fields of different schemas for specimens both describe — use it for numeric questions instead of estimating."),
+        description="Read the insights of this knowledge base: meta-knowledge (anomaly, rule, trend, correlation, threshold, note) that was extracted from published experiment records — of one schema or across several — and reviewed by a person, each evidence-linked to the records it rests on. Use this whenever someone asks what the experiments show as a whole: any anomalies, what drives a property, which rules hold. Filter by schema_id, kind, status or a free-text query over titles and statements; a published insight is in the knowledge graph's experiment layer, a draft is still being reviewed. It does no calculation: to answer a numeric question about the records, read them with knowledge_experiments and compute with your own tools."),
     Operation("insight_prompt", insights.insight_prompt, insights.InsightPrompt,
         tool_name="knowledge_insight_prompt",
-        description="Get everything needed to propose insights over published experiment records — one schema (schema_id), several (schema_ids) or, with neither, every schema that has published records: each schema's definition and statistics (distributions, outliers, correlations), the cross-schema correlations over specimens several schemas describe (records matched by name), the insights already published, and the records as one markdown table per schema with a record_id column (windowed: follow has_more with offset). Produce grounded insights citing record_ids as evidence, then submit them with knowledge_insight_save using the same scope."),
+        description="Get everything needed to propose insights over published experiment records — one schema (schema_id), several (schema_ids) or, with neither, every schema that has published records: each schema's definition and field notes, the insights already published, and the records themselves as raw JSON with record ids (paged: follow has_more with offset, or next_offset, until you have read them all). Nothing is precomputed; explore the records freely, do any calculation with your own tools, cite record_ids as evidence, then submit the insights with knowledge_insight_save using the same scope."),
     Operation("insight_save", insights.insight_save, insights.InsightSave,
         tool_name="knowledge_insight_save",
         description="Store proposed insights as drafts for a scope of schemas (the same schema_id / schema_ids / none given to knowledge_insight_prompt), each evidence-linked to the published records it cites; an insight citing a record outside those schemas and that group is refused. Pass replace_drafts=true when re-extracting so that scope's earlier drafts are replaced; published insights are never touched. A draft is a candidate until a person publishes it."),
@@ -83,7 +83,19 @@ OPERATIONS: tuple[Operation, ...] = (
         tool_name="knowledge_insight_update",
         description="Edit one draft insight's kind, title, statement, fields, confidence, evidence or note, when a person asks for the change. Refuses published insights. Never publishes: that is the person's click."),
     Operation("graph", actions.graph, actions.GraphQuery, tool_name="knowledge_graph",
-        description="Search the published experiment Insight graph, including record and field evidence. Use knowledge_projections for generic project Space graph/table outputs, and knowledge_document_search for original material. Query by words, names, or relation paths. Returned relations are published claims; concept descriptions alone are not claims. Semantic search is used only when an embedding model is configured; inspect semantic_error when it is unavailable."),
+        description=("Search and explore the knowledge graph: concepts and relations from saved project graph results "
+            "(merged across projects by name) plus published experiment Insights. Work coarse to fine, and read original "
+            "documents only for what matters. "
+            "1) operation=query with a plain-words question (and names=[...] for concepts you can name): the best-matching "
+            "concepts, each with `links` (its best relations for the question, with the neighbour's own description) and "
+            "`neighbours` (the rest, by name); also the strongest relations and, for two or more named concepts, the paths between "
+            "them. Semantic search is used only when an embedding model is configured; inspect semantic_error when it is unavailable. "
+            "2) Judge from the descriptions which neighbours matter, then operation=traverse with names=[those concepts] "
+            "(several at once, max_depth 1-2) to see THEIR relations. operation=connect with two names finds how they are linked. "
+            "3) Only for a relation that decides the answer: operation=evidence with names=[source, target] (and predicate "
+            "if they are joined more than once) returns its full statement, supporting sentences and the original text around "
+            "them. For broader reading use knowledge_document_search and knowledge_markdown. Relations are claims with source "
+            "evidence; concept descriptions alone are not claims. Use knowledge_projections for one project's full graph or table results.")),
     Operation("graph_index", actions.graph_index, actions.GraphIndexStatus, tool_name="knowledge_graph_index",
         description="Read the semantic index status: which embedding model the card uses (enabled=false when none), how many graph elements are embedded, pending or stale, and the last error. Call this when asked whether meaning-based search is available or why a search said semantic=false. Building the index requires knowledge_graph_index_build."),
     Operation("jobs", actions.jobs, actions.Jobs, tool_name="knowledge_jobs",
@@ -98,7 +110,7 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Create or update an experiment upload's name, notes and schema. For create, choose an experiment schema with knowledge_schemas or knowledge_schema_manage and give a name; an equivalent unpublished upload is reused. Import its files next, wait for conversion, then use knowledge_experiment_extract_prompt and knowledge_experiment_save. Updates refuse uploads with published records. This cannot delete, publish or change extraction run state."),
     Operation("graph_index_build", actions.graph_index_build, actions.GraphIndexBuild,
         tool_name="knowledge_graph_index_build",
-        description="Build missing or stale embeddings for the published graph using the configured embedding model. Does not change the model or publish knowledge. Read knowledge_graph_index first to check availability and progress."),
+        description="Build missing or stale embeddings for the knowledge graph using the configured embedding model. Does not change the model or publish knowledge. Read knowledge_graph_index first to check availability and progress."),
     # No tool_name below this line: human-only, on every transport.
     Operation("settings", actions.update_settings, actions.Settings,
         description="Read or change this knowledge base's collection name, PDF engine and MinerU base URL."),
@@ -106,6 +118,8 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Create, rename, annotate, mark the extraction state of, or delete one experiment upload."),
     Operation("experiment_ingest", actions.experiment_ingest, actions.ExperimentIngest,
         description="Upload one raw file into an experiment upload and queue its markdown conversion at once."),
+    Operation("schema_sample", schema_draft.schema_sample, schema_draft.SchemaSample,
+        description="Convert one sample file to markdown for drafting a schema; nothing is stored."),
     Operation("experiment_review", actions.experiment_review, actions.ExperimentReview,
         description="Publish, unpublish or delete one experiment record. Publishing asks for confirmation and marks the record as approved data."),
     Operation("insight_review", insights.insight_review, insights.InsightReview,
@@ -114,6 +128,10 @@ OPERATIONS: tuple[Operation, ...] = (
         description='List stable projects and their files, conversion readiness and source versions. A project owns related material; selection only chooses the execution scope.', tool_name='knowledge_projects'),
     Operation('project_manage', projects.project_manage, projects.ProjectManage,
         description='Create or rename a project for any kind of material. Put related original files, supplements and data into the same project.', tool_name='knowledge_project_manage'),
+    Operation('project_file_remove', projects.project_file_remove, projects.ProjectFileRemove,
+        description='Remove files from a project: they leave its active inventory (search, extraction, graph) while the original bytes stay as evidence. Results that used them are marked out of date.'),
+    Operation('project_delete', projects.project_delete, projects.ProjectDelete,
+        description='Delete a project with its file inventory and results, and rebuild the knowledge graph without them.'),
     Operation('project_import_preview', projects.project_import_preview, projects.ProjectImportPreview,
         description='Stage files or archives and preview their project boundaries. Reuse the token to change folder grouping without uploading again.'),
     Operation('project_import_commit', projects.project_import_commit, projects.ProjectImportCommit,

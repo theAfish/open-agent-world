@@ -6,8 +6,9 @@ provider, and hands the result straight back to the plugin's own save action, so
 what was extracted is validated and evidence-linked by the plugin as usual.
 
 The prompts themselves are built by the plugin (``oaw_knowledge_base.spaces``,
-``experiment_prompt``, ``insight_prompt``), which is also what the ``kb`` CLI uses
-outside OAW, so the two paths cannot drift.
+``experiment_prompt``), which is also what the ``kb`` CLI uses
+outside OAW, so the two paths cannot drift. Insights are not here: they are the
+connected agent's work, from ``insight_prompt`` to ``insight_save``.
 
 The ``run_*`` functions are the reusable core: the engineering routes below and the
 deployment routes in ``backend/deployment_workspace.py`` both call them, so a
@@ -104,16 +105,22 @@ class ExperimentExtractRequest(BaseModel):
     replace_drafts: bool = False
 
 
-class InsightExtractRequest(BaseModel):
-    # One schema, several, or neither: every experiment schema with published records.
-    schema_id: str | None = Field(default=None, max_length=64)
-    schema_ids: list[str] = Field(default_factory=list, max_length=50)
+class DraftTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8_000)
+
+
+class DraftSample(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    markdown: str = Field(max_length=30_000)
+
+
+class SchemaDraftRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
-    group_id: str | None = Field(default=None, max_length=64)
-    all_groups: bool = False
-    # Which section's schemas an open scope takes (see ``insights.Scoped``).
-    schema_kind: Literal["literature", "experiment"] = "experiment"
-    replace_drafts: bool = False
+    messages: list[DraftTurn] = Field(min_length=1, max_length=40)
+    samples: list[DraftSample] = Field(default_factory=list, max_length=5)
+    # The editor's current name, description, system prompt and definition, so a follow-up edits it.
+    current: dict | None = None
 
 
 def _credentials(services, reference):
@@ -309,31 +316,29 @@ async def run_experiment_extract(node_id: str, request: ExperimentExtractRequest
 
     saved = await invoke_resource_action(services, node_id, "experiment_save",
         ResourceActionRequest(arguments={"bundle_id": request.bundle_id, "records": records,
-                                         "replace_drafts": request.replace_drafts}))
+                                         "replace_drafts": request.replace_drafts,
+                                         "keep_invalid": True}))
     return {"records": saved["records"], "invalid": saved["invalid"], "bundle_id": request.bundle_id,
             "truncated": truncated}
 
 
-async def run_insight_extract(node_id: str, request: InsightExtractRequest, services) -> dict:
-    """The agent-free **Extract insights**: page through the schema's record table,
-    make one JSON-mode model call, and hand the insights to the plugin's own
-    ``insight_save`` — the same two actions a connected Lab assistant drives through
-    its tools, so an insight is evidence-checked identically whichever path produced it."""
+async def run_schema_draft(node_id: str, request: SchemaDraftRequest, services) -> dict:
+    """One turn of **Draft with AI** in the schema editor: a single JSON-mode model call
+    that returns a reply and, usually, a draft schema. Nothing is saved here; the person
+    reviews the draft in the editor and creates the schema themselves."""
     await _check_node(node_id, services)
-    scope = {"schema_ids": request.schema_ids, "all_groups": request.all_groups,
-             "schema_kind": request.schema_kind,
-             **({"schema_id": request.schema_id} if request.schema_id else {}),
-             **({"group_id": request.group_id} if request.group_id else {})}
-    prompt, table, truncated = await _paged_prompt(services, node_id, "insight_prompt", scope)
     base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_insights = _builders("insight_prompt", "build_messages", "parse_insights")
-    insights = await _complete(base_url, api_key, model, build_messages(prompt, table=table), parse_insights)
-
-    saved = await invoke_resource_action(services, node_id, "insight_save",
-        ResourceActionRequest(arguments={**scope, "insights": insights,
-                                         "replace_drafts": request.replace_drafts}))
-    return {"insights": saved["insights"], "warnings": saved["warnings"],
-            "schema_ids": saved["schema_ids"], "truncated": truncated}
+    build_messages, parse_draft = _builders("schema_draft", "build_messages", "parse_draft")
+    try:
+        messages = build_messages([turn.model_dump() for turn in request.messages],
+                                  [sample.model_dump() for sample in request.samples], request.current)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    answer = await _complete(base_url, api_key, model, messages, lambda content: content)
+    try:
+        return parse_draft(answer)
+    except ValueError as error:  # the message names what to fix; ask again or edit by hand
+        raise HTTPException(502, f"The model's draft was not usable: {error}") from None
 
 
 @router.post("/knowledge/{node_id}/project-space")
@@ -351,6 +356,6 @@ async def extract(node_id: str, request: ExperimentExtractRequest, services=Depe
     return await run_experiment_extract(node_id, request, services)
 
 
-@router.post("/knowledge/{node_id}/insights")
-async def extract_insights(node_id: str, request: InsightExtractRequest, services=Depends(get_services)):
-    return await run_insight_extract(node_id, request, services)
+@router.post("/knowledge/{node_id}/schema-draft")
+async def schema_draft(node_id: str, request: SchemaDraftRequest, services=Depends(get_services)):
+    return await run_schema_draft(node_id, request, services)

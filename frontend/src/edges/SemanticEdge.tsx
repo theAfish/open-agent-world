@@ -11,7 +11,7 @@ import { getRelationshipOption } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
 import type { EdgeDirection, Relationship } from "../types/world";
 import { relationshipPath, type NodeRect } from "./geometry";
-import { nodeCornerRadius } from "./nodeGeometry";
+import { nodeBoundaryShape, nodeCornerRadius } from "./nodeGeometry";
 import type { CanvasNode } from "../cards/types";
 import { EdgeLabelRenderer } from "../canvas/FlowPortal";
 import {isShadow,shadowPresentation,shadowPoints,useCollectionDrag} from "../state/shadowCollection";
@@ -63,6 +63,7 @@ export function SemanticEdge({
     width: node?.measured.width ?? node?.width ?? 1,
     height: node?.measured.height ?? node?.height ?? 1,
     outline: outline(node),
+    shape: nodeBoundaryShape(node, catalog),
   });};
   const geometry = relationshipPath(
     nodeRect(sourceNode, sourceX, sourceY),

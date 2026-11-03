@@ -76,6 +76,7 @@ def _build(path, resolve_secret=None, resolve_model=None):
     from .projection_store import ProjectionStore
     from .pipelines import register_pipelines
     from .search_store import ensure_schema as ensure_search_schema
+    from .spaces import ensure_builtin_spaces
 
     _prepare_file(path)
     url = f"sqlite:///{path}"
@@ -102,6 +103,7 @@ def _build(path, resolve_secret=None, resolve_model=None):
     register_pipelines(kb)
     kb.jobs.recover_interrupted()
     _backfill_search_index(kb, engine)
+    ensure_builtin_spaces(kb)
     return kb
 
 

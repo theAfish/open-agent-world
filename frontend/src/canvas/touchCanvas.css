@@ -1,0 +1,85 @@
+:root[data-input="touch"] .world-canvas .semantic-handle { pointer-events: none !important; }
+.world-canvas [data-touch-connection="source"] { outline-color: var(--accent); }
+.world-canvas [data-touch-connection="valid"] { outline: 3px solid var(--success); outline-offset: 5px; }
+.world-canvas [data-touch-connection="invalid"] { outline: 2px dashed var(--danger); outline-offset: 5px; }
+.touch-connection-hint { position: absolute; z-index: 50; left: 50%; top: max(12px, var(--safe-top)); transform: translateX(-50%); max-width: calc(100% - 140px); padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-solid); color: var(--ink); box-shadow: var(--panel-shadow); pointer-events: none; font-size: 13px; text-align: center; overflow-wrap: anywhere; }
+.touch-connection-hint[data-valid="true"] { border-color: var(--success); }
+:root[data-layout="compact"] .top-bar[data-mobile-menu="false"]:not(:has([data-tutorial-highlight])) > :is(.world-status, .top-actions) { display: none; }
+:root[data-layout="compact"] .top-bar[data-mobile-menu] {
+  top: var(--screen-top); left: var(--screen-left); bottom: auto;
+  width: 44px; max-height: calc(var(--app-height) - 100px); padding: 0; gap: 0;
+  overflow: visible; border-radius: 12px; background: var(--surface-solid);
+  box-shadow: 0 2px 8px var(--shadow);
+}
+:root[data-layout="compact"] .top-bar[data-mobile-menu] .world-menu-toggle { width: 44px; height: 44px; border: 0; background: transparent; }
+:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] {
+  width: min(288px, calc(100vw - var(--screen-left) - var(--screen-right)));
+  grid-template-columns: 44px minmax(0, 1fr); padding: 4px; gap: 6px; overflow-y: auto;
+}
+:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .world-status { justify-content: flex-end; padding-right: 8px; }
+:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] :is(.topology-summary, .connection-status span) { display: flex; }
+:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .connection-status { width: auto; gap: 6px; }
+:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .topology-summary { flex: 0 1 auto; font-size: 10px; }
+:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .top-actions { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .top-icon-button { width: 100%; height: 44px; }
+.mobile-workspace-menu nav { display: grid; gap: 4px; width: min(260px, calc(100vw - 100px)); max-height: calc(var(--app-height) - 120px); overflow-y: auto; }
+.mobile-workspace-menu nav button { min-height: 44px; padding: 10px 12px; border: 0; border-radius: 7px; color: var(--ink); background: var(--surface-soft); font: inherit; text-align: start; overflow-wrap: anywhere; }
+/* Landscape phones reserve the bottom for the expanded Deck. Put tools beside
+   the other top controls rather than between them and the Deck. */
+@media (min-width: 480px) and (max-width: 1250px) and (max-height: 500px) {
+  :root[data-touch-input="true"] .map-tools.react-flow__panel { top: var(--screen-top); right: calc(var(--screen-right) + 200px); }
+}
+
+/* A phone has one navigation row. Editing tools and the map are requested on
+   demand, instead of permanently occupying three corners of the canvas. */
+:root[data-layout="compact"] .mobile-canvas-tools.map-tools.react-flow__panel {
+  top: var(--screen-top); right: var(--screen-right); bottom: auto; margin: 0;
+  max-width: calc(100vw - var(--screen-left) - var(--screen-right)); gap: 8px;
+}
+.mobile-canvas-navigation { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.mobile-canvas-toolbar {
+  display: flex; align-items: center; padding: 0; border: 1px solid var(--line);
+  border-radius: 12px; overflow: hidden; background: var(--surface-solid); box-shadow: 0 2px 8px var(--shadow);
+}
+.mobile-canvas-toolbar .world-controls { display: flex; }
+.mobile-canvas-toolbar :is(.react-flow__controls-button, .canvas-tools-toggle) {
+  display: grid; place-items: center; width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+  padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink-soft); touch-action: manipulation;
+}
+.mobile-canvas-toolbar .canvas-tools-toggle { border-left: 1px solid var(--line); }
+.mobile-canvas-toolbar .react-flow__controls-button svg { width: 17px; height: 17px; fill: none; max-width: none; max-height: none; }
+.mobile-canvas-toolbar button:is(:hover, [aria-expanded="true"]) { background: var(--surface-soft); color: var(--ink); }
+.mobile-canvas-options {
+  width: min(280px, calc(100vw - var(--screen-left) - var(--screen-right))); padding: 8px;
+  display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--surface-solid); box-shadow: var(--panel-shadow);
+  max-height: calc(var(--app-height) - 150px); overflow-y: auto;
+}
+.mobile-canvas-options button {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 12px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; text-align: start;
+}
+.mobile-canvas-options button:is(:hover, [aria-pressed="true"]) { background: var(--accent-soft); color: var(--accent-strong); }
+.mobile-canvas-options p { margin: 3px 8px 8px; color: var(--ink-faint); font-size: 11px; line-height: 1.5; }
+.mobile-canvas-mode { display: flex; align-items: center; gap: 8px; padding: 0 0 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); color: var(--accent-strong); font-size: 12px; box-shadow: 0 2px 8px var(--shadow); }
+.mobile-canvas-mode button { min-height: 44px; padding: 0 12px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--ink); }
+:root[data-layout="compact"] .world-minimap.react-flow__minimap { top: calc(var(--screen-top) + 54px); right: var(--screen-right); bottom: auto; margin: 0; }
+:root[data-layout="compact"] .mobile-canvas-tools :is(.map-atlas, .glue-tool-hint) { width: min(280px, calc(100vw - var(--screen-left) - var(--screen-right))); max-height: calc(var(--app-height) - 180px); }
+:root[data-layout="compact"] .touch-connection-hint { top: calc(var(--screen-top) + 56px); max-width: calc(100% - 32px); }
+
+/* The crown grip stays 44 screen pixels wide while the card zooms underneath it.
+   Only its small printed bar is visible; no separate move mode is needed. */
+.touch-card-grip { display: none; }
+:root:is([data-layout="compact"], [data-touch-input="true"]) #oaw-world-map .touch-card-grip {
+  position: absolute; z-index: 8; left: 50%; top: 0; display: grid; place-items: center;
+  width: 44px; height: 44px; transform: translate(-50%, -50%) scale(var(--canvas-ui-scale, 1));
+  transform-origin: center; cursor: grab; pointer-events: auto; touch-action: none; user-select: none;
+}
+.touch-card-grip::before { content: ''; width: 26px; height: 4px; border-radius: 99px; background: var(--ink-faint); opacity: .5; box-shadow: 0 1px 1px var(--highlight); transition: background 140ms, opacity 140ms; }
+.world-canvas .card-render-boundary { transition: filter 160ms ease; }
+.world-canvas [data-touch-move="active"] { z-index: 100 !important; cursor: grabbing; outline-color: var(--accent); }
+.world-canvas [data-touch-move="active"] > :is(.card-render-boundary, .world-card, .container-frame) { filter: drop-shadow(0 12px 12px var(--shadow-deep)); }
+.world-canvas [data-touch-move="active"] .touch-card-grip::before { background: var(--accent); opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .world-canvas .card-render-boundary, .touch-card-grip::before { transition: none; }
+}

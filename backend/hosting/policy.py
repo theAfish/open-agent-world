@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 _HOST_FIELDS = frozenset({"workspace_path", "workspace_root", "working_directory", "cwd", "project_path",
                           "host_path", "local_path", "folders", "folder_bindings", "plugin_directories"})
 _BLOCKED_PREFIXES = ("/api/desktop", "/api/settings/storage", "/api/diagnostics", "/api/development",
-                     "/api/store", "/api/runtime/python/plugins", "/api/settings/sandbox")
+                     "/api/runtime/python/plugins", "/api/settings/sandbox")
 _PACK_ASSET = re.compile(r"/api/packs/[^/]+/versions/[^/]+/.+")
 _NODE_ACTION = re.compile(r"/api/(?:runtime-app/workspace/)?nodes/[^/]+/(?:actions|resource)/[^/]+")
 # Pack actions carry uploads as base64 JSON (up to 32 MiB decoded). Their
@@ -66,6 +66,10 @@ class HostedPolicyMiddleware:
         path = scope["path"].rstrip("/")
         method = scope.get("method", "GET")
         blocked = any(path == prefix or path.startswith(prefix + "/") for prefix in _BLOCKED_PREFIXES)
+        # Catalog metadata is safe to browse; installing remote code remains an
+        # operator action, including when a caller constructs the request itself.
+        blocked |= ((path == "/api/store" or path.startswith("/api/store/"))
+                    and method not in {"GET", "HEAD"})
         blocked |= path.startswith("/api/packs") and not (method in {"GET", "HEAD"} and _PACK_ASSET.fullmatch(path))
         blocked |= path.endswith(("/environment-folders", "/files/open-folder"))
         blocked |= bool(re.fullmatch(r"/api/sandboxes/[^/]+/diagnostics", path))

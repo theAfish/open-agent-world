@@ -2,6 +2,10 @@ import { tutorialAllowsCanvasTarget } from '../onboarding/interactionGuard';
 import { factoryDropTarget, dropFactoryItems } from '../factory/drop';
 import { useSmoothWheelZoom, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM } from './useSmoothWheelZoom';
 import { CanvasControls } from './CanvasControls';
+import { useInteractionEnvironment } from '../interaction/environment';
+import { useTouchCardGestures } from './useTouchCardGestures';
+import type { TouchPoint } from '../interaction/useTouchHold';
+import './touchCanvas.css';
 import { CardRenderingContext, useCardRendering, useCardRenderLOD } from './useCardRendering';
 import { CardLODView } from '../cards/CardLODView';
 import { t, useLocale } from "../i18n";
@@ -57,7 +61,7 @@ import { hasPaletteDrag, readPaletteDrag, type PaletteDragPayload } from "../pal
 import { usePaletteDropTarget, type PalettePointerLocation } from "../palette/pointerDrag";
 import { getConnectionOptions, validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
-import { NODE_SURFACE_SIZE, surfaceSizeFor, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel, type SurfaceSize } from "../state/nodeSurfaces";
+import { NODE_SURFACE_SIZE, surfaceSizeFor, surfaceLevelForNode, effectiveCanvasSurfaceLevel, useNodeSurfaceStore, type NodeSurfaceLevel, type SurfaceSize } from "../state/nodeSurfaces";
 import { LocalMiniMap } from "./LocalMiniMap";
 import { GenerationLayer } from "../effects/GenerationLayer";
 import {
@@ -135,6 +139,8 @@ export function WorldCanvas() {
   useLocale();
   const [pinToolActive, setPinToolActive] = useState(false);
   const [glueActive, setGlueActive] = useState(false);
+  const touchInput = useInteractionEnvironment(state => state.input === 'touch');
+  const compact = useInteractionEnvironment(state => state.compact);
   const [gluePreview, setGluePreview] = useState<GlueCandidate>();
   const storedGlueBoxes = useGlueStore(s => s.boxes);
   const glueBonds = useGlueStore(s => s.bonds);
@@ -162,6 +168,7 @@ export function WorldCanvas() {
   const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
   const selectionRevision = useWorldStore((state) => state.selectionRevision);
   const surfaceLevelsByNodeId = useNodeSurfaceStore((state) => state.surfaceLevels);
+  const baseLevels = useNodeSurfaceStore(state => state.baseLevels);
   const surfaceSizes = useNodeSurfaceStore((state) => state.surfaceSizes);
   const connectingNodeId = useNodeSurfaceStore((state) => state.connectingNodeId);
   const dragging = useNodeSurfaceStore((state) => state.dragging);
@@ -212,18 +219,19 @@ export function WorldCanvas() {
   );
   const surfaceLevels = useMemo(() => new Map(renderCards.map((card) => [
     card.id,
-    surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
-  ])), [renderCards, surfaceLevelsByNodeId]);
+    effectiveCanvasSurfaceLevel(card, surfaceLevelForNode(card.id, surfaceLevelsByNodeId), compact, catalog, baseLevels[card.id]),
+  ])), [renderCards, surfaceLevelsByNodeId, compact, catalog, baseLevels]);
   const glueBoxes = useMemo(() => reflowGlueSurfaces(storedGlueBoxes, glueBonds, surfaceLevels, surfaceSizes),
     [storedGlueBoxes, glueBonds, surfaceLevels, surfaceSizes]);
   useEffect(() => {
-    if (glueBoxes === storedGlueBoxes) return;
+    // Compact canvas geometry is a device projection, not a saved layout edit.
+    if (compact || glueBoxes === storedGlueBoxes) return;
     const endEdit = beginGlueEdit();
     useGlueStore.getState().setLayout(glueBoxes);
     void updateCardPositions(Object.entries(glueBoxes).filter(([id, box]) => box !== storedGlueBoxes[id]).map(([id, box]) => ({
       id, position: nodePositionFromSurfacePosition(box, box.level),
     }))).then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: t("Glue layout needs a retry"), detail: apiErrorMessage(reason) })).finally(endEdit);
-  }, [glueBoxes, storedGlueBoxes, updateCardPositions]);
+  }, [glueBoxes, storedGlueBoxes, updateCardPositions, compact]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     if (isContainer(card, catalog) || card.parent_id || card.equipment) return [];
     const level = surfaceLevels.get(card.id);
@@ -294,6 +302,9 @@ export function WorldCanvas() {
   }, [displacedById, renderCards, surfaceLevels, surfaceLevelsByNodeId, catalog, cards, equipmentPanels, equipmentPositions, surfaceSizes, glueBoxes]);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
   const { model: renderingModel, renderedNodes } = useCardRendering(nodes);
+  const interactiveNodes = useMemo(() => compact || touchInput
+    ? renderedNodes.map(node => node.draggable ? { ...node, draggable: false } : node) : renderedNodes,
+  [renderedNodes, compact, touchInput]);
   useEffect(() => {
     if (!connectingNodeId) return;
     renderingModel.pin(connectingNodeId, 'connection', true);
@@ -515,6 +526,8 @@ export function WorldCanvas() {
       const target = event.target as HTMLElement | null;
       // Modal workspaces and embedded readers own their keyboard shortcuts.
       if (event.defaultPrevented || document.querySelector("dialog:modal, .card-library-modal[open]") || target?.closest(".library-reader, input, textarea, select, [contenteditable='true']")) return;
+      // Let the gesture cancellation handler own Escape before window closing.
+      if (event.key === 'Escape' && activeDragIds.current.size) return;
       const modifier = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       if (modifier && !event.altKey && !event.shiftKey && ["c", "x", "v"].includes(key)) {
@@ -650,13 +663,18 @@ export function WorldCanvas() {
       delete frame.dataset.memberDropSide;
     });
   }, []);
-  useEffect(() => {
-    const cancel=()=>{
+  const cancelNodeDrag = useCallback(() => {
       useCollectionDrag.getState().set();
       clearContainerDropHint();
       if(!activeDragIds.current.size)return;
+      glueDrag.current = undefined;
+      setGluePreview(undefined);
+      useEquipmentDrag.getState().set();
+      clearTransformationHints();
       cancelledDrag.current=true;activeDragIds.current.clear();setDragging(false);setNodes(mappedNodes);
-    };
+  }, [clearContainerDropHint, mappedNodes, setNodes, setDragging]);
+  useEffect(() => {
+    const cancel = () => cancelNodeDrag();
     const escape=(event:KeyboardEvent)=>{if(event.key==="Escape"&&activeDragIds.current.size){event.preventDefault();cancel();}};
     window.addEventListener("blur", cancel);
     window.addEventListener("pointercancel", cancel);
@@ -667,7 +685,7 @@ export function WorldCanvas() {
       window.removeEventListener("pointercancel", cancel);
       window.removeEventListener("keydown",escape);
     };
-  }, [clearContainerDropHint,mappedNodes,setNodes,setDragging]);
+  }, [clearContainerDropHint,cancelNodeDrag]);
   const onNodeDrag: OnNodeDrag<CanvasNode> = useCallback((event, node) => {
     if(cancelledDrag.current)return;
     // Whole collections translate through React Flow's parent transform. Defer
@@ -822,6 +840,57 @@ export function WorldCanvas() {
     });
   }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog, clearContainerDropHint, transformationTarget, glueBoxes, surfaceLevels, surfaceSizes]);
 
+  const pickedCard = useRef<{ source: CanvasNode; nodes: CanvasNode[]; anchor: { x: number; y: number }; moved: boolean }>();
+  const cardPointerEvent = (point: TouchPoint) => new PointerEvent('pointermove', {
+    clientX: point.clientX, clientY: point.clientY, pointerId: point.pointerId,
+  });
+  const movePickedCard = (point: TouchPoint) => {
+    const gesture = pickedCard.current;
+    if (!gesture) return;
+    const position = screenToFlowPosition({ x: point.clientX, y: point.clientY });
+    const dx = position.x - gesture.anchor.x, dy = position.y - gesture.anchor.y;
+    gesture.moved ||= Math.hypot(dx, dy) * getViewport().zoom > 3;
+    const positions = new Map(gesture.nodes.map(node => [node.id, { x: node.position.x + dx, y: node.position.y + dy }]));
+    // Snapshot geometry only: live status/configuration may change during a hold.
+    const next = nodesRef.current.map(node => positions.has(node.id) ? { ...node, dragging: true, position: positions.get(node.id)! } : node);
+    const moved = new Map(next.filter(node => positions.has(node.id)).map(node => [node.id, node]));
+    nodesRef.current = next;
+    setNodes(next);
+    // Shared drag handling owns glue, collection, equipment and drop previews.
+    onNodeDrag(cardPointerEvent(point), moved.get(gesture.source.id)!, [...moved.values()]);
+  };
+  const cardGestures = useTouchCardGestures(wrapper, {
+    disabled: pinToolActive,
+    glueActive,
+    move: {
+      canStart(id) { return nodesRef.current.some(node => node.id === id && node.draggable !== false && !node.hidden && !node.data.equipmentDetail); },
+      start(id, point) {
+        const source = nodesRef.current.find(node => node.id === id);
+        if (!source || source.draggable === false) return false;
+        const selected = source.selected ? nodesRef.current.filter(node => node.selected && node.draggable !== false && !node.hidden) : [source];
+        const selectedIds = new Set(selected.map(node => node.id));
+        const moved = selected.filter(node => !ancestors(cards, node.data.card).some(parent => selectedIds.has(parent.id)));
+        if (!moved.some(node => node.id === id)) return false;
+        selectCards(selected.map(node => node.id));
+        pickedCard.current = { source, nodes: moved, anchor: screenToFlowPosition({ x: point.clientX, y: point.clientY }), moved: false };
+        onNodeDragStart(cardPointerEvent(point), source, moved);
+        setNodes(current => current.map(node => ({ ...node, selected: selectedIds.has(node.id), dragging: moved.some(item => item.id === node.id) })));
+        return true;
+      },
+      update: movePickedCard,
+      release(point) {
+        const gesture = pickedCard.current;
+        pickedCard.current = undefined;
+        if (!gesture || !gesture.moved) { cancelNodeDrag(); return; }
+        const ids = new Set(gesture.nodes.map(node => node.id));
+        const moved = nodesRef.current.filter(node => ids.has(node.id)).map(node => ({ ...node, dragging: false }));
+        setNodes(current => current.map(node => ids.has(node.id) ? { ...node, dragging: false } : node));
+        onNodeDragStop(cardPointerEvent(point), moved.find(node => node.id === gesture.source.id)!, moved);
+      },
+      cancel() { pickedCard.current = undefined; cancelNodeDrag(); },
+    },
+  });
+
   const onConnect = useCallback((connection: Connection) => {
     if (tutorialAllowsCanvasTarget(connection.source, 'connect') && tutorialAllowsCanvasTarget(connection.target, 'connect')) requestConnection(connection.source, connection.target);
   }, [requestConnection]);
@@ -945,6 +1014,10 @@ export function WorldCanvas() {
       ref={wrapper}
       className={`world-canvas ${pinToolActive ? "pin-tool-active" : ""} ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
       data-testid="world-canvas"
+      onPointerDownCapture={cardGestures.onPointerDownCapture}
+      onClickCapture={cardGestures.onClickCapture}
+      onContextMenuCapture={cardGestures.onContextMenuCapture}
+      onLostPointerCapture={cardGestures.onLostPointerCapture}
       onMouseDownCapture={(event) => {
         if (event.button !== 0 || !(event.target instanceof Element)) return;
         const target = event.target;
@@ -978,7 +1051,7 @@ export function WorldCanvas() {
       <CardRenderingContext.Provider value={renderingModel}><ReactFlow<CanvasNode, CanvasEdge>
         id="oaw-world-map"
         ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': t('Zoom in'), 'controls.zoomOut.ariaLabel': t('Zoom out'), 'controls.fitView.ariaLabel': t('Fit view'), 'minimap.ariaLabel': t('Nearby canvas · drag to pan') }}
-        nodes={renderedNodes}
+        nodes={interactiveNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -1018,6 +1091,7 @@ export function WorldCanvas() {
         maxZoom={MAX_CANVAS_ZOOM}
         defaultViewport={{ x: viewport.x, y: viewport.y, zoom: viewport.zoom }}
         panOnScroll={false}
+        zoomOnDoubleClick={!compact}
         selectionOnDrag={false}
         onlyRenderVisibleElements={false}
         deleteKeyCode={null}
@@ -1037,10 +1111,14 @@ export function WorldCanvas() {
         <LegionDeploymentLayer />
         {nodes.filter((node) => node.data.equipmentDetail && !node.hidden).map((node) =>
           <SurfaceBridge key={node.id} sourceId={equipmentOriginId(node.id)} targetId={node.id} />)}
-        <LocalMiniMap />
+        {!compact && <LocalMiniMap />}
         <MapAtlas active={pinToolActive} onActiveChange={active => { setPinToolActive(active); if (active) setGlueActive(false); }} glueActive={glueActive} onGlueChange={active => { setGlueActive(active); if (active) setPinToolActive(false); }} />
-        <CanvasControls />
+        {!compact && <CanvasControls />}
       </ReactFlow></CardRenderingContext.Provider>
+      {cardGestures.preview && <div className="touch-connection-hint" role="status" data-valid={cardGestures.preview.valid}>
+        {cardGestures.preview.target ? cardGestures.preview.valid
+          ? t('Release to choose a capability') : t('Choose another card') : t('Drag to another card to connect')}
+      </div>}
       <EdgeInspector />
     </div>
   );
