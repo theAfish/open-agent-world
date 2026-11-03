@@ -18,6 +18,10 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/oaw-preview-controller /opt/oaw-preview-app /srv/oaw-preview-hosting /opt/oaw-preview-releases /opt/oaw-preview-execution /opt/oaw-release-operator-preview /etc/systemd/system /run
+# App and release directories need one mount view for atomic bundle promotion.
+ReadWritePaths=/var/lib/oaw-preview-controller /opt /srv/oaw-preview-hosting /etc/systemd/system /run
+ReadOnlyPaths=/opt/oaw-preview-controller /opt/oaw-preview-execution
+ReadOnlyPaths=/opt/oaw-release-operator-preview/bootstrap.py /opt/oaw-release-operator-preview/release_remote.py /opt/oaw-release-operator-preview/release_worker.py /opt/oaw-release-operator-preview/release_verify.py /opt/oaw-release-operator-preview/installation.json /opt/oaw-release-operator-preview/execution.json
+# Installation must mark every unrelated existing /opt entry read-only too.
 InaccessiblePaths=-/opt/open-agent-world -/srv/oaw-hosting -/opt/oaw-releases -/opt/oaw-release-operator
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

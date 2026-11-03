@@ -134,8 +134,22 @@ and the two unit files. Never copy a privileged executable out of a PR artifact.
    [timer](oaw-preview-controller.timer). Verify their syntax with
    `systemd-analyze verify`. The service runs the trusted controller with
    `/usr/bin/python3 -I -S`; never run it from an application checkout. Its write
-   paths cover only controller/Preview state and the systemd paths needed by the
-   existing transaction. Production paths are inaccessible to the service.
+   paths cover controller/Preview state and the systemd paths needed by the
+   existing transaction. App and release directories share one writable `/opt`
+   mount so runtime bundle promotion and rollback can use atomic renames.
+   Separate writable binds for those directories cause `EXDEV` even when the
+   underlying host filesystem is the same. Controller/token, execution runtime
+   and independently installed operator code/registration remain read-only;
+   the operator directory stays writable for atomic policy-file replacement.
+   Inventory `/opt` and add every unrelated existing entry to a root-owned
+   `oaw-preview-controller.service.d/10-opt-readonly.conf` drop-in. Keep that
+   host inventory private. Review this list again before adding other software
+   under `/opt`. Production paths remain inaccessible. The trusted controller
+   can create entries in the shared `/opt` parent; application code still runs
+   only under the separately reviewed nonroot namespaces.
+   Before activation, prove an empty-directory app-to-release rename and return,
+   synthetic policy replacement, denied controller/code/token write-open probes,
+   and denied production read-open probes under the exact unit properties.
 6. Check the exact disposable candidate before enabling deployment:
 
    ```sh
