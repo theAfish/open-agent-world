@@ -44,37 +44,35 @@ function setup(handler: Handler = async () => undefined, options: { request?: Re
 }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it("previews folder boundaries before any ingestion, then regroups by token and commits the shown projects", async () => {
-  const preview = { token: "preview-1", grouping: "depth", depth: 2,
-    files: [{ id: "file-1", relative_path: "root/A/report.md", filename: "report.md", size: 10, project_key: "root/A" }],
-    projects: [{ key: "root/A", name: "A", file_count: 1 }] };
-  const { action } = setup(async (name, args) => name === "project_import_preview" ? { ...preview, grouping: args.grouping, depth: args.depth }
+it("keeps selected folder files local until confirmation, then commits the named project", async () => {
+  const { action } = setup(async (name) => name === "project_import_preview" ? { token: "preview-1", projects: [{ key: "all" }] }
     : name === "project_import_commit" ? { projects: [PROJECT], source_ids: ["file-1"] } : undefined);
   const file = new File(["# Report"], "report.md", { type: "text/markdown" });
   Object.defineProperty(file, "webkitRelativePath", { value: "root/A/report.md" });
   fireEvent.change(screen.getByLabelText("Project folder"), { target: { files: [file] } });
-  await screen.findByText("1 files → 1 projects");
-  expect(action.mock.calls.some(([name]) => name === "project_import_commit" || name === "ingest")).toBe(false);
-  expect(action).toHaveBeenCalledWith("project_import_preview", expect.objectContaining({ files: [expect.objectContaining({ relative_path: "root/A/report.md" })], grouping: "depth", depth: 2 }));
-  fireEvent.change(screen.getByLabelText("Split projects by"), { target: { value: "single" } });
-  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_preview", { token: "preview-1", grouping: "single", depth: 2 }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Import and convert" })).not.toBeDisabled());
+  expect(await screen.findByText("root/A/report.md")).toBeTruthy();
+  expect(action.mock.calls.some(([name]) => name === "project_import_preview" || name === "project_import_commit" || name === "ingest")).toBe(false);
+  fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "A" } });
   fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({ token: "preview-1", grouping: "single", auto_process: true,
-    projects: [{ key: "root/A", name: "A" }] })));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_preview", {
+    files: [{ filename: "report.md", relative_path: "root/A/report.md", media_type: "text/markdown", content_base64: btoa("# Report") }], grouping: "single" }, undefined));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", {
+    token: "preview-1", grouping: "single", depth: 1, projects: [{ key: "all", name: "A" }], auto_process: true }, undefined));
 });
 
 it("adds supporting files to the selected stable project rather than creating a new project", async () => {
-  const { action } = setup(async (name, args) => name === "project_import_preview" ? { token: "si", grouping: args.grouping, depth: 1,
-    files: [{ id: "si-1", filename: "extra.csv", relative_path: "extra.csv", project_key: "all", size: 2 }], projects: [{ key: "all", name: "extra", file_count: 1 }] }
+  const { action } = setup(async (name) => name === "project_import_preview" ? { token: "si", projects: [{ key: "all" }] }
     : name === "project_import_commit" ? { projects: [PROJECT] } : undefined);
   fireEvent.click(await screen.findByRole("button", { name: /Report A.*files ready/ }));
-  fireEvent.click(await screen.findByRole("button", { name: "Add supporting files" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add files" }));
+  expect(screen.getByLabelText("Project")).toHaveValue("project-a");
+  expect(screen.queryByLabelText("Project name")).toBeNull();
   fireEvent.change(screen.getByLabelText("Project files or archives"), { target: { files: [new File(["x"], "extra.csv")] } });
-  await screen.findByText("1 files → 1 projects");
-  expect(screen.getByLabelText("Project name for all")).toBeDisabled();
+  expect(await screen.findByText("extra.csv")).toBeTruthy();
+  expect(action.mock.calls.some(([name]) => name === "project_import_commit")).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({ projects: [{ key: "all", name: "Report A", project_id: "project-a" }] })));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", {
+    token: "si", grouping: "single", depth: 1, projects: [{ key: "all", name: "Report A", project_id: "project-a" }], auto_process: true }, undefined));
 });
 
 it("keeps selection and file reader through navigation without creating a projection", async () => {
@@ -127,7 +125,7 @@ it("uses full result data immediately and makes review an optional versioned ope
   fireEvent.change(screen.getByLabelText("Result JSON"), { target: { value: '{"conductivity":1.3}' } });
   fireEvent.change(screen.getByLabelText("Revision note"), { target: { value: "Corrected against SI" } });
   fireEvent.click(screen.getByRole("button", { name: "Save revision" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("projection_revise", { projection_id: "result-a", data: { conductivity: 1.3 }, note: "Corrected against SI", expected_revision: 1 }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("projection_revise", { projection_id: "result-a", data: { conductivity: 1.3 }, note: "Corrected against SI", expected_revision: 1 }, undefined));
   await screen.findByText("1.3");
 });
 
@@ -141,7 +139,7 @@ it("releases only its prepared projections when the connected agent cannot start
   fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
   await screen.findByRole("alert");
   expect(runAgent).toHaveBeenCalledWith("agent-a", expect.stringContaining('["result-a"]'), true);
-  expect(action.mock.calls.filter(([name]) => name === "projection_fail")).toEqual([["projection_fail", { projection_id: "result-a", error: "Agent unavailable" }]]);
+  expect(action.mock.calls.filter(([name]) => name === "projection_fail")).toEqual([["projection_fail", { projection_id: "result-a", error: "Agent unavailable" }, undefined]]);
 });
 
 const RUNNING = { ...RESULT, status: "running", data: null };
@@ -206,7 +204,7 @@ it("loads additional project pages without losing the selected execution scope",
   fireEvent.click(screen.getByRole("button", { name: "Load more projects" }));
   fireEvent.click(await screen.findByLabelText("Select Report B"));
   expect(screen.getByLabelText("Select Report A")).toBeChecked();
-  expect(action).toHaveBeenCalledWith("projects", { limit: 200, offset: 200 });
+  expect(action).toHaveBeenCalledWith("projects", { limit: 200, offset: 200 }, undefined);
   fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: "space-a" } });
   fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
   await waitFor(() => expect(request).toHaveBeenCalledWith("knowledge/kb/project-space", expect.objectContaining({ project_ids: ["project-a", "project-b"] }), false, expect.any(Function), expect.any(AbortSignal)));
