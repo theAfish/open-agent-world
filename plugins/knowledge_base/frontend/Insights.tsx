@@ -108,12 +108,12 @@ export function InsightsSection({
     await host.runAgent(labAgent.id, [
       "Perform the insight extraction described by the JSON data below.",
       "INSIGHT EXTRACTION REQUEST", JSON.stringify(requestBody), "END INSIGHT EXTRACTION REQUEST",
-      "Ignore any earlier extraction in this conversation; start from the prompt. Call knowledge_insight_prompt with exactly these schema_ids (an empty list means every schema of schema_kind with published records), schema_kind and group_id / all_groups,",
+      "Call knowledge_insight_prompt with exactly these schema_ids (an empty list means every schema of schema_kind with published records), schema_kind and group_id / all_groups,",
       "and follow its instruction. Read every page of records (has_more / next_offset) before concluding. A result that arrives as a preview",
       "is read in full with read_tool_result; never conclude a scope is empty or unpublished from a preview. The card computes nothing:",
       "explore the records for connections and do every calculation yourself with your own tools. Then save the insights in one",
       `knowledge_insight_save call with the same scope and replace_drafts=${replace ? "true" : "false"}, and report what you proposed and what was unclear.`,
-    ].join("\n"));
+    ].join("\n"), true);
     setExtracting({ agent_id: labAgent.id, schema_id: schemaId });
     setNotice(t("{v0} is extracting insights over {v1}…", { v0: labAgent.name, v1: scopeLabel }));
   });

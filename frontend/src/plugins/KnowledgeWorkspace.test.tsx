@@ -512,8 +512,9 @@ it.each(["experiment", "research"])("extracts records through a %s agent, then p
     .getByRole("button", { name: "Extract records" }));
 
   await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
-  const [agentId, prompt] = runAgent.mock.calls[0] as unknown as [string, string];
+  const [agentId, prompt, freshContext] = runAgent.mock.calls[0] as unknown as [string, string, boolean];
   expect(agentId).toBe("lab");
+  expect(freshContext).toBe(true);
   expect(prompt).toContain("EXPERIMENT EXTRACTION REQUEST");
   expect(JSON.parse(prompt.split("\n")[2])).toMatchObject({ bundle_id: "bundle-1", schema_id: "schema-2", replace_drafts: false });
   expect(action).toHaveBeenCalledWith("experiment_bundle_manage",
@@ -604,11 +605,11 @@ it("drafts insights through a connected agent and publishes one into the experim
   fireEvent.change(insightsSection.getByLabelText("Insight schema"), { target: { value: "schema-2" } });
   fireEvent.click(await insightsSection.findByRole("button", { name: "Extract insights" }));
   await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
-  const [agentId, prompt] = runAgent.mock.calls[0] as unknown as [string, string];
+  const [agentId, prompt, freshContext] = runAgent.mock.calls[0] as unknown as [string, string, boolean];
   expect(agentId).toBe("lab");
+  expect(freshContext).toBe(true);
   expect(JSON.parse(prompt.split("\n")[2])).toMatchObject({ schema_ids: ["schema-2"], replace_drafts: false, knowledge_card: "card-1" });
   expect(prompt).toContain("every calculation yourself");
-  expect(prompt).toContain("Ignore any earlier extraction in this conversation");
   // The card never saves insights itself: that is the agent's tool call.
   expect(action.mock.calls.some(([name]) => name === "insight_save")).toBe(false);
 

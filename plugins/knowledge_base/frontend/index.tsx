@@ -452,11 +452,11 @@ export function Workspace({ host, card }: PluginViewProps) {
       await host.runAgent(agent.id, [
         "Perform the experiment extraction described by the JSON data below.",
         "EXPERIMENT EXTRACTION REQUEST", JSON.stringify(request), "END EXPERIMENT EXTRACTION REQUEST",
-        "Ignore any earlier extraction in this conversation; start from the prompt. Call knowledge_experiment_extract_prompt with this bundle_id and read the whole document (follow has_more with offset).",
+        "Call knowledge_experiment_extract_prompt with this bundle_id and read the whole document (follow has_more with offset).",
         "If its result arrives as a preview, read definition, system_prompt and markdown in full with read_tool_result before writing any record.",
         "Produce one record per specimen, sample, run or table row, filling the schema's own properties (do not add your own), save them in one knowledge_experiment_save call",
         `with replace_drafts=${replace ? "true" : "false"}; if the save is rejected, fix the records as the error says and save again. Then report what you saved and what was unclear.`,
-      ].join("\n"));
+      ].join("\n"), true);
       const startedAt = new Date().toISOString();
       setExtracting({ bundle_id: bundle.id, agent_id: agent.id, started_at: startedAt });
       setNotice(t("{v0} is extracting records from \"{v1}\"…", { v0: agent.name, v1: bundle.name }));

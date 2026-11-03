@@ -403,7 +403,7 @@ interface WorldState {
   loadText: (id: string) => Promise<void>;
   saveText: (id: string, content: string, expectedRevision?: number) => Promise<boolean>;
   uploadImage: (id: string, file: File) => Promise<boolean>;
-  runAgent: (id: string, prompt: string) => Promise<void>;
+  runAgent: (id: string, prompt: string, freshContext?: boolean) => Promise<void>;
   stopAgent: (id: string) => Promise<void>;
   loadSandboxRuntimes: (refresh?: boolean) => Promise<void>;
   refreshSandbox: (id: string, clearError?: boolean) => Promise<void>;
@@ -1559,9 +1559,9 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
-  runAgent: async (id, prompt) => {
+  runAgent: async (id, prompt, freshContext) => {
     try {
-      await worldApi.runAgent(id, prompt);
+      await worldApi.runAgent(id, prompt, freshContext);
       set((state) => ({
         cards: state.cards.map((card) =>
           card.id === id

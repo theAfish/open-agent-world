@@ -140,7 +140,7 @@ it("releases only its prepared projections when the connected agent cannot start
   fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: "space-a" } });
   fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
   await screen.findByRole("alert");
-  expect(runAgent).toHaveBeenCalledWith("agent-a", expect.stringContaining('["result-a"]'));
+  expect(runAgent).toHaveBeenCalledWith("agent-a", expect.stringContaining('["result-a"]'), true);
   expect(action.mock.calls.filter(([name]) => name === "projection_fail")).toEqual([["projection_fail", { projection_id: "result-a", error: "Agent unavailable" }]]);
 });
 

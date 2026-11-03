@@ -265,7 +265,7 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
         }
         if (created.length) {
           const task = { agentId: agent.id, projectionIds: created.map(r => r.id), startedAt: new Date().toISOString(), previousRunIds };
-          await host.runAgent!(agent.id, `Use the connected knowledge base ${cardId}. Extract the prepared projections ${JSON.stringify(task.projectionIds)}. For each, read every original Markdown window via knowledge_projection_prompt and save schema-valid data with knowledge_projection_save. These runs are already prepared; do not create another run. If extraction fails, call knowledge_projection_fail. Do not run review unless asked.`);
+          await host.runAgent!(agent.id, `Use the connected knowledge base ${cardId}. Extract the prepared projections ${JSON.stringify(task.projectionIds)}. For each, read every original Markdown window via knowledge_projection_prompt and save schema-valid data with knowledge_projection_save. These runs are already prepared; do not create another run. If extraction fails, call knowledge_projection_fail. Do not run review unless asked.`, true);
           setAgentTask(task); setNotice(t("The agent is processing the selected projects"));
         } else setNotice(t("Existing results and running tasks are reused"));
       } catch (reason) {
@@ -290,7 +290,7 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
     if (canRunAgent && agent) {
       const previousRunIds = (await readAgentRuns(agent.id)).map(run => run.run_id);
       const startedAt = new Date().toISOString();
-      await host.runAgent!(agent.id, `Review projection ${currentResult.id} in knowledge base ${cardId} against its original documents using knowledge_projection_review_prompt. Read all Markdown windows. Apply supported corrections through knowledge_projection_revise with expected_revision and a concise note. Preserve the schema and evidence. ${instruction || "This is an optional review of an existing result."}`);
+      await host.runAgent!(agent.id, `Review projection ${currentResult.id} in knowledge base ${cardId} against its original documents using knowledge_projection_review_prompt. Read all Markdown windows. Apply supported corrections through knowledge_projection_revise with expected_revision and a concise note. Preserve the schema and evidence. ${instruction || "This is an optional review of an existing result."}`, true);
       setAgentTask({ agentId: agent.id, projectionIds: [], startedAt, previousRunIds,
         reviewOf: { id: currentResult.id, projectId: currentResult.project_id, spaceId: currentResult.space_id } });
       setNotice(t("The agent is reviewing this result"));
