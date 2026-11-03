@@ -10,6 +10,8 @@ import sqlite3
 import subprocess
 import sys
 import tarfile
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -49,6 +51,109 @@ def test_public_check_rejects_incorrect_authentication_state(monkeypatch):
     monkeypatch.setattr(client, 'urlopen', lambda *a, **k: io.BytesIO(b'{"hosted":true,"authenticated":true}'))
     with pytest.raises(ValueError, match='authentication entry check failed'):
         client.verify_public('https://example')
+
+
+@pytest.mark.parametrize('origin', ['http://127.0.0.1:18081', 'http://[::1]:18081'])
+def test_preview_release_configuration_requires_private_opt_in(tmp_path, origin):
+    value = client.read(ROOT / 'deploy/aliyun/release.preview.example.json')
+    value.update(public_origin=origin)
+    path = tmp_path / 'release.json'
+    client.write(path, value)
+    with pytest.raises(ValueError, match='HTTPS'):
+        client.config(path)
+    value['allow_local_http'] = True
+    client.write(path, value)
+    assert client.config(path)['public_origin'] == origin
+    value['environment'] = 'production'
+    client.write(path, value)
+    with pytest.raises(ValueError, match='only for Preview'):
+        client.config(path)
+
+
+@pytest.mark.parametrize('origin', ['http://118.31.119.91:18081', 'http://0.0.0.0:18081',
+    'http://localhost:18081', 'http://127.0.0.2:18081', 'http://127.0.0.1',
+    'http://127.0.0.1:80', 'http://127.0.0.1:65536', 'http://127.0.0.1:018081',
+    'http://127.0.0.1:18081/', 'http://user@127.0.0.1:18081',
+    'http://127.0.0.1:18081?redirect=1', 'http://127.0.0.1:18081#fragment',
+    'http://127.0.0.1:18081\\remote', 'https://preview.example'])
+def test_private_verification_refuses_other_origins_before_connecting(origin, monkeypatch):
+    monkeypatch.setattr(client, 'build_opener', lambda *a: pytest.fail('Invalid origin reached transport'))
+    with pytest.raises(ValueError, match='loopback'):
+        client.verify_public(origin, allow_local_http=True)
+
+
+def test_production_release_keeps_https_enforcement(tmp_path):
+    value = client.read(ROOT / 'deploy/aliyun/release.example.json')
+    path = tmp_path / 'release.json'
+    value.update(environment='production', public_origin='https://production.example')
+    client.write(path, value)
+    assert client.config(path)['public_origin'] == 'https://production.example'
+    for changes in ({'public_origin': 'http://127.0.0.1:18081'}, {'allow_local_http': True},
+                    {'allow_local_http': 'true'}):
+        client.write(path, {**value, **changes})
+        with pytest.raises(ValueError):
+            client.config(path)
+
+
+def test_private_entry_verification_bypasses_proxies_retries_and_rejects_redirects(monkeypatch):
+    seen = []
+    replies = iter([503, 200, 302])
+    class Entry(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.path)
+            status = next(replies)
+            self.send_response(status)
+            self.send_header('Location', 'http://203.0.113.1/forbidden')
+            self.end_headers()
+            self.wfile.write(b'{"hosted":true,"authenticated":false}')
+        def log_message(self, *args):
+            pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Entry)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv('http_proxy', 'http://203.0.113.1:9')
+    monkeypatch.setenv('https_proxy', 'http://203.0.113.1:9')
+    monkeypatch.setenv('no_proxy', '')
+    sleeps = []
+    monkeypatch.setattr(client.time, 'sleep', sleeps.append)
+    try:
+        origin = 'http://127.0.0.1:' + str(server.server_port)
+        client.verify_public(origin, allow_local_http=True)
+        assert sleeps == [2]
+        with pytest.raises(client.HTTPError) as raised:
+            client.verify_public(origin, allow_local_http=True)
+        assert raised.value.code == 302 and seen == ['/auth/me'] * 3
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_private_entry_retries_ssh_socket_startup_without_deploying(monkeypatch):
+    responses = iter([client.URLError('gateway socket not ready'),
+                      io.BytesIO(b'{"hosted":true,"authenticated":false}')])
+    def fetch(*args, **kwargs):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+    monkeypatch.setattr(client, 'build_opener', lambda *handlers: SimpleNamespace(open=fetch))
+    monkeypatch.setattr(client.time, 'sleep', lambda *args: None)
+    monkeypatch.setattr(client, 'remote', lambda *a, **k: pytest.fail('Entry recheck tried to deploy'))
+    client.verify_public('http://127.0.0.1:18081', allow_local_http=True)
+
+
+def test_verify_command_checks_private_entry_without_ssh_or_release(tmp_path, monkeypatch, capsys):
+    value = client.read(ROOT / 'deploy/aliyun/release.preview.example.json')
+    value.update(public_origin='http://127.0.0.1:18081', allow_local_http=True)
+    path = tmp_path / 'release.json'
+    client.write(path, value)
+    calls = []
+    monkeypatch.setattr(client, 'verify_public', lambda origin, **kwargs: calls.append((origin, kwargs)))
+    monkeypatch.setattr(client, 'remote', lambda *a, **k: pytest.fail('Verify unexpectedly contacted the operator'))
+    client.main(['--config', str(path), 'verify'])
+    assert calls == [('http://127.0.0.1:18081', {'allow_local_http': True})]
+    assert json.loads(capsys.readouterr().out) == {'entry_verified': True, 'public_https': False}
 
 
 def archive(path, entries):

@@ -23,9 +23,10 @@ PASSWORDS = {"alice": "preview-alice-password-728", "bob": "preview-bob-password
 
 
 @pytest.fixture
-def fixture(tmp_path):
+def fixture(tmp_path, request):
     directory = tmp_path / "preview"
-    receipt = asyncio.run(initialize_preview(directory, ORIGIN, PASSWORDS))
+    origin, allow_local_http = getattr(request, "param", (ORIGIN, False))
+    receipt = asyncio.run(initialize_preview(directory, origin, PASSWORDS, allow_local_http=allow_local_http))
     settings = read_gateway_settings(directory / "control/hosting.json")
     return directory, receipt, settings
 
@@ -37,10 +38,11 @@ def worker_config(directory, profile):
 
 
 def headers(config):
-    return {"Origin": ORIGIN, "Authorization": "Bearer " + mint_worker_token(
+    return {"Origin": config.public_origin, "Authorization": "Bearer " + mint_worker_token(
         config.secret, config.profile_id, config.user_id)}
 
 
+@pytest.mark.parametrize('fixture', [(ORIGIN, False), ('http://127.0.0.1:8765', True), ('http://[::1]:8765', True)], indirect=True)
 def test_preview_fixture_real_http_websocket_and_mock_conversation(fixture):
     directory, receipt, settings = fixture
     config = worker_config(directory, settings.profiles[0])
@@ -51,7 +53,7 @@ def test_preview_fixture_real_http_websocket_and_mock_conversation(fixture):
         assert client.get("/api/world").status_code == 401
         assert client.get("/api/application", headers=supplied).json()["mode"] == "preview"
         with pytest.raises(WebSocketDisconnect):
-            with client.websocket_connect("/ws/events", headers={"Origin": ORIGIN}):
+            with client.websocket_connect("/ws/events", headers={"Origin": config.public_origin}):
                 pytest.fail("Unauthenticated Preview WebSocket accepted")
         with client.websocket_connect("/ws/events", headers=supplied) as socket:
             assert socket.receive_json()["type"] == "connection_ready"
@@ -104,6 +106,7 @@ def test_preview_denies_paid_cloud_and_cross_profile_authority(fixture, monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('fixture', [(ORIGIN, False), ('http://127.0.0.1:8765', True), ('http://[::1]:8765', True)], indirect=True)
 async def test_preview_and_production_sessions_and_databases_are_independent(fixture, tmp_path):
     directory, _, settings = fixture
     preview_accounts = AccountStore(settings.accounts_path)
@@ -131,20 +134,28 @@ async def test_preview_and_production_sessions_and_databases_are_independent(fix
         for app in workers.values():
             await stack.enter_async_context(app.router.lifespan_context(app))
         await stack.enter_async_context(gateway.app.router.lifespan_context(gateway.app))
-        client = await stack.enter_async_context(httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway), base_url=ORIGIN))
+        origin = settings.public_origin
+        client = await stack.enter_async_context(httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway), base_url=origin))
         client.cookies.set("oaw_session", production_cookie)
         assert (await client.get("/api/world")).status_code == 401
         client.cookies.clear()
-        login = await client.post("/auth/login", headers={"Origin": ORIGIN},
+        login = await client.post("/auth/login", headers={"Origin": origin},
             json={"username": "alice", "password": PASSWORDS["alice"]})
         assert login.status_code == 200, login.text
+        cookie = login.headers['set-cookie'].lower()
+        assert ('; secure' in cookie) is (not settings.allow_local_http)
+        assert '; httponly' in cookie and '; samesite=lax' in cookie and '; path=/' in cookie
+        assert 'domain=' not in cookie
         assert production_accounts.get_session(client.cookies["oaw_session"]) is None
         assert (await client.get("/api/world")).status_code == 200
-        alice_note = await client.post("/api/nodes", headers={"Origin": ORIGIN, "X-OAW-Instance": profiles[0].profile_id},
+        rejected = await client.post('/auth/login', headers={'Origin': 'https://production.example'},
+            json={'username': 'alice', 'password': PASSWORDS['alice']})
+        assert rejected.status_code == 403
+        alice_note = await client.post("/api/nodes", headers={"Origin": origin, "X-OAW-Instance": profiles[0].profile_id},
                                       json={"type": "text", "content": "Alice private Preview data"})
         assert alice_note.status_code == 201, alice_note.text
         client.cookies.clear()
-        login = await client.post("/auth/login", headers={"Origin": ORIGIN},
+        login = await client.post("/auth/login", headers={"Origin": origin},
             json={"username": "bob", "password": PASSWORDS["bob"]})
         assert login.status_code == 200
         assert (await client.get("/api/nodes/" + alice_note.json()["id"])).status_code == 404

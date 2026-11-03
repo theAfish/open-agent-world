@@ -87,6 +87,70 @@ def test_preview_requires_a_separate_https_hostname(config, url):
         bootstrap.plan(config)
 
 
+@pytest.mark.parametrize('origin', ['http://127.0.0.1:1024', 'http://127.0.0.1:8765', 'http://[::1]:65535'])
+def test_explicit_private_preview_plans_exact_loopback_origin_without_changing_isolation(config, origin):
+    public_command = bootstrap.plan(config)['preview_preparation']['initialize']
+    assert '--allow-local-http' not in public_command
+    config['preview'].update(public_origin=origin, allow_local_http=True)
+    result = bootstrap.plan(config)
+    command = result['preview_preparation']['initialize']
+    assert command[command.index('--origin') + 1] == origin
+    assert command[-1] == '--allow-local-http'
+    assert '--property=PrivateNetwork=yes' in command
+    assert '--property=RestrictAddressFamilies=AF_UNIX' in command
+    assert result['routing_changes'] is result['start_services'] is result['production_mutations'] is False
+
+
+@pytest.mark.parametrize('origin', [
+    'http://127.0.0.1:8765', 'http://[::1]:8765',
+])
+def test_private_preview_requires_explicit_opt_in(config, origin):
+    config['preview']['public_origin'] = origin
+    with pytest.raises(ValueError, match='HTTPS origin'):
+        bootstrap.plan(config)
+
+
+@pytest.mark.parametrize('origin', [
+    'http://localhost:8765', 'http://127.0.0.2:8765', 'http://0.0.0.0:8765',
+    'http://preview.example:8765', 'http://127.1:8765', 'http://[0:0:0:0:0:0:0:1]:8765',
+    'https://127.0.0.1:8765', 'http://127.0.0.1', 'http://127.0.0.1:0',
+    'http://127.0.0.1:80', 'http://127.0.0.1:1023', 'http://127.0.0.1:65536',
+    'http://127.0.0.1:08765', 'http://127.0.0.1:+8765', 'http://127.0.0.1:bad',
+    'http://127.0.0.1:8765/', 'http://127.0.0.1:8765?query', 'http://127.0.0.1:8765#fragment',
+    'http://alice@127.0.0.1:8765', 'http://127.0.0.1:8765\\',
+    ' http://127.0.0.1:8765', 'http://127.0.0.1:8765\n', 'http://127.0.0.1:\t8765',
+])
+def test_private_preview_rejects_noncanonical_or_nonloopback_origins(config, origin):
+    config['preview'].update(public_origin=origin, allow_local_http=True)
+    with pytest.raises(ValueError, match='exact HTTP loopback'):
+        bootstrap.plan(config)
+
+
+@pytest.mark.parametrize('flag', ['true', 'false', 1, 0, None])
+def test_private_preview_flag_must_be_a_json_boolean(config, flag):
+    config['preview']['allow_local_http'] = flag
+    with pytest.raises(ValueError, match='must be a boolean'):
+        bootstrap.plan(config)
+
+
+def test_private_preview_keeps_https_production_and_distinct_cookie_hostname(config):
+    config['preview'].update(public_origin='http://127.0.0.1:8765', allow_local_http=True)
+    config['production_origin'] = 'http://production.example'
+    with pytest.raises(ValueError, match='HTTPS origin'):
+        bootstrap.plan(config)
+    config['production_origin'] = 'https://127.0.0.1'
+    with pytest.raises(ValueError, match='distinct hostname'):
+        bootstrap.plan(config)
+
+
+def test_production_cannot_contain_private_preview_setup(config):
+    config['execution'].update(environment='production', target=config['production_target'])
+    config['operator'] = bootstrap.OPERATOR_ROOTS['production']
+    config['preview'].update(public_origin='http://127.0.0.1:8765', allow_local_http=True)
+    with pytest.raises(ValueError, match='cannot contain Preview setup'):
+        bootstrap.plan(config)
+
+
 def test_changed_reviewed_file_fails_before_any_apply_step_and_preserves_production(config, tmp_path, monkeypatch):
     marker = tmp_path / 'production.sqlite3'
     marker.write_bytes(b'production must not change')
@@ -151,6 +215,34 @@ def test_existing_nonroot_generator_matches_independent_root_unit_policy(units):
     _, expected, profiles = bootstrap.reviewed_units(config)
     assert len(profiles) == 2 and len(expected) == 8
     assert bootstrap.plan(config, step='preview-units')['start_services'] is False
+
+
+@pytest.mark.parametrize('reviewed,installed', [(True, False), (False, True), (True, 1), (False, 'false')])
+def test_unit_install_requires_matching_boolean_private_http_policy(units, monkeypatch, reviewed, installed):
+    config, _ = units
+    config['preview'].update(public_origin='http://127.0.0.1:8765' if reviewed else 'https://preview.example.invalid',
+                             allow_local_http=reviewed)
+    profiles = bootstrap.reviewed_units(config)[2]
+    hosting = {
+        'public_origin': config['preview']['public_origin'], 'allow_local_http': installed,
+        'profiles': [{'profile_id': profile} for profile in profiles]}
+    original_read = bootstrap.read
+    def read(path):
+        if path.name == 'execution.json':
+            return config['execution']
+        if path.name == 'hosting.json':
+            return hosting
+        return original_read(path)
+    # Model only the external host registration/storage. Keep the real pinned
+    # target and independent generated-unit validation intact.
+    monkeypatch.setattr(bootstrap, 'read', read)
+    monkeypatch.setattr(bootstrap, 'plain_tree', lambda path: [])
+    monkeypatch.setattr(bootstrap, 'check_admin', lambda config: None)
+    monkeypatch.setattr(bootstrap, 'trusted', lambda *args, **kwargs: None)
+    monkeypatch.setattr(bootstrap, 'identity_record', lambda *args: None)
+    monkeypatch.setattr(bootstrap, 'require_idle', lambda account: None)
+    with pytest.raises(ValueError, match='independent Preview configuration'):
+        bootstrap.install_preview_units(config)
 
 
 @pytest.mark.parametrize('before,after', [

@@ -14,8 +14,9 @@ import sys
 import tarfile
 import tempfile
 import time
-from urllib.request import urlopen
-from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener, urlopen
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,10 +75,29 @@ def config(path):
     if not re.fullmatch(r'[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+', value['ssh_target']):
         raise ValueError('ssh_target must be user@host, without shell syntax')
     value['identity_file'] = str(Path(value['identity_file']).expanduser().resolve())
-    if not value['public_origin'].startswith('https://'):
-        raise ValueError('Public verification requires HTTPS')
     operator(value)
+    private = value.get('allow_local_http', False)
+    if private and value.get('environment') != 'preview':
+        raise ValueError('Local HTTP verification is supported only for Preview')
+    verification_origin(value['public_origin'], private)
     return value
+
+
+def verification_origin(value, allow_local_http=False):
+    if type(allow_local_http) is not bool:
+        raise ValueError('allow_local_http must be a boolean')
+    if not isinstance(value, str):
+        raise ValueError('Verification origin must be a string')
+    if allow_local_http:
+        match = re.fullmatch(r'http://(?:127\.0\.0\.1|\[::1\]):([1-9][0-9]{3,4})', value)
+        if not match or not 1024 <= int(match[1]) <= 65535:
+            raise ValueError('Private Preview requires an exact loopback HTTP origin on port 1024-65535')
+    else:
+        origin = urlsplit(value)
+        if (origin.scheme != 'https' or not origin.hostname or not origin.netloc
+                or any((origin.path, origin.query, origin.fragment, origin.username, origin.password))
+                or re.search(r'\s|\\', value) or origin.port is not None and not 1 <= origin.port <= 65535):
+            raise ValueError('Public verification requires an exact HTTPS origin')
 
 
 def operator(cfg):
@@ -366,19 +386,33 @@ def wait(cfg, identifier):
         time.sleep(5)
 
 
-def verify_public(origin):
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
+def verify_public(origin, *, allow_local_http=False):
+    """Verify HTTPS, or an explicitly selected local SSH tunnel without proxies/redirects."""
+    verification_origin(origin, allow_local_http)
+    fetch = build_opener(ProxyHandler({}), _NoRedirect()).open if allow_local_http else urlopen
     deadline = time.monotonic() + 60
     while True:
         try:
-            with urlopen(origin + '/auth/me', timeout=10) as response:
+            with fetch(origin + '/auth/me', timeout=10) as response:
                 value = json.load(response)
             if value.get('hosted') is not True or value.get('authenticated') is not False:
-                raise ValueError('Public HTTPS authentication entry check failed; inspect status (do not replay the release)')
+                raise ValueError('Hosted authentication entry check failed; inspect status (do not replay the release)')
             return
         except HTTPError as error:
             # systemd active precedes the gateway's HTTP listener readiness.
             if error.code not in {502, 503, 504} or time.monotonic() >= deadline:
                 raise
+            time.sleep(2)
+        except (URLError, ConnectionError) as error:
+            # Before a private gateway is ready, SSH accepts the local TCP
+            # connection but cannot yet open its remote Unix socket.
+            if not allow_local_http or time.monotonic() >= deadline:
+                raise RuntimeError('Entry verification could not connect; check the gateway and SSH tunnel without replaying the release') from error
             time.sleep(2)
 
 
@@ -412,8 +446,8 @@ def deploy(cfg, args):
         remote(cfg, 'stage', identifier, **pinned)
     state = remote(cfg, 'status', identifier)
     if state['phase'] in {'complete', 'already-current'}:
-        verify_public(cfg['public_origin'])
-        print(json.dumps({'deployed': state, 'public_https': True}), flush=True)
+        verify_public(cfg['public_origin'], allow_local_http=cfg.get('allow_local_http', False))
+        print(json.dumps({'deployed': state, 'public_https': not cfg.get('allow_local_http', False)}), flush=True)
         return
     if state['unit_active']:
         print(json.dumps(wait(cfg, identifier)), flush=True)
@@ -426,8 +460,8 @@ def deploy(cfg, args):
     result = remote(cfg, 'start', identifier)
     if result['phase'] != 'already-current':
         result = wait(cfg, identifier)
-    verify_public(cfg['public_origin'])
-    print(json.dumps({'deployed': result, 'public_https': True}), flush=True)
+    verify_public(cfg['public_origin'], allow_local_http=cfg.get('allow_local_http', False))
+    print(json.dumps({'deployed': result, 'public_https': not cfg.get('allow_local_http', False)}), flush=True)
 
 
 def seed(cfg, args):
@@ -475,6 +509,7 @@ def main(argv=None):
     seed_parser.add_argument('--artifact', type=Path, required=True)
     status_parser = commands.add_parser('status')
     status_parser.add_argument('--release')
+    commands.add_parser('verify', help='Recheck the configured HTTPS entry or explicit private SSH tunnel; never deploys')
     rollback_parser = commands.add_parser('rollback')
     rollback_parser.add_argument('--release', required=True)
     rollback_parser.add_argument('--restore-data', action='store_true', help='Restore code AND the pre-update data snapshot; preserve replaced data privately')
@@ -492,7 +527,10 @@ def main(argv=None):
             prepare(cfg, args)
         return
     cfg = config(args.config)
-    if args.command == 'seed':
+    if args.command == 'verify':
+        verify_public(cfg['public_origin'], allow_local_http=cfg.get('allow_local_http', False))
+        print(json.dumps({'entry_verified': True, 'public_https': not cfg.get('allow_local_http', False)}), flush=True)
+    elif args.command == 'seed':
         seed(cfg, args)
     elif args.command == 'deploy':
         deploy(cfg, args)

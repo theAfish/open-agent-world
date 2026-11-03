@@ -41,6 +41,10 @@ jobs:
         run: python scripts/test-source-launchers.py
       - name: Test npm discovery and build receipts
         run: node --test frontend/scripts/source-startup.test.mjs
+      - name: Test private Preview tunnel without connecting
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/test-aliyun-preview-tunnel.ps1
 
   backend:
     name: Backend tests (${{ matrix.shard }}/4)

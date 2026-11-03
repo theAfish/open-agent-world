@@ -82,12 +82,19 @@ async def initialize_preview(directory: Path, origin: str, passwords: dict, *, s
     from backend.world.models import CardCreate, EdgeCreate, Point
     from .accounts import AccountStore
     from .cli import initialize, provision
-    from .configuration import default_upstream, read_gateway_settings, write_private_json
+    from .configuration import default_upstream, public_origin, read_gateway_settings, write_private_json
     from .deployments import DeploymentStore
     from .systemd import deployment_name
     from .worker import hosted_scope
 
     deployment_name(service)
+    if type(allow_local_http) is not bool or not isinstance(origin, str):
+        raise ValueError("Preview origin must be a string and allow_local_http must be a boolean")
+    public_origin(origin, allow_local_http)
+    if allow_local_http:
+        match = re.fullmatch(r"http://(?:127\.0\.0\.1|\[::1\]):([1-9][0-9]*)", origin)
+        if match is None or not 1024 <= int(match[1]) <= 65535:
+            raise ValueError("Private Preview requires an exact HTTP loopback origin with an unprivileged port")
     if (not isinstance(passwords, dict) or set(passwords) != {"alice", "bob"}
             or any(not isinstance(value, str) or len(value) < 12 or len(value.encode()) > 1024
                    for value in passwords.values()) or passwords["alice"] == passwords["bob"]):
@@ -213,6 +220,7 @@ def main(argv=None):
     init = commands.add_parser("initialize")
     init.add_argument("--directory", type=Path, required=True)
     init.add_argument("--origin", required=True)
+    init.add_argument("--allow-local-http", action="store_true")
     init.add_argument("--service", default="oaw-preview")
     init.add_argument("--password-file", type=Path, required=True)
     units = commands.add_parser("units")
@@ -236,7 +244,8 @@ def main(argv=None):
                 or os.name == "posix" and metadata.st_mode & 0o077):
             raise ValueError("Preview password file must be an owner-only regular file")
         passwords = json.loads(args.password_file.read_text(encoding="utf-8"))
-        print(json.dumps(asyncio.run(initialize_preview(args.directory, args.origin, passwords, service=args.service))))
+        print(json.dumps(asyncio.run(initialize_preview(args.directory, args.origin, passwords, service=args.service,
+                                                       allow_local_http=args.allow_local_http))))
     elif args.command == "units":
         from .configuration import read_gateway_settings
         values = preview_units(read_gateway_settings(args.directory / "control/hosting.json"),

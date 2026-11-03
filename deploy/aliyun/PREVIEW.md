@@ -13,14 +13,53 @@ responses; this is not acceptance of a model provider or an Alibaba Sandbox.
 
 ## Address and browser boundary
 
-The existing production origin uses an IP address and its certificate covers that
-IP. A Preview hostname and matching TLS certificate must be approved and verified
-before publishing Preview. `https://preview.example.invalid` is a placeholder,
-not a provisioned address. The final exact HTTPS origin is pinned in the trusted
-configuration after the read-only nginx/TLS audit.
+Preview supports two explicit ingress modes. Private mode uses a local SSH tunnel
+and needs no public DNS, ICP filing or TLS certificate. Public mode retains the
+distinct HTTPS hostname requirement. Production remains HTTPS-only, and the root
+provisioner deployment block applies independently of the Preview ingress mode.
 
-Live installation remains blocked until the approved hostname is supplied. There
-is no temporary Preview address to publish or substitute in the meantime.
+For private mode, set `preview.allow_local_http: true` and
+`preview.public_origin: "http://127.0.0.1:18081"` in the trusted bootstrap
+configuration. Set the same `allow_local_http` and `public_origin` in the separate
+release configuration; [release.preview-private.example.json](release.preview-private.example.json)
+provides those values. Only exact `http://127.0.0.1:<port>` or
+`http://[::1]:<port>` origins with ports 1024–65535 are accepted. The opt-in is
+Preview-only. DNS names, `localhost`, wildcard/non-loopback IPs, credentials,
+paths, queries, fragments and malformed ports are rejected. The existing generic
+personal-development HTTP option is unchanged.
+
+`public_origin` names the browser's local endpoint, not an ECS listener. The
+gateway continues to listen only on `/run/oaw-preview/gateway.sock`. No ECS TCP
+port, Nginx virtual host, security-group rule, DNS record or certificate is added
+for private mode. The TCP-to-Unix forwarding syntax is documented by
+[OpenSSH](https://man.openbsd.org/ssh#L).
+
+On Windows, keep this command running in a separate PowerShell window, then open
+`http://127.0.0.1:18081` in the browser:
+
+```powershell
+.\scripts\aliyun_preview_tunnel.ps1 -Server root@118.31.119.91 -IdentityFile "$env:USERPROFILE\.ssh\_web_server.pem"
+```
+
+The identity must already be authorized for SSH and able to connect to the
+Preview socket. Additional developers use their own approved SSH identities.
+`-Plan` prints the exact arguments without connecting. The helper ignores SSH
+config aliases/extra forwards, binds only `127.0.0.1`, verifies the known host key,
+disables agent forwarding and runs in the foreground; Ctrl+C closes it. It does
+not create a server user, change SSH policy or grant socket access. Its
+`-LocalPort` must match the pinned origin; use one common port for this slot.
+For an approved IPv6 origin, the equivalent explicit OpenSSH forward is
+`-L [::1]:18081:/run/oaw-preview/gateway.sock`.
+
+Private login uses host-only, HttpOnly, SameSite cookies without `Secure` on this
+explicit HTTP origin. The remote leg is encrypted by SSH. Keep a separate browser
+profile for Preview, because cookies ignore ports and other local applications
+can share loopback cookie scope. Existing production cookies must not enter this
+origin. Local verification disables HTTP proxies and rejects redirects.
+
+For public mode, keep `allow_local_http` false/absent. A distinct Preview hostname
+and matching TLS certificate must be approved and verified before public routing.
+`https://preview.example.invalid` is a placeholder, not a provisioned address.
 
 Use a distinct hostname. A path on the production origin is the same browser
 origin. Another port on the same IP/hostname still receives host cookies, even
@@ -57,7 +96,7 @@ Reviewed operating-system restrictions must apply before importing an artifact:
 | Service identity | Independent gateway/worker Unix users, socket names and systemd units; no sudo, Docker socket or production service-control permission |
 | Filesystem | `RootDirectory` points to the separately prepared Preview runtime; only the canonical Preview app and prescribed per-service data/socket views are bound in; production application, hosting, release and operator roots are absent |
 | Worker network | `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any`; only its inherited private Unix socket |
-| Gateway network | `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any`; socket-activated Unix ingress from nginx and Unix sockets to Preview workers |
+| Gateway network | `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any`; socket-activated Unix ingress from SSH (private) or nginx (public) and Unix sockets to Preview workers |
 | Capacity | Gateway `MemoryMax=128M`; each of two workers `MemoryMax=384M`; each service `TasksMax=128`; no production limit changes |
 
 Each service uses `MountAPIVFS=yes`, `PrivateIPC=yes`, `ProtectProc=invisible`
@@ -67,8 +106,8 @@ only the read-only app/own instance view and its writable data. No host `/run`,
 host `/proc`, production socket or system bus is mounted into the runtime.
 
 The gateway ingress is `/run/oaw-preview/gateway.sock`, owned by its Preview
-service identity with nginx's `www-data` group and mode `0660`. nginx proxies
-HTTP and upgraded WebSockets through that Unix socket; no Preview TCP port is
+service identity with the existing `www-data` group and mode `0660`. Authorized
+SSH sessions or nginx proxy HTTP and upgraded WebSockets through that Unix socket; no Preview TCP port is
 published. The gateway and workers cannot create TCP connections, including to
 production loopback listeners. Verify these denials under the actual units.
 Production still needs its own authentication and private filesystem permissions.
@@ -100,6 +139,7 @@ Worker units do not load `worker-common.env` or `worker.env`.
 
 Start from [bootstrap.example.json](bootstrap.example.json), replace every
 placeholder, and inspect the bootstrap plan before approving any server change.
+Choose the private origin/opt-in above, or the approved public HTTPS origin.
 Install `bootstrap.py` and the trusted operator from an independently reviewed
 revision outside all application/release directories. The privileged process
 must use its own pinned Python and standard-library code. Root must not execute
@@ -152,6 +192,9 @@ shell invocation. The password file is a separate owner-only regular file
 containing exactly `alice` and `bob`, with distinct operator-generated passwords
 of at least 12 characters. Keep it outside the empty hosting directory; it must
 not enter an artifact or a log. Replace the placeholder origin before use.
+For private mode the initializer arguments instead include
+`--origin http://127.0.0.1:18081 --allow-local-http`; the reviewed bootstrap plan
+emits that exact combination automatically.
 
 Each account gets its own randomly identified builder profile, random worker
 secret and independent data directory. Each fixture contains a text note, a mock
@@ -180,6 +223,72 @@ the full bundle and installs only administrator-reviewed bytes. Do not pass this
 Preview bundle to the generic `install-systemd` command: the generic installer
 regenerates the normal hosted policy and imports application hosting code as root.
 
+## Exact private ECS installation plan: approval required
+
+The 2026-11-03 read-only check of `118.31.119.91` found no Preview directories,
+operator, users, units or gateway socket. SSH already permits local Unix-socket
+forwarding (`AllowStreamLocalForwarding=yes`, `DisableForwarding=no`). The public
+listeners are the existing SSH/HTTP/HTTPS services; production alone uses
+`127.0.0.1:8080`. The host has 2 CPUs, about 2 GiB available RAM and 14 GiB free
+disk. Its system Python is 3.14, so the sample Python 3.12 execution root must be
+prepared explicitly. The existing production provisioner remains outside this plan.
+
+Approval covers this initial installation only, with no production restart:
+
+1. Freeze one reviewed source/build and its artifact approval. Prepare the Core
+   and hosting dependencies from `backend/uv.lock` on the developer machine,
+   with hashes and binary wheels only; no optional scientific/ADK/cloud Packs:
+
+   ```powershell
+   uv export --project backend --locked --no-dev --no-emit-project --extra hosting --output-file .tmp/preview-hosting-requirements.txt
+   uv pip install --target .tmp/preview-linux-site --python-platform x86_64-manylinux_2_28 --python-version 3.12 --only-binary :all: --require-hashes --no-deps --link-mode copy -r .tmp/preview-hosting-requirements.txt
+   ```
+
+   Exporting/installing wheels is local preparation, not native Linux acceptance.
+2. Create only the independent runtime at `/opt/oaw-preview-execution` and the
+   initial runtime-only app at `/opt/oaw-preview-app/backend/.venv`. Use a
+   separately reviewed CPython 3.12 distribution, its standard library/ELF
+   dependencies and the prepared Linux wheels. Materialize regular files with
+   the documented modes; do not bind/copy production's app venv, credentials,
+   user data or dependency caches. Create the empty bind placeholders listed
+   above and the empty Core runtime bundle. Stop if a native import/ABI or
+   ownership check fails; no source is executed as root.
+3. Stage the four reviewed operator files at `/opt/oaw-operator-review-v1`, a
+   root-private configuration at `/root/oaw-preview-bootstrap.json`, and install
+   `/opt/oaw-release-operator-preview`. Register only `oaw-preview-build`,
+   `oaw-preview-verify`, `oaw-preview-setup` and their independent groups.
+4. Create `/opt/oaw-preview-releases` and seed the approved artifact through the
+   existing Preview-only controller. Initialize only `/srv/oaw-preview-hosting`
+   plus its external owner-only password input, using the restricted setup UID.
+   Create fresh Alice/Bob fixtures, independent databases and random keys.
+5. Review/stage the eight generated files in `/opt/oaw-preview-unit-review-v1`;
+   install `oaw-preview.target`, its gateway socket/service, and the two workers'
+   socket/services. Register only the three generated `oaw-<hash>` service
+   identities/groups. `systemctl daemon-reload` and a manual Preview target
+   start are the only service-manager changes. Services stay disabled at boot.
+   Preview provisioner units must be absent/inactive; none is installed.
+6. Prove the actual mount, UID and network denials using synthetic canaries,
+   then start only Preview. Retain the existing gateway memory limit of 128 MiB
+   and 384 MiB per worker. Serialize preparation and acceptance; if host memory
+   is insufficient, stop Preview and request a revised plan rather than altering
+   production limits or services.
+7. Open the developer-side `127.0.0.1:18081` tunnel with the already approved SSH
+   identity. Verify anonymous rejection, Alice/Bob isolation, card persistence,
+   one mock Conversation and real WebSocket events through SSH. Check the trusted
+   receipt separately over SSH and exercise Preview-only failed-update recovery.
+   On failure stop only `oaw-preview.target`; retain its private failure evidence.
+
+No DNS, TLS, Nginx, security-group, SSH-daemon or cloud-resource change is needed.
+No public or remote loopback TCP listener is created for Preview. The current
+developer SSH identity can open the socket; onboarding another identity with
+different Unix permissions requires separate approval. Existing production
+accounts, environment variables, files, services, Sandbox volumes and AgenticFS
+assignments remain untouched. No automatic PR or post-merge deployment is enabled.
+
+The commands below specify each bootstrap/seed/initialization/unit step. Their
+presence is not execution approval; obtain approval of this plan before any ECS
+mutation, and verify the final artifact/configuration inventory before applying.
+
 ## First manual deployment procedure
 
 These commands describe the separately approved deployment; none are executed by
@@ -188,6 +297,8 @@ local Preview configuration based on
 [release.preview.example.json](release.preview.example.json); never reuse the
 production configuration. Replace the hostname, SSH identity/target and local
 paths, while preserving the independently approved Preview server paths.
+For private mode, start from `release.preview-private.example.json`; keep its
+loopback origin and explicit opt-in instead of substituting a hostname.
 
 1. Build the exact reviewed commit on the nonprivileged build machine. This
    command does not connect to ECS:
@@ -295,7 +406,20 @@ paths, while preserving the independently approved Preview server paths.
    return `already-current`; it is not a first-start action. Fixture initialization
    creates an empty `control/deployments.sqlite3` before any gateway starts, so
    the normal release idle check can run against this fresh installation.
-   Prepare the trusted public status projection and the
+   For private mode, open the approved SSH tunnel and verify the entry without
+   deploying or supplying a release/SHA:
+
+   ```powershell
+   python scripts/aliyun_release.py --config 'D:/path/to/preview-release.local.json' verify
+   ```
+
+   Check the trusted receipt with `status` over SSH; application HTML is not
+   trusted build identity. Private mode does not install the public status route
+   or Nginx template. Verify real browser login, persistence, mock Conversation
+   and WebSockets over the tunnel before acceptance. Confirm an external
+   connection cannot reach an ECS Preview listener.
+
+   For public mode, prepare the trusted public status projection and the
    nginx template below with the final distinct hostname/TLS certificate. Keep
    the status directory root-owned (`0755`) and its public JSON root-owned
    (`0644`), outside the artifact. Review the exact nginx diff, run `nginx -t`,
@@ -315,6 +439,23 @@ paths, while preserving the independently approved Preview server paths.
    `--check` still prepares dependencies and can run nonroot artifact code; it is
    a server mutation requiring approval. Recheck the pinned baseline and update
    the separately reviewed trusted status/header projection after the switch.
+
+   Private updates use the same artifact/baseline checks and worker verification;
+   keep the SSH tunnel open for the final entry check. The result correctly reports
+   `public_https: false`. If entry verification fails, use `verify` after fixing
+   the tunnel instead of replaying a completed deployment.
+
+## Retiring private ingress
+
+Keep the same Unix-socket gateway, isolated runtime and Preview units. Once the
+domain is ready, approve a configuration switch to the exact public HTTPS origin:
+stop Preview, update the gateway and worker origins consistently, remove/disable
+`allow_local_http` in both trusted/bootstrap and release configurations, and
+install the separately reviewed Nginx/TLS route. Validate the public configuration
+and cookies before restarting. A disposable fixture reset may be approved instead;
+never silently overwrite existing fixtures. Close the developer tunnels and clear
+their Preview browser sessions. No HTTP exception belongs in production, and no
+automatic PR deployment is enabled by this switch.
 
 ## Trusted version identity and switching
 
@@ -378,11 +519,15 @@ After explicit approval, record acceptance separately for each required boundary
   enforces the actual socket/address-family/network restrictions.
 - Confirm only Preview services, accounts, mounts and directories changed; no
   production account, data, settings, environment, Sandbox or Volume was reused.
-- On the final distinct HTTPS hostname, sign in as Alice and Bob; edit a card,
-  reload it, complete a mock Conversation turn, and receive a real event over
-  nginx and the private worker socket. Reject anonymous and cross-origin access.
+- On the pinned private loopback origin through SSH, or on the final distinct
+  HTTPS hostname for public mode, sign in as Alice and Bob; edit a card, reload
+  it, complete a mock Conversation turn, and receive a real event through the
+  selected ingress and private worker socket. Reject anonymous and cross-origin
+  access. For private mode prove that ending SSH removes the local listener and
+  that the ECS exposes no Preview TCP listener.
 - Inspect browser cookie transmission and storage for both production and
-  Preview. Verify the trusted identity page/header against the installed receipt.
+  Preview. Check the trusted receipt over SSH in private mode; verify the trusted
+  identity page/header in public mode. Do not use artifact HTML as provenance.
 - Cold-start the slot and check memory/OOM behavior, including two concurrent
   login attempts. Verify production readiness remains unchanged.
 - Exercise failed preparation, interrupted switch, successful rollback and

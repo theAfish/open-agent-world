@@ -83,6 +83,17 @@ def https_origin(value):
     return origin
 
 
+def preview_origin(value, allow_local_http):
+    require(type(allow_local_http) is bool, 'Preview allow_local_http must be a boolean')
+    if not allow_local_http:
+        return https_origin(value)
+    match = re.fullmatch(r'http://(?:127\.0\.0\.1|\[::1\]):([1-9][0-9]*)', value) if isinstance(value, str) else None
+    require(match is not None and 1024 <= int(match[1]) <= 65535,
+            'Private Preview requires an exact HTTP loopback origin with an unprivileged port')
+    from urllib.parse import urlsplit
+    return urlsplit(value)
+
+
 def separate(paths):
     roots = [linux_path(value) for value in paths]
     require(all(not a.is_relative_to(b) for index, a in enumerate(roots)
@@ -146,13 +157,15 @@ def validate(config):
     preview = config.get('preview')
     if environment == 'preview':
         require(isinstance(preview, dict), 'Preview requires its independent hosting setup')
-        origin = https_origin(preview.get('public_origin'))
-        try:
-            ipaddress.ip_address(origin.hostname)
-        except ValueError:
-            pass
-        else:
-            raise ValueError('Preview requires a separate HTTPS hostname, not another port on the production IP')
+        allow_local_http = preview.get('allow_local_http', False)
+        origin = preview_origin(preview.get('public_origin'), allow_local_http)
+        if not allow_local_http:
+            try:
+                ipaddress.ip_address(origin.hostname)
+            except ValueError:
+                pass
+            else:
+                raise ValueError('Preview requires a separate HTTPS hostname, not another port on the production IP')
         require(origin.hostname.lower() != production_origin.hostname.lower(),
                 'Preview requires a distinct hostname so production cookies cannot enter Preview')
         require('port' not in preview, 'Preview ingress uses its private Unix socket, without a TCP port')
@@ -205,9 +218,12 @@ def plan(config, *, step='operator', upgrade_from=None):
                               'A new empty hosting directory owned by setup_user, mode 0700',
                               'An independent setup-user-owned 0600 JSON file at hosting + .passwords.json (outside the empty hosting directory)',
                               'Empty canonical app/hosting/password bind placeholders in the independently prepared sandbox root',
-                              'The approved HTTPS route must be reviewed separately; no DNS or nginx changes are applied'],
+                              ('The private SSH tunnel must be reviewed separately; no public routing changes are applied'
+                               if preview.get('allow_local_http', False) else
+                               'The approved HTTPS route must be reviewed separately; no DNS or nginx changes are applied')],
             'initialize': [*runner, 'initialize', '--directory', hosting, '--origin', preview['public_origin'],
-                           '--service', name, '--password-file', hosting + '.passwords.json'],
+                           '--service', name, '--password-file', hosting + '.passwords.json',
+                           *(['--allow-local-http'] if preview.get('allow_local_http', False) else [])],
             'generate_units': [*runner, 'units', '--directory', hosting, '--application-directory', app,
                                '--service', name, '--verify-user', execution['verify_user'],
                                '--execution-root', execution['sandbox_root'],
@@ -521,6 +537,8 @@ def install_preview_units(config):
             'Preview cannot inherit a cloud resource provisioner or shared model environment')
     hosting = read(target_root / 'control/hosting.json')
     require(hosting.get('public_origin') == preview['public_origin']
+            and type(hosting.get('allow_local_http', False)) is bool
+            and hosting.get('allow_local_http', False) == preview.get('allow_local_http', False)
             and set(item['profile_id'] for item in hosting.get('profiles', [])) == profiles
             and not hosting.get('shared_models_origin') and not hosting.get('shared_environment_origin'),
             'Reviewed units must match the independent Preview configuration')
