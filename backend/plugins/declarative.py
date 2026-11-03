@@ -70,7 +70,7 @@ def config_model(schema: dict):
 
 def contribute_cards(registration, spec):
     """Populate the same staging collector before an advanced register hook."""
-    from backend.plugins.registry import NodeTypeDefinition
+    from backend.plugins.registry import NodePresentation, NodeTypeDefinition
     from backend.plugins.resources import NodeResourceAction
     for card in spec.contributions.cards:
         name = card.name or spec.name
@@ -95,7 +95,9 @@ def contribute_cards(registration, spec):
             default_status=card.default_status or card.statuses[0],
             statuses=frozenset(card.statuses), config_model=config_model(schema), frontend=card.frontend,
             resource_actions=actions,
-            surfaces={'preview': True, 'inspector': True, 'workspace': 'workspace' in card.frontend}))
+            presentation=NodePresentation(
+                states=('node', 'preview', 'inspector') + (('workspace',) if 'workspace' in card.frontend else ()),
+                initial='preview', open='inspector')))
 
 
 def declarative_plugin(spec):

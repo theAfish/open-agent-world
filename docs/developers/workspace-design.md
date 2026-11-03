@@ -37,6 +37,21 @@ and Structure Viewer use this mode. Collapsed collectible faces and card finishe
 are unchanged, and docked content continues to use the existing pane host. This
 trait does not change presentation states, persisted sizes or Composer layout.
 
+Plugin API 1.42 supports `NodePresentation(content_controls="bottom", ...)` for
+these content-owned surfaces; `"side"` is the default. The host reserves a full
+32 px bottom edge for its menu, drag grip and expand/close actions, and positions
+the menu above it. This applies to inspectors, standalone workspaces and
+single-state content previews. Docked panes and mobile windows retain their own
+host controls. Declare the layout intent in Python; do not select host DOM or
+move its controls from Pack CSS. Content needs no compensating footer padding.
+
+New plugins should declare only `presentation.states`, `initial` and `open` for
+surface support. `NodeTypeDefinition.surfaces` remains an input for older plugins;
+the host derives its catalog flags from the resolved presentation. Canvas
+`presentation.sizes` supplies default outer window dimensions. In contrast,
+`workspace_layout` supplies minimum/ideal content sizing for workspace composition,
+where panes share available space; these are separate sizing contracts.
+
 Reuse native buttons with `primary-button` or `secondary-button`, native inputs
 with `oaw-input`, and labels with `field-label`. `SchemaFields`, `IconButton`,
 and the existing focus-managed `Modal` are public SDK exports. Use `Tooltip` for

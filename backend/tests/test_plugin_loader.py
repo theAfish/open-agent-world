@@ -48,6 +48,64 @@ def test_local_entry_is_not_loaded_twice_when_also_installed(tmp_path, monkeypat
     assert [p.id for p in registry.plugins()].count("test.autoload_editable") == 1
 
 
+def test_context_receives_validated_source_environment_without_installing(tmp_path):
+    from open_agent_world.plugin_api import PackEnvironmentManager, PythonEnvironmentSpec
+    entry = write_plugin(tmp_path, 'autoload_context')
+    root = tmp_path / entry.name
+    project = root / 'pyproject.toml'
+    project.write_text('[project]\nname = "autoload-context"\nversion = "1.0"\n' + project.read_text(encoding='utf-8'), encoding='utf-8')
+    module = root / (entry.name + '.py')
+    module.write_text(module.read_text(encoding='utf-8').replace(
+        'def create_plugin():',
+        'def create_plugin(*, context):\n    global CONTEXT\n    CONTEXT = context'), encoding='utf-8')
+    (root / 'oaw.pack.toml').write_text('''schema_version = 3
+[distribution]
+id = "test.context-release"
+[plugin]
+owner = "test.autoload_context"
+packs = []
+[environments.worker]
+target = "host-worker"
+verify_imports = ["json"]
+''', encoding='utf-8')
+    profile = tmp_path / 'profile'
+    registry = loader.load_plugin_registry(root, data_root=profile, load_unenrolled_sources=True, strict=True)
+    context = sys.modules[entry.name].CONTEXT
+    environment = context.environment('worker')
+    assert isinstance(environment.manager, PackEnvironmentManager)
+    assert environment.spec == PythonEnvironmentSpec.from_declaration(
+        'test.autoload_context', 'worker', registry.pack_specs['test.autoload_context'].environments['worker'], root)
+    assert environment.manager.root == profile / 'runtime'
+    assert environment.status()['status'] == 'missing'
+    with pytest.raises(RuntimeError, match='not ready'):
+        environment.read()
+    assert not (profile / 'runtime/environments').exists()
+    with pytest.raises(ValueError, match='has no environment'):
+        context.environment('someone-elses-worker')
+
+
+@pytest.mark.parametrize('declaration', [
+    {'target': 'sandbox'},
+    {'target': 'host-worker', 'provider': 'external', 'management': 'external'},
+    {'target': 'host-worker', 'platforms': ('unsupported-platform',)},
+])
+def test_context_rejects_environments_owned_by_other_targets_or_platforms(tmp_path, declaration):
+    from open_agent_world.plugin_api import PluginContext
+    from backend.packs.spec import EnvironmentSpec, read_source_pack
+    from backend.tests.test_pack_spec import source
+    root = source(tmp_path)
+    pack = read_source_pack(root).model_copy(update={'environments': {'worker': EnvironmentSpec(**declaration)}})
+    with pytest.raises(ValueError):
+        PluginContext(tmp_path / 'profile', root, pack).environment('worker')
+    assert not (tmp_path / 'profile').exists()
+
+
+def test_legacy_context_does_not_guess_a_declaration_from_the_filesystem(tmp_path):
+    context = loader.create_plugin(lambda *, context: context, data_root=tmp_path, source_root=tmp_path)
+    with pytest.raises(ValueError, match='host-loaded Pack declaration'):
+        context.environment('worker')
+
+
 def test_installed_external_plugin_still_loads(tmp_path, monkeypatch):
     entry = write_plugin(tmp_path / "external", "autoload_external")
     monkeypatch.syspath_prepend(str(tmp_path / "external" / "autoload_external"))

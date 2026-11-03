@@ -101,6 +101,24 @@ it('lets a card opt out of expanded title/footer bars while retaining its collec
   expect(container.querySelector('.world-card')?.getAttribute('data-finish')).toBe('starlight');
 });
 
+it.each(['preview', 'inspector'] as const)('uses the declared bottom control edge on a content-owned %s surface', level => {
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', { configurable: true, value: vi.fn() });
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  const card: WorldCard = { id: 'bottom-controls', type: 'test.instrument', name: 'Instrument', status: 'idle', config: {},
+    position: { x: 0, y: 0 }, size: { width: 360, height: 240 }, expanded: false };
+  const definition = { ...TEST_CATALOG.node_types[0], id: card.type, traits: ['ui.content-surface.v1'],
+    presentation: { states: [level], initial: level, open: level, content_controls: 'bottom' as const } };
+  const catalog = { ...TEST_CATALOG, node_types: [definition] };
+  useWorldStore.setState({ cards: [card], edges: [], events: [], catalog });
+  useNodeSurfaceStore.getState().syncCards([card], catalog);
+  const props = { id: card.id, data: { card }, selected: false, dragging: false } as ComponentProps<typeof WorldCardNode>;
+  const { container } = render(<ReactFlowProvider><WorldCardNode {...props} /></ReactFlowProvider>);
+  expect(container.querySelector('.world-card')?.getAttribute('data-content-controls')).toBe('bottom');
+  expect(container.querySelector('.content-surface-grip.node-drag-region')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Card details' }));
+  expect(screen.getByRole('button', { name: 'Remove Instrument' })).toBeTruthy();
+});
+
 it('shows a missing placeholder instead of dispatching a same-named installed implementation', () => {
   const card: WorldCard = { id: 'lost', type: 'agent', name: 'Old agent', status: 'idle', config: {},
     position: { x: 0, y: 0 }, size: { width: 300, height: 190 }, expanded: false,

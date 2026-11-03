@@ -1,6 +1,6 @@
 {
   "name": "@oaw/plugin-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Public Open Agent World frontend Pack types and build contract",
   "type": "module",
   "types": "./types/plugins/sdk.d.ts",

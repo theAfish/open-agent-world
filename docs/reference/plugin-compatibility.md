@@ -2,11 +2,34 @@
 
 [API directory](../plugins.md) · [Card App tutorial](../developers/card-app.md)
 
+## Which version to declare
+
+| Version | Meaning |
+| --- | --- |
+| npm `@oaw/plugin-api` (currently 1.1.0 in this checkout) | Development package: build helpers and generated TypeScript declarations |
+| `PluginDescriptor.plugin_api_version` and `[compatibility].plugin_api` | Minimum host feature level used by the Pack; keep these declarations equal |
+| `FrontendPlugin.apiVersion` and `compatibility.frontend_api` (1) | Frontend module loading protocol, independent of host feature additions |
+| OAW release and `[compatibility].oaw` | Application release compatibility range |
+
+Using a newer SDK package does not upgrade the recipient's host. For example,
+an SDK 1.1.0 build using `host.credentials` needs Plugin API 1.42, while a build
+using only `Tooltip` needs 1.41. Optional features may be tested for availability;
+required features must be covered by the declared minimum. Generate/package the
+SDK from the host checkout you target; package versions do not imply an npm
+publication. Old Packs need no version change for host features they do not use.
+
 ## Minimum feature levels
 
 Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
+
+Plugin API 1.42 adds `NodePresentation.content_controls="side" | "bottom"` for
+`ui.content-surface.v1`, named host-worker environments through
+[`PluginContext.environment(name)`](plugin-lifecycle.md#declared-host-worker-environments),
+and the card-scoped human [`host.credentials`](plugin-frontend.md#human-credential-configuration)
+interface. These use existing host controls, environment providers and credential
+authorization; they introduce no alternate window, installer or secret store.
 
 Plugin API 1.41 provides shared frontend `Tooltip` and `Popover` components with
 theme tokens, top-layer positioning, viewport collision handling and keyboard

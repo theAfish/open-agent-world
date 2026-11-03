@@ -216,6 +216,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
       data-card-expanded={visualLevel === "inspector" || visualLevel === "workspace" ? "true" : "false"}
       data-surface-level={level}
       data-content-surface={contentSurface || undefined}
+      data-content-controls={contentSurface ? presentation.content_controls ?? 'side' : undefined}
       data-render-lod="full"
       data-activity={activity.phase}
       data-equipment-detail={data.equipmentDetail || undefined}
