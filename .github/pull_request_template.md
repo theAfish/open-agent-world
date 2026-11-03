@@ -1,7 +1,10 @@
 ## Change
 
 Describe the problem, resulting behavior, and compatibility or migration impact.
-Feature/fix PRs target `dev`; release integration PRs target `main`.
+Feature/fix PRs normally target `dev`; release integration PRs target `main`.
+Ali-specific PRs target `feat/aliyun-agentcore-poc`; follow the
+[Ali PR and Private Preview guide](https://github.com/theAfish/open-agent-world/blob/feat/aliyun-agentcore-poc/.github/ALI_PR_GUIDE.md)
+for preview eligibility, SSH access and shared-slot review.
 
 ## Validation
 
