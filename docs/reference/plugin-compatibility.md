@@ -53,7 +53,10 @@ file, and tool traffic over a provider-owned duplex transport without public
 callbacks. It does not provision a cloud environment by itself.
 
 Hosted runtimes declare `RuntimeProvider.supports_managed_execution = True` after
-adopting these execution APIs (or using authorized remote Sandbox tools). The host
+adopting these execution APIs, using authorized Sandbox tools, or running a fixed
+Pack-owned pipeline in its declared managed environment. Fixed pipelines such as
+XRD remain host computations; this declaration does not move them into a remote
+Sandbox. General CLI Harness commands must use the host-selected execution API. The host
 rejects legacy adapters before Agent creation or execution; personal installations
 remain compatible. This declaration is a compatibility check for trusted code,
 not an OS boundary or a substitute for reviewing an installed backend Pack.

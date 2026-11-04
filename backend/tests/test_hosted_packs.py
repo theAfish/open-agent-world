@@ -100,6 +100,15 @@ def test_hosted_workers_reject_legacy_runtime_execution_before_start(tmp_path):
         manager.install_provider('core.mock',LegacyRuntime(manager.capability_provider))
 
 
+@pytest.mark.parametrize('card_type', ['xrd.match', 'atomsculptor.agent'])
+def test_hosted_bundled_managed_runtimes_remain_creatable(tmp_path, card_type):
+    worker=config(tmp_path)
+    with TestClient(create_worker_app(worker)) as client:
+        response=client.post('/api/nodes',headers=headers(worker),json={'type':card_type})
+        assert response.status_code==201,response.text
+        assert response.json()['type']==card_type
+
+
 def test_approved_archive_is_prepared_and_loaded_in_a_separate_user_process(tmp_path):
     from backend.hosting.templates import export_template
     from backend.packs.installation import PackInstallationManager

@@ -864,6 +864,9 @@ def _trace_value(value: Any, depth: int = 0) -> Any:
 class AtomSculptorRuntime(RuntimeProvider):
     """One OAW Agent card backed by a coordinator and three ADK specialists."""
 
+    # Model tool calls use scoped OAW capabilities, including Sandbox execution.
+    supports_managed_execution = True
+
     def __init__(self, capability_provider, *, model_connection_resolver: ModelConnectionResolver | None = None,
                  context_store: Any = None) -> None:
         self.capabilities = capability_provider
