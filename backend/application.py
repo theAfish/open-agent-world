@@ -77,7 +77,8 @@ def get_application(request: Request, services=Depends(get_services)):
 @router.post("/restart", status_code=202)
 async def restart_application(request: Request):
     from backend.api.desktop import _require_local_desktop
-    _require_local_desktop(request)
+    if not request.scope.get('oaw.pack_management'):
+        _require_local_desktop(request)
     if request.headers.get("x-oaw-restart") != "1":
         raise HTTPException(403, "Restart requires an explicit host request")
     restart = request.app.state.restart

@@ -187,6 +187,9 @@ async def update_runtime(config: WorkerConfig, template_path: Path, *, services_
     if template_path.stat().st_size > 64 * 1024 * 1024:
         raise ValueError("Hosted template exceeds 64 MiB")
     template, blueprint = validate_template(json.loads(template_path.read_text(encoding="utf-8")))
+    from .packs import pack_locks
+    if pack_locks(template.get('packs',[])) != pack_locks(config.approved_packs):
+        raise ValueError('Deploy a new workspace to change installed Pack versions; user data is not migrated automatically')
     template = {**template, "blueprint": blueprint.model_dump(mode="json")}
     source = validate_source_nodes(template, blueprint, required=True)
     root = config.data_root
@@ -216,7 +219,7 @@ async def update_runtime(config: WorkerConfig, template_path: Path, *, services_
         if [workspace["legion_id"] for workspace in published_workspaces(old_manifest)] != expected_roots:
             raise ValueError("Published workspace scope or order changed; explicit migration required")
         settings = replace(Settings.for_data_root(root), agent_runtime=config.agent_runtime, sandbox_runtime=None,
-                           marketplace_url=None, inherit_runtime_environment=False,
+                           marketplace_url=None, inherit_runtime_environment=False, hosted_pack_versions=config.approved_packs,
                            tenant_scope=hosted_scope(config.user_id, config.application_id, config.profile_id))
         services = (services_factory or create_worker_services)(settings)
         try:

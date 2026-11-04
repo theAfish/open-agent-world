@@ -53,12 +53,15 @@ class HostedProfile:
     mode: str
     upstream: str
     secret: str = field(repr=False)
+    pack_management: bool = False
 
     def __post_init__(self):
         identifier(self.profile_id)
         identifier(self.user_id)
         if self.mode not in {"builder", "runtime"}:
             raise ValueError("Profile mode must be builder or runtime")
+        if type(self.pack_management) is not bool or self.pack_management and self.mode != 'builder':
+            raise ValueError("Pack management requires an operator-enabled builder")
         if (not isinstance(self.application_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", self.application_id)
                 or not isinstance(self.name, str) or not self.name.strip() or len(self.name) > 120):
             raise ValueError("Application ID and name are required and must be bounded")
@@ -71,7 +74,8 @@ class HostedProfile:
             raise ValueError("Each worker requires an independent secret of 32 to 64 random bytes encoded as hex")
 
     def public(self) -> dict:
-        return {"id": self.profile_id, "application_id": self.application_id, "name": self.name, "mode": self.mode}
+        return {"id": self.profile_id, "application_id": self.application_id, "name": self.name,
+                "mode": self.mode, "pack_management": self.pack_management}
 
 
 @dataclass(frozen=True)

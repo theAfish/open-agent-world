@@ -25,6 +25,7 @@ class MockAgentRuntime(RuntimeProvider):
     It never substitutes for a Google ADK initialization or execution failure.
     The application has to choose ``mock`` before constructing this class.
     """
+    supports_managed_execution = True
 
     def __init__(self, capability_provider: AgentCapabilityProvider) -> None:
         self._provider = capability_provider

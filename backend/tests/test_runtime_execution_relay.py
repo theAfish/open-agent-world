@@ -1,0 +1,89 @@
+import asyncio
+from contextlib import asynccontextmanager
+import json
+import os
+import sys
+
+import pytest
+
+from backend.agents.execution import NativeRuntimeProcess
+from backend.agents.execution_transport import FRAME_LIMIT, RelayRuntimeExecution, execution_worker_argv
+from backend.errors import ResourceValidationError
+
+
+@asynccontextmanager
+async def relay(tmp_path):
+    process = await asyncio.create_subprocess_exec(*execution_worker_argv(sys.executable),
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, limit=FRAME_LIMIT,
+        **({'creationflags':0x08000000} if os.name=='nt' else {'start_new_session':True}))
+    host=RelayRuntimeExecution(NativeRuntimeProcess(process))
+    try:
+        await host.initialize(str(tmp_path/'project'),str(tmp_path/'home'))
+        yield host
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_real_relay_duplex_process_and_scoped_files(tmp_path):
+    async with relay(tmp_path) as host:
+        staged=await host.write_file('input/data.bin',b'\0binary\xff')
+        assert await host.read_file(staged)==b'\0binary\xff'
+        with pytest.raises(ResourceValidationError):
+            await host.read_file('../outside')
+        script='import sys;print("ready",flush=True);print(sys.stdin.readline().strip(),flush=True)'
+        process=await host.spawn([sys.executable,'-I','-u','-c',script],env=dict(os.environ))
+        assert (await process.readline()).rstrip(b'\r\n')==b'ready'
+        await process.write(b'protocol-neutral\n')
+        assert (await process.readline()).rstrip(b'\r\n')==b'protocol-neutral'
+        assert await process.wait()==0
+
+
+@pytest.mark.asyncio
+async def test_private_http_tool_bridge_round_trip(tmp_path):
+    calls=[]
+    async def tool(reader,writer):
+        try:
+            header=await reader.readuntil(b'\r\n\r\n')
+            assert b'authorization: Bearer run-fixture' in header
+            length=int(next(line.split(b':',1)[1] for line in header.split(b'\r\n') if line.lower().startswith(b'content-length:')))
+            calls.append(json.loads(await reader.readexactly(length)))
+            body=b'{"tool":"ok"}'
+            writer.write(f'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n'.encode()+body)
+            await writer.drain()
+        finally:
+            writer.close();await writer.wait_closed()
+    server=await asyncio.start_server(tool,'127.0.0.1',0)
+    try:
+        async with relay(tmp_path) as host:
+            local=f'http://127.0.0.1:{server.sockets[0].getsockname()[1]}/mcp'
+            forwarded=await host.forward_http(local)
+            assert forwarded!=local
+            script='import urllib.request;request=urllib.request.Request('+repr(forwarded)+',data=b\'{"method":"tools/list"}\',headers={"Authorization":"Bearer run-fixture","Content-Type":"application/json"});print(urllib.request.urlopen(request,timeout=5).read().decode(),flush=True)'
+            process=await host.spawn([sys.executable,'-I','-u','-c',script],env=dict(os.environ))
+            assert json.loads(await process.readline())=={'tool':'ok'}
+            assert await process.wait()==0
+            assert calls==[{'method':'tools/list'}]
+    finally:
+        server.close();await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_remote_peer_cannot_select_an_arbitrary_host_url(tmp_path, monkeypatch):
+    import httpx
+    calls = []
+    def forbidden(*args, **kwargs):
+        pytest.fail('A forged proxy registration reached the host network')
+    monkeypatch.setattr(httpx, 'AsyncClient', forbidden)
+    async with relay(tmp_path) as host:
+        async def reply(method, **params):
+            calls.append((method,params))
+        monkeypatch.setattr(host, 'request', reply)
+        await host._forward_http({'proxy_id':'forged','request_id':'request',
+            'url':'http://169.254.169.254/latest/meta-data/','data':'','headers':{}})
+        host.proxies['registered'] = 'http://127.0.0.1:18081/mcp'
+        await host._forward_http({'proxy_id':'registered','request_id':'malformed',
+            'data':'','headers':[]})
+        assert [(method,p['request_id'],p['status']) for method,p in calls] == [
+            ('http_response','request',502),('http_response','malformed',502)]

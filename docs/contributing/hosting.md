@@ -370,6 +370,32 @@ signing keys, user files and encrypted credentials together. Never expose the
 control directory as a static site or commit it. `.oaw-hosting/` is ignored;
 other deployment directories should be outside the repository.
 
+## Administrator Pack installation
+
+An administrator can use the normal Store and file installer when the operator
+enables `pack_management: true` on both its **builder** profile in `hosting.json`
+and its private `worker.json`. Existing profiles default to disabled. The gateway
+checks the current account role and instance on every management request, strips
+client-supplied authority, and signs a short-lived method/path-bound grant for
+that exact worker. Ordinary users retain read-only Store browsing. IDE, host
+filesystem configuration and unrelated deployment APIs remain restricted.
+
+Acquisition verifies the archive and retains its original bytes under
+`control/pack-archives`. Dependency preparation and plugin loading run under the
+private worker UID. Python Packs use the existing restart prompt; the worker
+shuts down gracefully and exits with code 75 so systemd restarts that worker.
+The gateway and other users' workers remain running.
+
+Publish after the new version has loaded. The template pins distribution IDs,
+versions and archive hashes. The reconciler copies only these bounded archives
+as data into a new instance's read-only `pack-inputs`; its existing nonroot
+initialization task prepares them with the normal Pack installer. User data is
+never copied from the administrator profile. Runtime workers load exactly their
+approved selection and cannot install code through their public API. Changing
+Pack versions requires a new workspace deployment; compatible template updates
+keep their existing Pack pins. Review the sealed provisioner update before
+enabling this workflow on an existing server.
+
 ## Local integration debugging
 
 Explicitly initialize with `--allow-local-http` and `http://127.0.0.1:8080`, set

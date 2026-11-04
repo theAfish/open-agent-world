@@ -10,6 +10,7 @@ from backend.config import Settings
 from backend.hosting.worker import WorkerConfig, create_worker_app, mint_worker_token, hosted_scope
 from backend.cloud.aliyun.sandbox import AliyunSandboxBackend, AliyunSandboxSettings
 from backend.sandbox.models import SandboxStateError
+from backend.tests.test_pack_installation import isolate_modules
 
 
 def test_full_research_publication_round_trips_into_private_cloud_workspaces(tmp_path, monkeypatch):
@@ -169,6 +170,30 @@ def test_cloud_discovery_uses_all_bundled_sources_and_private_context(tmp_path, 
     assert registry.is_enabled("data.sqlite") and registry.is_enabled("matcreator")
     assert not registry.is_enabled("openai.codex")
     assert registry.node_type("sandbox").config_model().command_timeout == 60
+
+
+def test_cloud_admin_loads_installed_pack_only_when_operator_enabled(tmp_path, monkeypatch, isolate_modules):
+    from backend.packs.installation import PackInstallationManager
+    from backend.tests.test_pack_installation import artifact
+
+    profile = str(uuid4())
+    configure(monkeypatch, profile)
+    registry = hosted.approved_plugins(tmp_path)
+    PackInstallationManager(tmp_path, registry).install(artifact())
+    settings = replace(Settings.for_data_root(tmp_path),
+                       tenant_scope=hosted_scope(str(uuid4()), "canvas", profile))
+    services = hosted.create_hosted_services(settings)
+    try:
+        assert not services.plugins.has_plugin('test.greeter')
+    finally:
+        services.close()
+    services = hosted.create_hosted_services(replace(settings, hosted_pack_management=True))
+    try:
+        assert services.plugins.has_plugin('test.greeter')
+        assert services.pack_installations.status()['versions'][0]['loaded']
+        assert services.runtime_execution.configuration(None)['provider'] == 'aliyun.agent-sandbox'
+    finally:
+        services.close()
 
 
 def test_new_ecs_workspace_files_work_before_any_compute_start(tmp_path, monkeypatch):

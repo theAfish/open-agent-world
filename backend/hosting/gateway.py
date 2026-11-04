@@ -21,7 +21,7 @@ from .worker import mint_worker_token
 
 _HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer",
                 "transfer-encoding", "upgrade"}
-_PRIVATE_HEADERS = {"authorization", "cookie", "host", "forwarded", "x-real-ip", "x-oaw-instance"}
+_PRIVATE_HEADERS = {"authorization", "cookie", "host", "forwarded", "x-real-ip", "x-oaw-instance", "x-oaw-pack-authority"}
 _RESPONSE_HEADERS = {"cache-control", "set-cookie", "server", "x-powered-by"}
 
 
@@ -114,6 +114,11 @@ class Gateway:
                    and not key.lower().startswith(("x-forwarded-", "sec-websocket-"))]
         headers.append(("authorization", "Bearer " + mint_worker_token(
             profile.secret, profile.profile_id, profile.user_id, user["display_name"])))
+        from .packs import management_path, management_grant
+        if (user['role']=='admin' and profile.pack_management and profile.mode=='builder'
+                and management_path(request.url.path,request.method)):
+            headers.append(('x-oaw-pack-authority',management_grant(profile.secret,profile.profile_id,
+                request.method,request.url.path.rstrip('/'))))
         return headers
 
     async def wait_for_worker(self, profile):
@@ -144,6 +149,10 @@ class Gateway:
         profile = self.profiles.get(user["id"])
         if profile is None:
             return self.error(403, "workspace_unassigned", "No workspace has been assigned to this account.")
+        from .packs import management_path, acquire_for_gateway
+        management = management_path(request.url.path,request.method)
+        if management and not (user['role']=='admin' and profile.mode=='builder' and profile.pack_management):
+            return self.error(403,'admin_required','Pack management requires an enabled administrator workspace.')
         if not self.instance_matches(request, profile, required=request.method not in {"GET", "HEAD", "OPTIONS"}):
             return self.error(409, "instance_changed", "Reload this workspace.", profile)
         # copy_with preserves the configured authority even for // or encoded paths.
@@ -156,7 +165,9 @@ class Gateway:
         # can exceed five minutes before a command is even admitted.
         sandbox_operation = request.method == "POST" and re.fullmatch(
             r"/api/(?:runtime-app/workspace/)?sandboxes/[^/]+/(?:start|execute|python/packages)", request.url.path)
-        timeout = httpx.Timeout(300, connect=10, read=3600 if sandbox_operation else 300)
+        resource_operation = request.method == 'POST' and re.fullmatch(
+            r'/api/(?:runtime-app/workspace/)?nodes/[^/]+/(?:resource|actions)/[^/]+',request.url.path)
+        timeout = httpx.Timeout(300, connect=10, read=3600 if sandbox_operation else 900 if management or resource_operation else 300)
         try:
             await self.wait_for_worker(profile)
         except httpx.HTTPError:
@@ -170,9 +181,33 @@ class Gateway:
         current_profile = self.profiles.get(current_user["id"])
         if current_profile != profile:
             return self.error(409, "instance_changed", "Reload this workspace.", current_profile or profile)
+        if management and current_user['role']!='admin':
+            return self.error(403,'admin_required','Administrator access required.')
+        supplied = None
+        try:
+            if management:
+                supplied = await acquire_for_gateway(self,request)
+        except ValueError:
+            return self.error(422,'invalid_pack','The Pack archive could not be verified.')
+        except Exception as error:
+            from backend.packs.marketplace import MarketplaceError
+            if isinstance(error,MarketplaceError):
+                return self.error(error.status_code,'store_unavailable',str(error))
+            raise
+        if management:
+            latest = await self.auth.user_from_scope(request.scope)
+            if not latest or latest['id']!=current_user['id'] or latest['role']!='admin':
+                return self.error(403,'admin_required','Administrator access required.')
+            await self.refresh()
+            if self.profiles.get(latest['id'])!=profile:
+                return self.error(409,'instance_changed','Reload this workspace.')
+            current_user = latest
         try:
             outgoing = client.build_request(request.method, target, headers=self.upstream_headers(request, profile, current_user),
-                                               content=request.stream(), timeout=timeout)
+                                               content=supplied if supplied is not None else request.stream(), timeout=timeout)
+            if supplied is not None:
+                outgoing.headers['content-type']='application/vnd.oaw.pack'
+                outgoing.headers['content-length']=str(len(supplied))
             # AsyncClient also applies its own upstream cookie jar. Those
             # cookies must never become worker authority or cross profiles on
             # the same hostname at different ports.

@@ -6,7 +6,7 @@ export interface HostedSession {
   user: { id: string; username: string; display_name: string; role?: 'user' | 'admin' } | null;
   shared_models?: boolean;
   login_methods: ('password' | 'oidc')[];
-  instance: { id: string; application_id: string; name: string; mode: 'builder' | 'runtime' } | null;
+  instance: { id: string; application_id: string; name: string; mode: 'builder' | 'runtime'; pack_management?: boolean } | null;
 }
 
 let session: HostedSession | undefined;
@@ -22,6 +22,8 @@ const connectionListeners = new Set<() => void>();
 const logoutFlag = 'oaw-hosted-signout';
 export const currentHostedSession = () => session;
 export const isHosted = () => session?.hosted === true;
+export const canManageHostedPacks = () => session?.authenticated === true && session.user?.role === 'admin'
+  && session.instance?.mode === 'builder' && session.instance.pack_management === true;
 export const hostedSessionActive = () => !invalidated && session?.authenticated === true;
 export const hostedConnectionState = () => connectionState;
 export function subscribeHostedConnection(listener: () => void) {

@@ -2,12 +2,13 @@
 
 Unlike node documents, these handlers operate on native resources (for example
 SQLite), not JSON snapshots. The host serializes them with graph mutations and
-runs blocking work off the event loop. Plugins own their format and lifecycle.
+runs blocking work off the event loop. Async handlers run on the host event loop
+and must offload their own blocking work. Plugins own their format and lifecycle.
 """
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 from backend.plugins.state import CardStateStore
 
 
@@ -27,9 +28,13 @@ class NodeResourceContext:
     # example to transcribe an image inside its own conversion job). Same rules as
     # ``resolve_secret``: the connection's key never leaves the handler.
     resolve_model: Callable[[str], Any] | None = None
+    # Bound by the host to this node/action. No provider credential or arbitrary
+    # node selection is exposed to a Pack handler.
+    open_execution: Callable[..., Any] | None = None
+    execution_configuration: Callable[[], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class NodeResourceAction:
-    handler: Callable[[NodeResourceContext, dict[str, Any]], dict[str, Any]]
+    handler: Callable[[NodeResourceContext, dict[str, Any]], dict[str, Any] | Awaitable[dict[str, Any]]]
     capability_kind: str | None = None

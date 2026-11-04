@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -11,6 +12,7 @@ from .models import AgentConfig, AgentEvent, AgentInfo, RuntimeModelConnection, 
 
 if TYPE_CHECKING:
     from backend.runs.models import InvocationContext, RuntimeInput
+    from backend.agents.execution import RuntimeExecution
 
 
 class AgentCapabilityProvider(Protocol):
@@ -37,6 +39,19 @@ class AgentCapabilityProvider(Protocol):
         Plugins may narrow it and add their own explicit worker settings.
         Hosted workers omit deployment credentials; this is not OS isolation.
         """
+        ...
+
+    def runtime_execution(self, agent_id: str, run_id: str, *, workspace: Path,
+                          home: Path) -> AbstractAsyncContextManager[RuntimeExecution]:
+        """Open this live Run's host-selected process/file/bridge environment.
+
+        workspace/home preserve personal native paths; remote providers choose
+        their own private roots. No provider may silently fall back to native.
+        """
+        ...
+
+    def runtime_execution_configuration(self, agent_id: str) -> dict[str, Any]:
+        """Read host-selected runtime availability without starting anything."""
         ...
 
     async def publish_execution(self, agent_id: str, run_id: str, snapshot: Mapping[str, Any]) -> None:
@@ -95,6 +110,9 @@ class ModelConnectionResolver(Protocol):
 
 class RuntimeProvider(ABC):
     """Provider-neutral runtime boundary; provider SDK objects never cross it."""
+    # Compatibility declaration by trusted adapters. All agent-generated command
+    # execution must use the host-selected SDK or authorized Sandbox tools.
+    supports_managed_execution: bool = False
 
     async def notify_input(self, run_id: str) -> None:
         """Wake an active provider after durable input arrives; no receipt implied.

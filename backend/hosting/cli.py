@@ -213,6 +213,13 @@ def main(argv=None):
         if descriptor is not None:
             from .systemd import activated_socket
             activated_socket(descriptor)
+        restart_requested = False
+        server = None
+        def restart_worker():
+            nonlocal restart_requested
+            restart_requested = True
+            if server is not None:
+                server.should_exit = True
         if args.command == "gateway":
             from .gateway import create_gateway
             config = args.config.resolve()
@@ -231,10 +238,15 @@ def main(argv=None):
             if factory_name:
                 module, name = factory_name.split(":", 1)
                 factory = getattr(importlib.import_module(module), name)
-            app = create_worker_app(value, frontend_directory=args.frontend, services_factory=factory)
+            app = create_worker_app(value, frontend_directory=args.frontend, services_factory=factory,restart=restart_worker)
         # Do not log URLs/cookies or trust arbitrary forwarding headers. A single
         # process owns each profile and the gateway checks the configured origin.
-        uvicorn.run(app, host=args.host, port=args.port, fd=descriptor, proxy_headers=False, access_log=False)
+        server = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port, fd=descriptor, proxy_headers=False, access_log=False))
+        server.run()
+        if restart_requested:
+            # Graceful lifespan shutdown has finished. The installed systemd
+            # Restart=on-failure policy starts only this private worker again.
+            raise SystemExit(75)
         return
     directory = args.directory.resolve()
     settings = read_gateway_settings(directory / "control/hosting.json")

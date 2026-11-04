@@ -24,6 +24,40 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.44 adds host-selected `AgentCapabilityProvider.runtime_execution`
+and `NodeResourceContext.open_execution`, including duplex processes, bounded
+file transfer and private loopback tool forwarding. Native paths remain personal
+host paths; hosted compositions must explicitly supply an execution provider.
+Resource handlers may be async. Packs using this contract declare 1.44 in both
+their descriptor and manifest; they do not choose a cloud SDK or silently fall
+back to host execution.
+
+The execution session supplies `workspace`, `home`, `environment`, and an optional
+host-managed `command`. A CLI adapter uses `spawn(argv, env=...)`, the returned
+process's byte streams, `read_file` / `write_file`, and `forward_http` for a
+host-issued loopback tool endpoint. File transfers are bounded to 32 MiB and reuse
+the existing no-follow file policy. Local adapters may discover their existing
+CLI when `remote` is false; remote adapters must use a command configured inside
+that environment. Dependency declarations targeting `host-worker` still describe
+the host and are not implicitly installed in a remote environment.
+
+`runtime_execution_configuration(agent_id)` and a resource action's bound
+`execution_configuration()` read configuration without starting a process or
+allocating a cloud VM. Open sessions only for live Runs or explicit resource
+actions. The host tracks sessions through cancellation and shutdown; an
+unconfirmed cleanup keeps the node unavailable. Native execution preserves
+personal directories and is not an OS security sandbox. Remote providers own
+their isolation, credential filtering, persistent roots, durable allocation
+receipts, and confirmed teardown. The stdlib relay supports private process,
+file, and tool traffic over a provider-owned duplex transport without public
+callbacks. It does not provision a cloud environment by itself.
+
+Hosted runtimes declare `RuntimeProvider.supports_managed_execution = True` after
+adopting these execution APIs (or using authorized remote Sandbox tools). The host
+rejects legacy adapters before Agent creation or execution; personal installations
+remain compatible. This declaration is a compatibility check for trusted code,
+not an OS boundary or a substitute for reviewing an installed backend Pack.
+
 Plugin API 1.43 provides `AgentCapabilityProvider.conversation_attachments`,
 `read_conversation_attachment` and `publish_conversation_attachment` for trusted
 runtime providers. They list sent files, read verified bytes and retain generated

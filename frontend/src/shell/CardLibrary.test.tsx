@@ -52,6 +52,17 @@ it('opens the hosted Store while keeping server Pack management unavailable', as
   expect(screen.getByRole('heading', { name: 'Pack inventory' })).toBeTruthy();
 });
 
+it('enables the existing installer for an operator-enabled hosted administrator', async () => {
+  vi.spyOn(hostedAuth,'isHosted').mockReturnValue(true);
+  vi.spyOn(hostedAuth,'canManageHostedPacks').mockReturnValue(true);
+  useCardLibrary.setState({snapshot:snapshot(),open:true,tab:'packs',refresh:async()=>{}});
+  useWorldStore.setState({legions:[]});
+  await act(async()=>{render(<CardLibrary/>);});
+  expect(screen.getByRole('button',{name:'Install Pack from File...'})).toBeTruthy();
+  expect(worldApi.getInstalledPacks).toHaveBeenCalled();
+  expect(screen.queryByText('Developer tools')).toBeNull();
+});
+
 it('adds an installed file to the inventory immediately and closes its installation panel', async () => {
   useCardLibrary.setState({ snapshot: snapshot(), open: true, tab: 'packs', refresh: async () => {} });
   useWorldStore.setState({ legions: [] });

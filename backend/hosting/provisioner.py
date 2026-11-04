@@ -167,6 +167,8 @@ def install_profile(directory, application, profile, config, template, settings,
     private_files = ["worker.json", *resource_files]
     if template is not None:
         private_files.append("template.json")
+        from .packs import stage_archives
+        stage_archives(directory/'control/pack-archives',instance,template.get('packs',[]),group=user.pw_gid)
     for filename in private_files:
         os.chown(instance / filename, 0, user.pw_gid)
         (instance / filename).chmod(0o640)
@@ -204,6 +206,9 @@ def update_profile(directory, application, profile, template, name, job_id):
         raise ValueError("Hosted updates require the existing private data directory")
     value["data_root"] = instance / "data"
     config = WorkerConfig(**value)
+    from .packs import pack_locks
+    if pack_locks(template.get('packs',[])) != pack_locks(config.approved_packs):
+        raise ValueError('Deploy a new workspace to change installed Pack versions')
     if (config.profile_id != profile.profile_id or config.user_id != profile.user_id
             or config.application_id != profile.application_id or config.secret != profile.secret
             or config.mode != "runtime" or profile.mode != "runtime"):
@@ -293,11 +298,11 @@ def engineering(directory, application, name, username):
         # an operator repeats engineering initialization after readiness.
         profile_id = str(uuid5(UUID(user_id), name + ":engineering"))
         profile = HostedProfile(profile_id, user_id, "engineering", "Engineering workspace", "builder",
-                                default_upstream(profile_id, name), secrets.token_hex(32))
+                                default_upstream(profile_id, name), secrets.token_hex(32), pack_management=True)
         config = WorkerConfig(profile_id, user_id, profile.application_id, profile.mode, settings.public_origin,
                               profile.secret, directory / "instances" / profile_id / "data",
                               shared_models_origin=settings.shared_models_origin,
-                              shared_environment_origin=settings.shared_environment_origin)
+                              shared_environment_origin=settings.shared_environment_origin,pack_management=True)
         resources = prepare_resources(directory, profile)
         if resources is None:
             raise ValueError("Workspace resources are pending; retry after the operator confirms readiness")
@@ -364,7 +369,8 @@ def tick(directory: Path, application: Path, name="oaw-hosted"):
             config = WorkerConfig(profile.profile_id, profile.user_id, profile.application_id, profile.mode,
                                   settings.public_origin, profile.secret, directory / "instances" / profile.profile_id / "data",
                                   shared_models_origin=settings.shared_models_origin,
-                                  shared_environment_origin=settings.shared_environment_origin)
+                                  shared_environment_origin=settings.shared_environment_origin,
+                                  approved_packs=tuple(template.get('packs',[])))
             resources = prepare_resources(directory, profile)
             if resources is None:
                 with store.transaction(immediate=True) as db:

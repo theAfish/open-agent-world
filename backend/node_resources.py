@@ -1,7 +1,9 @@
 """Dispatch native resource operations through live graph authorization."""
 import asyncio
+import inspect
 import json
 from threading import Event
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -63,12 +65,25 @@ async def invoke_resource_action(services, node_id, action, request, *, capabili
                 raise PermissionDeniedError("This connection does not allow that resource action")
             if request.confirm:
                 raise PermissionDeniedError("Agents cannot supply desktop confirmation")
-        context = NodeResourceContext(node_id, services.resources.node_storage_path(node_id), Event(),
+        cancelled = Event()
+        current = services._require_run_manager().current_context
+        operation_id = current.run_id if capability is not None and current is not None else 'resource:' + uuid4().hex
+        def open_execution(*, workspace, home):
+            if cancelled.is_set():
+                raise ResourceValidationError("Resource action was cancelled")
+            return services.open_runtime_execution(node_id, operation_id, workspace=workspace, home=home)
+        context = NodeResourceContext(node_id, services.resources.node_storage_path(node_id), cancelled,
             actor_id=capability.agent_id if capability else None, confirmed=request.confirm,
             state=services.card_state.bind(node_id),
             resolve_secret=resource_secret_resolver(services, node),
-            resolve_model=resource_model_resolver(services, node))
-        task = asyncio.create_task(asyncio.to_thread(operation.handler, context, request.arguments))
+            resolve_model=resource_model_resolver(services, node), open_execution=open_execution,
+            execution_configuration=lambda:services.runtime_execution_configuration(node_id))
+        async def invoke():
+            if inspect.iscoroutinefunction(operation.handler):
+                return await operation.handler(context, request.arguments)
+            value = await asyncio.to_thread(operation.handler, context, request.arguments)
+            return await value if inspect.isawaitable(value) else value
+        task = asyncio.create_task(invoke())
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError:

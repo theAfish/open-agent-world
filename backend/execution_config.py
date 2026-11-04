@@ -174,6 +174,24 @@ def effective_variables(services, sandbox_id, environment_id=None):
 def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, target_id=None, *, folder_mounts=None):
     shared = shared_environment(services)
     _, chains = _effective_variable_steps(services, sandbox_id, environment_id, shared)
+    environment, secrets = _resolve_environment_chains(services, chains, shared, folder_mounts=folder_mounts)
+    if target_id:
+        target_env, _ = resolve_execution_configuration(services, None, target_id)
+        environment.update(target_env)
+    validate_command_environment(environment)
+    return environment, secrets
+
+
+def runtime_environment_defaults(services):
+    """Share operator-approved tool variables, never the hosting process environment."""
+    shared = shared_environment(services)
+    chains = [[(name,value,'shared','shared')] for name,value in shared.variables.items()] if shared else []
+    environment, secrets = _resolve_environment_chains(services, chains, shared)
+    validate_command_environment(environment)
+    return environment, secrets
+
+
+def _resolve_environment_chains(services, chains, shared, *, folder_mounts=None):
     environment, secrets = {}, []
     for chain in chains:
         name = chain[-1][0]
@@ -201,10 +219,6 @@ def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, tar
                 secrets.append(text)
             steps.append(environment_step(value, text))
         environment[name] = steps if structured else steps[0]["value"]
-    if target_id:
-        target_env, _ = resolve_execution_configuration(services, None, target_id)
-        environment.update(target_env)
-    validate_command_environment(environment)
     return environment, tuple(secrets)
 
 

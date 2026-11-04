@@ -99,7 +99,11 @@ def test_profile_assignment_overrides_ecs_without_affecting_other_profiles(tmp_p
         monkeypatch.delenv(key, raising=False)
     captured = []
     monkeypatch.setattr(hosted, 'registry_factory', lambda remote: captured.append(remote))
-    monkeypatch.setattr(hosted, 'approved_plugins', lambda root: object())
+    def approved(root, *, pack_settings):
+        assert root == pack_settings.data_root
+        assert pack_settings.tenant_scope.world_id in (profile, other)
+        return object()
+    monkeypatch.setattr(hosted, 'approved_plugins', approved)
     monkeypatch.setattr(hosted, 'create_services', lambda *a, **k: SimpleNamespace(world=SimpleNamespace(list_cards=lambda: [])))
     for identifier in (profile, other):
         settings = replace(Settings.for_data_root(tmp_path / identifier / 'data'), tenant_scope=hosted_scope(str(uuid4()), 'canvas', identifier))
