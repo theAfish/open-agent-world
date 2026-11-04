@@ -224,6 +224,7 @@ export function SettingsPanel() {
             <h3>{t("Global environment variables")}</h3>
             <p className="settings-description">{t("Applies to all Sandboxes on their next command. Local values take priority.")}</p>
             <EnvironmentVariablesEditor rows={environmentRows} onChange={rows => { setEnvironmentRows(rows); setSandboxSaved(false); }} disabled={!loaded || busy}
+              existingVariables={Object.fromEntries(Object.keys(sandbox.environment_variables ?? {}).map(name => [name.toUpperCase(), "global"]))}
               secrets={environmentSecrets} bindings={sandbox.secret_bindings ?? {}} onSecretsChange={setEnvironmentSecrets} />
           </section>
         </div>}

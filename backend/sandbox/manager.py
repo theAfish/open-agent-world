@@ -351,7 +351,7 @@ class SandboxManager(SandboxBackend):
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,
-                      invocation_env: Mapping[str, str] | None = None,
+                      invocation_env: Mapping[str, object] | None = None,
                       runtime_mount: RuntimeMount | None = None,
                       python_environment: str = "auto", on_command_start=None,
                       folder_mounts: Sequence[FolderMount] = ()) -> CommandResult:

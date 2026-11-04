@@ -13,6 +13,7 @@ import * as registry from './registry';
 import { useConversationView } from '../state/conversationView';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import type { PluginViewProps } from './sdk';
+import { WorkspaceAccess } from '../workspace/WorkspaceAccess';
 
 afterEach(() => { cleanup(); useLegionWorkspace.getState().close(); useNodeSurfaceStore.setState({ drafts: {} }); vi.restoreAllMocks(); });
 const card: WorldCard = { id: "extension-card", type: "example.agent", name: "Extension", status: "idle",
@@ -36,6 +37,43 @@ function install(pluginId: string, frontend: { settings?: string } = {}) {
   }] } });
   return updateCard;
 }
+
+it.each(['core.environment', 'core.sandbox'])('binds human credential configuration to a %s card without storing secrets in UI state', async trait => {
+  const update = install('test.credentials', { settings: 'view' });
+  const catalog = useWorldStore.getState().catalog;
+  useWorldStore.setState({ catalog: { ...catalog, node_types: catalog.node_types.map(item => ({ ...item, traits: [trait] })) } });
+  let props!: PluginViewProps;
+  vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => { props = value; return <p>Credentials</p>; }) as ReturnType<typeof registry.pluginView>);
+  const status = vi.spyOn(worldApi, 'getCredentialBindings').mockResolvedValue({ token: false });
+  const bind = vi.spyOn(worldApi, 'bindCredential').mockResolvedValue({ configured: true });
+  render(<PluginSurface card={card} slot="settings" level="inspector" />);
+  await screen.findByText('Credentials');
+  const credentials = props.host.credentials!;
+  expect(await credentials.status()).toEqual({ token: false });
+  expect(status).toHaveBeenCalledWith(card.id);
+  await credentials.set('token', 'private-value', 7);
+  expect(bind).toHaveBeenCalledWith(card.id, 'token', 'private-value', 7);
+  await credentials.set('token', null, 7);
+  expect(bind).toHaveBeenLastCalledWith(card.id, 'token', null, 7);
+  const conflict = new Error('Environment changed; reload before saving');
+  bind.mockRejectedValueOnce(conflict);
+  await expect(credentials.set('token', 'replacement', 6)).rejects.toBe(conflict);
+  expect(update).not.toHaveBeenCalled();
+  expect(props.host.draft!.get()).toBeUndefined();
+});
+
+it.each([false, true])('omits credential configuration for an ordinary card or deployed workspace (deployed=%s)', async deployed => {
+  install('test.credentials', { settings: 'view' });
+  if (deployed) {
+    const catalog = useWorldStore.getState().catalog;
+    useWorldStore.setState({ catalog: { ...catalog, node_types: catalog.node_types.map(item => ({ ...item, traits: ['core.environment'] })) } });
+  }
+  let props!: PluginViewProps;
+  vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => { props = value; return <p>Viewer</p>; }) as ReturnType<typeof registry.pluginView>);
+  render(<WorkspaceAccess.Provider value={{ deployed, permissions: {} }}><PluginSurface card={card} slot="settings" level="inspector" /></WorkspaceAccess.Provider>);
+  await screen.findByText('Viewer');
+  expect(props.host.credentials).toBeUndefined();
+});
 
 it("loads the actual local plugin entry and saves through the scoped host SDK", async () => {
   const update = install("openai.codex", { settings: "settings" });
@@ -65,6 +103,25 @@ it("uses the host view when no override is declared", () => {
   expect(screen.getByText("Host schema")).toBeTruthy();
 });
 
+it('keeps a loaded time instrument mounted when a deck refresh returns equivalent catalog definitions', async () => {
+  const { Timepiece } = await import('../../../plugins/time/frontend');
+  install('tools.time');
+  const counter = { ...card, type: 'tools.time.counter' };
+  const definition = useWorldStore.getState().catalog.node_types[0];
+  useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: [{ ...definition, id: counter.type, frontend: { preview: 'timepiece' } }] } });
+  vi.spyOn(registry, 'pluginView').mockReturnValue(Timepiece as unknown as ReturnType<typeof registry.pluginView>);
+  const read = vi.spyOn(worldApi, 'nodeDocumentAction').mockResolvedValue({ value: {
+    time_zone: 'Asia/Shanghai', offset_minutes: 480, offset_ms: 0, selected_date: '', duration_ms: 300000,
+    elapsed_ms: 0, started_at_ms: null, updated_at_ms: 0, count: 42, laps: [],
+  }, revision: 1, summary: {} });
+  render(<PluginSurface card={counter} slot="preview" level="preview" />);
+  const count = await screen.findByLabelText('Current count');
+  expect(count.textContent).toBe('42');
+  act(() => useWorldStore.setState({ catalog: structuredClone(useWorldStore.getState().catalog) }));
+  expect(count.isConnected).toBe(true);
+  expect(read).toHaveBeenCalledTimes(1);
+});
+
 it("isolates a missing module without mounting a misleading fallback", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   install("example.missing", { settings: "view" });
@@ -89,7 +146,7 @@ it("renders a plugin resource icon without a vendor mapping", () => {
   expect(icon.style.width).toBe("var(--catalog-icon-size, 25px)");
 });
 
-it('omits persistent state and persistence controls for a stateless plugin', async () => {
+it('updates SDK persistence controls when the catalog changes a plugin state policy', async () => {
   install('test.viewer', { settings: 'view' });
   const definition = useWorldStore.getState().catalog.node_types[0];
   useWorldStore.setState({ cards: [card], catalog: { ...TEST_CATALOG, node_types: [{ ...definition, state: { mode: 'none' } }] } });
@@ -97,6 +154,13 @@ it('omits persistent state and persistence controls for a stateless plugin', asy
   vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => { props = value; return <p>Viewer</p>; }) as ReturnType<typeof registry.pluginView>);
   render(<PluginSurface card={card} slot="settings" level="inspector" />);
   await screen.findByText('Viewer');
+  expect(props.host.state).toBeUndefined();
+  expect(props.host.setDataPersistence).toBeUndefined();
+  act(() => useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: [{ ...definition,
+    state: { mode: 'scoped', supportedScopes: ['shared', 'session'], defaultScope: 'shared', userConfigurable: true } }] } }));
+  expect(props.host.state).toBeDefined();
+  expect(props.host.setDataPersistence).toBeTypeOf('function');
+  act(() => useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: [{ ...definition, state: { mode: 'none' } }] } }));
   expect(props.host.state).toBeUndefined();
   expect(props.host.setDataPersistence).toBeUndefined();
 });

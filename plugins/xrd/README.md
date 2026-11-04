@@ -77,13 +77,51 @@ Configuration records path, SHA256, file size, modification time, record count
 and database date. Missing or changed files require reconfiguration. Paths are
 local to the machine running OAW, including after sharing a card template.
 
+For hosted workers, the operator sets `OAW_XRD_LIBRARY_CATALOG` to a read-only
+JSON file mapping stable library IDs to labels and absolute `.sq` paths, for example:
+
+```json
+{"cod": {"label": "COD", "path": "/srv/reference-libraries/cod.sq"}}
+```
+
+The slot form then lists deployed libraries and sends only `library_id` and `slot`.
+The backend resolves the ID from that catalog and rejects browser-supplied paths.
+Keep all four QualX files together and make both the catalog and library directory
+unwritable by workers. An unreadable or invalid configured catalog blocks mounting.
+Without this operator setting, local installations retain the path form.
+
+Confirming the same slot and path reuses its existing mount when file size and
+modification time are unchanged. It does not recount records or hash the library
+again. New or changed files are inspected in a background thread outside the graph
+mutation lock; the host checks the document revision again before saving.
+
+Click an occupied slot and choose **卸载此槽位** to remove its mount. Other slots
+and candidate structures are preserved. Removing the final slot clears the
+legacy primary-library fields too, so it cannot remain as an invisible search
+input. Library files remain available in the deployed catalog for remounting.
+
+Toolkit libraries with `source_cards` and `card_id_map` retain their PDF card IDs,
+per-card source kind, and source label. Numeric QualX engine IDs are not COD IDs;
+these cards do not expose COD links or trigger COD structure downloads.
+
 Library intensities are scaled to a maximum of 100 per entry before thresholding.
 The single-candidate score is the geometric mean of matched reference-intensity
 coverage and matched experimental-peak-prominence coverage, multiplied by
 `1 - mean_abs_delta / (2 * tolerance)`. This is a heuristic ranking, not a
 probability, validated phase identification, phase fraction, or multi-phase fit.
-Matching remains one-to-one within the configured angular tolerance. No automatic
-zero-shift search is performed. Invalid peak arrays are counted and their IDs
+`cell_scale_percent` sets a bounded isotropic cell-length search (default ±2%,
+maximum ±5%; 0 disables it). All peaks of a candidate share one scale `s`:
+`d_aligned = s * d_original`, with angles recomputed using Bragg's law. A coarse
+search shortlists scales, then unique peak assignments refine the shared scale in
+sin(theta) space. Non-unit scaling requires at least three distinct matched peaks.
+Matching remains one-to-one within the configured residual angular tolerance.
+Results and scientific context preserve original peaks, raw residuals, the scale,
+unscaled score and match count, and whether the scale reached its allowed limit.
+The plotted peaks use the aligned positions; source cards and CIFs are unchanged.
+QualX only supplies its original prefiltered candidates: scale alignment cannot
+recover a card that the engine excluded. Use native traversal for full recall
+under the configured scale search. No automatic zero-shift search is performed.
+Invalid peak arrays are counted and their IDs
 (up to 50) recorded. In full-library mode, plot residuals are relative to the
 currently selected candidate; the stored residual list is for the leading one.
 The top candidate is not automatically accepted or attached to a CIF.

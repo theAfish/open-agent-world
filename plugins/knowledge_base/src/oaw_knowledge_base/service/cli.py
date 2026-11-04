@@ -8,7 +8,7 @@ the CLI, the HTTP service, MCP and the OAW card all execute the same code. Two m
 * **Against a service** (``--service URL`` or ``KB_SERVICE_URL``): post the same
   arguments over HTTP.
 
-``kb project``, ``kb records extract`` and ``kb insights extract`` are what
+``kb project`` and ``kb records extract`` are what
 make the whole loop testable with no OAW: each builds the same prompt OAW's host bridge
 builds, calls an OpenAI-compatible endpoint named by the environment, and saves the
 answer. Model credentials stay in the operator's shell and never enter the store or
@@ -351,16 +351,10 @@ def cmd_graph(args, backend):
     return 0
 
 
-def _insight_scope(args):
-    scope = {"schema_ids": args.schema or [], "all_groups": not args.group,
-             "schema_kind": args.schema_kind}
-    if args.group:
-        scope["group_id"] = args.group
-    return scope
-
-
 def cmd_insights(args, backend):
-    """``kb insights`` — list, show, stats, extract, publish, unpublish, delete."""
+    """``kb insights`` — list, show, publish, unpublish, delete. Proposing insights is a
+    connected agent's work (``insight_prompt`` then ``insight_save``, e.g. through
+    ``kb call`` or MCP); a person reviews them here."""
     operation = args.operation
     if operation == "list":
         arguments = {"operation": "list", "limit": args.limit, "all_groups": not args.group,
@@ -376,32 +370,12 @@ def cmd_insights(args, backend):
             raise CliError("Pass the insight id to show")
         show(backend.call("insights", {"operation": "get", "insight_id": args.insight_ids[0]}))
         return 0
-    if operation == "stats":
-        show(backend.call("insights", {"operation": "stats", **_insight_scope(args)}))
-        return 0
-    if operation == "extract":
-        return _extract_insights(args, backend)
     if not args.insight_ids:
         raise CliError(f"Pass at least one insight id to {operation}")
     # Publishing is a deliberate act: confirmed here, and over HTTP it needs the
     # separate admin token the service only has when someone sets KB_ADMIN_TOKEN.
     show(backend.call("insight_review", {"operation": operation, "insight_ids": args.insight_ids},
                       confirm=operation == "publish"))
-    return 0
-
-
-def _extract_insights(args, backend):
-    from .. import insight_prompt
-
-    scope = _insight_scope(args)
-    prompt, table = _paged(backend, "insight_prompt", scope)
-    answer = _complete(insight_prompt.build_messages(prompt, table=table), **_model_options(args))
-    insights = insight_prompt.parse_insights(answer)
-    if args.dry_run:
-        show({"insights": insights})
-        return 0
-    show(backend.call("insight_save", {**scope, "insights": insights,
-                                       "replace_drafts": args.replace}))
     return 0
 
 
@@ -656,18 +630,15 @@ def build_parser():
     graph.add_argument("--limit", type=int, default=200)
     graph.set_defaults(layer="experiment")
     scope(graph)
-    insights = add("insights", cmd_insights, "Build insights from published experimental JSON records")
-    insights.add_argument("operation", choices=("list", "show", "stats", "extract", "publish", "unpublish", "delete"))
+    insights = add("insights", cmd_insights, "Review the insights proposed over published experimental JSON records")
+    insights.add_argument("operation", choices=("list", "show", "publish", "unpublish", "delete"))
     insights.add_argument("insight_ids", nargs="*")
     insights.add_argument("--schema", action="append")
-    insights.set_defaults(schema_kind="experiment")
     insights.add_argument("--query")
     insights.add_argument("--kind", choices=("anomaly", "rule", "trend", "correlation", "threshold", "note"))
     insights.add_argument("--status", choices=("draft", "published"))
     insights.add_argument("--limit", type=int, default=50)
-    insights.add_argument("--replace", action="store_true")
     scope(insights)
-    model_flags(insights, dry_run=True)
     generic = add("call", cmd_call, "Call an operation using a JSON request file")
     generic.add_argument("operation")
     generic.add_argument("--file")

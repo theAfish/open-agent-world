@@ -33,10 +33,25 @@ def test_all_search_cifs_are_cached_in_rank_order_with_failures_isolated(tmp_pat
         finally:active-=1
     monkeypatch.setattr(structures,'prepare_cod_structure',fetch)
     ids=[str(1000000+i) for i in range(1,7)]
-    candidates=[{'node_id':'lib:'+cod,'filename':cod,'metadata':{'library_node_id':'lib','reference_code':cod},'score':.5,'peaks':[]} for cod in ids]
+    candidates=[{'node_id':'lib:'+cod,'filename':cod,'metadata':{'library_node_id':'lib','reference_code':cod,'url':f'https://www.crystallography.net/cod/{cod}.html'},'score':.5,'peaks':[]} for cod in ids]
     asyncio.run(search_frames(tmp_path,{'candidates':candidates}))
     frames=read_frames(tmp_path)['frames']
     assert sorted(calls)==ids and maximum<=4
     assert [f['label'] for f in frames]==ids
     assert frames[2]['error']=='missing CIF' and 'cif' not in frames[2]
     assert all('cif' in f for i,f in enumerate(frames) if i!=2)
+
+
+def test_pdf_card_frames_never_fetch_a_cod_structure(tmp_path, monkeypatch):
+    snapshot=[{'node_id':'lib','value':{'kind':'library'}}, {'node_id':'exp','value':{'kind':'pattern','points':[[10,1],[20,2]]}}]
+    (tmp_path/'input-snapshot.json').write_text(json.dumps(snapshot),encoding='utf-8')
+    calls=[]
+    async def forbidden(*args,**kwargs):
+        calls.append(True)
+        raise AssertionError('A PDF card cannot be fetched as a COD structure')
+    monkeypatch.setattr(structures,'prepare_cod_structure',forbidden)
+    candidate={'node_id':'lib:340688','filename':'PDF#34-0688 · Li7PS6','metadata':{
+        'library_node_id':'lib','reference_code':'PDF#34-0688','engine_reference_id':'340688','structure_available':'false'},'score':.5,'peaks':[]}
+    asyncio.run(search_frames(tmp_path,{'candidates':[candidate]}))
+    frame=read_frames(tmp_path)['frames'][0]
+    assert 'cif' not in frame and frame['error'] is None and calls==[]

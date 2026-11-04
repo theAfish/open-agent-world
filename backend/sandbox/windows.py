@@ -323,7 +323,7 @@ class WindowsSandboxBackend(SandboxBackend):
         *,
         timeout_seconds: float | None = None,
         env: Any = None,
-        invocation_env: Mapping[str, str] | None = None,
+        invocation_env: Mapping[str, object] | None = None,
         runtime_mount: RuntimeMount | None = None,
         folder_mounts=(),
         execution_policy: Mapping[str, Any] | None = None,

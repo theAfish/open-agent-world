@@ -4,6 +4,7 @@ import autoprefixer from "autoprefixer";
 import { fileURLToPath, URL } from "node:url";
 import { localControlPlaneProxy, localManagementProxy } from "./server/control-plane.mjs";
 import { sourcePackArtifacts } from "./server/source-packs.mjs";
+import { reactFlowTouchInput } from './server/react-flow-touch.mjs';
 
 const backendHttpUrl = process.env.OAW_DEV_BACKEND_HTTP_URL ?? "http://127.0.0.1:8000";
 const backendWsUrl = process.env.OAW_DEV_BACKEND_WS_URL ?? "ws://127.0.0.1:8000";
@@ -15,7 +16,7 @@ export default defineConfig(({ mode }) => ({
     dedupe: ["react", "react-dom"],
     alias: [{ find: "@oaw/plugin-api", replacement: fileURLToPath(new URL("./src/plugins/sdk.ts", import.meta.url)) }],
   },
-  plugins: [localControlPlaneProxy(), ...(mode === "test" ? [] : [sourcePackArtifacts()]), react()],
+  plugins: [reactFlowTouchInput(), localControlPlaneProxy(), ...(mode === "test" ? [] : [sourcePackArtifacts()]), react()],
   server: { proxy: { "/api": localManagementProxy(backendHttpUrl), "/auth": { target: backendHttpUrl }, "/ws": localManagementProxy(backendWsUrl, true) } },
   test: { setupFiles: ["./src/test/setup.ts"] },
 }));

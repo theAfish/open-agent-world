@@ -98,8 +98,8 @@ kb jobs --job JOB_ID --watch
 kb records extract --bundle BUNDLE_ID
 kb records list --schema SCHEMA_ID
 kb records publish RECORD_ID
-kb insights stats --schema SCHEMA_ID
-kb insights extract --schema SCHEMA_ID
+kb call insight_prompt --file scope.json   # an Agent's work; see agent-contract.md
+kb insights list --status draft
 kb insights publish INSIGHT_ID
 kb graph
 ```
@@ -108,7 +108,9 @@ kb graph
 ID). `upload.json` supplies `bundle_id`, `filename`, `media_type` and
 `content_base64`. Schema files contain `name`, `definition` and `system_prompt`.
 Records and insights support inspection, explicit publication and unpublication.
-Use `--project PROJECT_ID` to scope listings and analysis. Insights cite records;
+Insights are proposed by an Agent through `insight_prompt` and `insight_save` (over
+MCP or `kb call`); the CLI makes no model call for them and computes no statistics.
+Use `--project PROJECT_ID` to scope listings. Insights cite records;
 records cite the original files.
 
 ## HTTP and MCP

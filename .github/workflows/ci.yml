@@ -139,11 +139,20 @@ jobs:
       - name: Install UI acceptance browsers
         working-directory: frontend
         run: npx --no-install playwright install --with-deps chromium webkit
-      - name: Pack the public SDK and build external Greeter
+      - name: Pack the public SDK
+        id: pack-sdk
         run: |
           mkdir -p .outputs
-          npm pack ./frontend/pack-sdk --pack-destination .outputs
-          backend/.venv/bin/python scripts/build-external-greeter.py
+          npm pack ./frontend/pack-sdk --pack-destination .outputs --json > .outputs/pack-sdk.json
+          node --input-type=module <<'JS'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const [sdk] = JSON.parse(readFileSync('.outputs/pack-sdk.json', 'utf8'));
+          appendFileSync(process.env.GITHUB_OUTPUT, `path=.outputs/${sdk.filename}\nversion=${sdk.version}\n`);
+          JS
+      - name: Build external Greeter with the packaged SDK
+        env:
+          OAW_PACK_SDK: ${{ steps.pack-sdk.outputs.path }}
+        run: backend/.venv/bin/python scripts/build-external-greeter.py --sdk "$OAW_PACK_SDK"
       - name: Install external Pack and verify cards and assets after restart
         working-directory: frontend
         env:
@@ -152,14 +161,15 @@ jobs:
       - name: Upload the versioned public Pack SDK
         uses: actions/upload-artifact@v4
         with:
-          name: oaw-plugin-api-1.0.0-${{ github.sha }}
-          path: .outputs/oaw-plugin-api-1.0.0.tgz
+          name: oaw-plugin-api-${{ steps.pack-sdk.outputs.version }}-${{ github.sha }}
+          path: ${{ steps.pack-sdk.outputs.path }}
           if-no-files-found: error
       - name: Build and install an external declarative Pack
         env:
           PLAYWRIGHT_CHANNEL: chromium
+          OAW_PACK_SDK: ${{ steps.pack-sdk.outputs.path }}
         run: |
-          backend/.venv/bin/python scripts/build-external-notes.py
+          backend/.venv/bin/python scripts/build-external-notes.py --sdk "$OAW_PACK_SDK"
           node frontend/scripts/run-pack-e2e.mjs --declarative
       - name: Run deployment acceptance against production frontend
         working-directory: frontend

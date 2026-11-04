@@ -15,6 +15,10 @@ def test_research_assistant_reads_connected_database_without_expanding_its_scope
     knowledge_id = formation["node_ids"]["knowledge"]
     assert any(edge["source"] == agent_id and edge["target"] == knowledge_id
                and edge["relationship"] == "knowledge.base.research" for edge in formation["edges"])
+    # Insight extraction computes in a Sandbox the assistant may execute in.
+    sandbox_id = formation["node_ids"]["sandbox"]
+    assert any(edge["source"] == agent_id and edge["target"] == sandbox_id
+               and edge["relationship"] == "execute" for edge in formation["edges"])
 
     database = create_node(client, "data.sqlite", name="Measured samples")
     private_database = create_node(client, "data.sqlite", name="Unconnected samples")

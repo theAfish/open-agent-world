@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import PurePath
 from dataclasses import fields
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
@@ -113,6 +114,8 @@ class AgentRunRequest(BaseModel):
     task_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
     parent_run_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
     detached: bool = False
+    # Run in a new agent context instead of the Agent's shared default history.
+    fresh_context: bool = False
 
     @model_validator(mode="after")
     def validate_lineage(self) -> "AgentRunRequest":
@@ -190,18 +193,21 @@ async def run_agent(
     request: AgentRunRequest,
     services: ApplicationServices = Depends(get_services),
 ) -> dict[str, object]:
+    # The prefix keeps it from ever naming a real conversation session.
+    context_id = f"isolated:{uuid4()}" if request.fresh_context else None
     if (
         request.task_id is None
         and request.parent_run_id is None
         and not request.detached
     ):
-        return await services.run_agent(agent_id, request.prompt)
+        return await services.run_agent(agent_id, request.prompt, context_id=context_id)
     run = await services._require_run_manager().start_run(
         agent_id,
         request.prompt,
         task_id=request.task_id,
         parent_run_id=request.parent_run_id,
         detached=request.detached,
+        context_id=context_id,
     )
     return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 

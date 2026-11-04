@@ -1,6 +1,7 @@
 import { memo, useRef, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { t, useLocale } from '../i18n';
+import { CardMoveGrip } from './CardMoveGrip';
 import { useWorldStore } from '../state/worldStore';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { ConnectionDropSurface } from './ConnectionDropSurface';
@@ -16,6 +17,8 @@ import { FaceArtwork } from '../factory/FaceArtwork';
 import type { PrintedDesign } from '../factory/types';
 import { faceStudio } from '../factory/faceDesign';
 import { WorldCardPrint } from './WorldCardPrint';
+import { hasContentSurface } from './ContentSurfaceControls';
+import { cardBoundaryShape } from '../edges/nodeGeometry';
 
 /** Card model projection: no plugin bodies, editors, file requests or workspaces. */
 export const CardLODView = memo(function CardLODView({ data, selected, type, isConnectable, width, height }: NodeProps<CanvasNode>) {
@@ -23,20 +26,24 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
   const card = data.card;
   const definition = useWorldStore(s => s.catalog.node_types.find(d => d.id === card.type));
   const level = data.surfaceLevel;
+  const boundaryShape = cardBoundaryShape(card, level, useWorldStore.getState().catalog);
   const container = type === 'container';
   const pointer = useRef<{ x: number; y: number; moved: boolean }>();
-  const mid = data.renderLOD === 'mid';
+  const contentPreview = level === 'preview' && definition?.presentation?.states.length === 1 && hasContentSurface(definition);
+  const mid = data.renderLOD === 'mid' && !contentPreview;
   const workspace = level === 'workspace' || level === 'inspector';
   const authoredSlot = level === 'node' ? 'preview' : level === 'inspector' ? 'body' : level;
   const authoring = definition?.frontend?.[authoredSlot] === 'oaw.authoring-card' ? definition.authoring : undefined;
   const design = authoring ?? (definition?.traits.includes('ui.factory-card.v1') ? card.config as unknown as PrintedDesign : undefined);
   const surface = design && (authoring ? faceStudio(design.face) : design.face.studio)?.modes[level];
-  const lighting = useCardFinish(!workspace && !container && !surface ? card.finish : 'normal', 'thumbnail');
-  return <article className={`world-card node-surface card-finish-surface card-lod-view world-card--${card.type} is-${level} ${surface ? 'factory-custom-surface' : ''} ${selected ? 'is-selected' : ''} ${container ? 'container-frame' : ''}`}
-    style={{ '--card-kind': definition?.color, borderRadius: NODE_SURFACE_RADIUS[level] } as CSSProperties}
+  const lighting = useCardFinish(!workspace && !container && !surface && !contentPreview ? card.finish : 'normal', 'thumbnail');
+  return <>{container && !card.ephemeral && <CardMoveGrip />}<article className={`world-card node-surface card-finish-surface card-lod-view world-card--${card.type} is-${level} ${surface ? 'factory-custom-surface' : ''} ${selected ? 'is-selected' : ''} ${container ? 'container-frame' : ''}`}
+    style={{ '--card-kind': definition?.color, borderRadius: boundaryShape === 'ellipse' ? '50%' : NODE_SURFACE_RADIUS[level] } as CSSProperties}
     data-card-id={card.id} data-card-type={card.type} data-surface-level={level}
+    data-card-shape={boundaryShape}
+    data-content-surface={contentPreview || undefined}
     data-finish={normalizeCardFinish(card.finish)}
-    data-card-print={!workspace && !container && !surface ? 'collectible' : undefined}
+    data-card-print={!workspace && !container && !surface && !contentPreview ? 'collectible' : undefined}
     data-card-expanded={level === 'workspace' || level === 'inspector' ? 'true' : 'false'}
     data-render-lod={data.renderLOD} aria-label={`${t(definition?.label ?? card.type)} ${card.name}`}
     {...lighting}
@@ -49,7 +56,7 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
       if ((event.target as Element).closest('.react-flow__handle, button, input, textarea, select, a, [contenteditable="true"]')) return;
       if (!container && (level === 'node' || level === 'preview')) useNodeSurfaceStore.getState().openPrimary(card.id);
     }}>
-    {!workspace && !container && !surface && <WorldCardPrint />}
+    {!workspace && !container && !surface && !contentPreview && <WorldCardPrint />}
     {isConnectable && !container && <ConnectionDropSurface nodeId={card.id} />}
     {isConnectable && ([Position.Top, Position.Right, Position.Bottom, Position.Left] as const).map(side =>
       <Handle key={side} id={`boundary-${side}`} type="source" position={side}
@@ -68,6 +75,6 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
       {(workspace || container) && <CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />}
     </header>
     {mid && level !== 'node' && !container && <CardStaticPreview card={card} definition={definition} workspace={workspace} width={width} height={height} />}
-    {!workspace && !container && <CardFinishLayer finish={card.finish} quality="thumbnail" />}</>}
-  </article>;
+    {!workspace && !container && !contentPreview && <CardFinishLayer finish={card.finish} quality="thumbnail" />}</>}
+  </article></>;
 });

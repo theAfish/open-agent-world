@@ -7,12 +7,40 @@ editable, revisioned node documents. Connect them to an Agent, or equip them
 using the existing equipment controls. Access grants permission to select a
 resource for explicit invocation; this Agent connection never injects configuration automatically. A separate `environment.default` connection from a Profile to a Sandbox establishes its live shared default, as described in [Sandbox configuration](sandbox-workspace.md).
 
-An Environment Profile (`environment`) contains a `variables` object. Each value
-is either an ordinary string or an object containing only `secret_ref`:
+An Environment Profile (`environment`) contains a `variables` object. Values
+can be ordinary strings, secret references, or authorized file/folder references:
 
 ```json
 {"variables":{"DEMO_REGION":"local-test","API_TOKEN":{"secret_ref":"service-token"}}}
 ```
+
+The editor detects existing names in the Sandbox runtime and saved configuration,
+and shows their source without reading host environment variables or secret values.
+Choose **Replace**, **Append**, or **Prepend**. New ordinary variables default to
+setting a value. `PATH` defaults to **Append** and supports append/prepend only,
+preserving the runtime's base search path. For text `PATH` values, enter absolute
+directories in the Sandbox, one per line; the runtime uses `;` on Windows and `:`
+on Linux/WSL/macOS. Empty entries and relative paths are rejected. Choose **Path**
+to authorize a host folder and have its accessible runtime path inserted instead.
+Adding a text path grants no filesystem access. Prepending a directory changes
+which same-named command is found first; managed interpreter setup remains runtime-owned.
+
+Operations are stored alongside the value or reference:
+
+```json
+{"variables":{"PATH":{"value":"/workspace/bin\n/opt/tools","operation":"append"},"FLAGS":{"value":"--verbose","operation":"append","separator":" "},"MODELS":{"path_ref":"models","operation":"prepend","separator":":"}}}
+```
+
+Ordinary append/prepend values support an explicit separator, defaulting to direct
+concatenation. `PATH` always uses the runtime's automatic separator. Operations
+compose in order from global defaults, through the selected/linked profile, to
+Sandbox-local configuration. Replacement discards lower-layer values; append and
+prepend retain them. An absent base value simply becomes the supplied value,
+without an extra separator. Values are literal: `$PATH`, `${PATH}`, and `%PATH%`
+are not expanded. Configuration stores the operation rather than a snapshot of
+the current environment, so later base changes apply to the next command.
+All changes affect only Sandbox commands and their children; system/user environment
+settings and the backend process environment are unchanged.
 
 In the editor, choose **Secret**, enter the credential directly, and save.
 The editor generates the reference and saves configuration and encrypted bindings
@@ -68,7 +96,11 @@ Sandbox backends receive the validated command-only `invocation_env` mapping,
 alongside the existing argv/runtime-mount contract. The original `env` parameter
 retains its narrow backend allowlist. An implementation must inject the new
 mapping only into the isolated command and its children, or explicitly reject
-it. Backends explicitly opt in with `supports_invocation_environment=True`; the
+it. Plain replacement values remain strings; composed values are ordered lists
+of `{value, operation, separator}` steps, resolved against the isolated runtime's
+base environment by `apply_invocation_environment`. Folder mounts identify the
+corresponding step when a variable combines several authorized paths.
+Backends explicitly opt in with `supports_invocation_environment=True`; the
 default rejects configuration selection. It must never ignore unsupported configuration. Existing implementations
 use the same validation in Windows AppContainer, native Linux, and WSL2.
 
@@ -103,7 +135,9 @@ UTF-8 bytes; larger configurations fail explicitly. A profile cannot set the
 target carrier or any `OAW_`/`SANDBOX_` variable. Loader variables such as `LD_*`
 and `DYLD_*`, startup variables such as `BASH_ENV`, `ENV`, `PYTHONPATH`,
 `NODE_OPTIONS`, and host-controlled paths, homes, temp directories, Windows
-startup settings and WSL interop settings are reserved. The authoritative list
+startup settings and WSL interop settings are reserved. `PATH` has the explicit
+append/prepend exception described above; complete replacement remains rejected.
+Operations do not bypass the other reserved-name rules. The authoritative list
 is in `backend/sandbox/environment.py`; unsafe overrides are rejected, including
 case variants. Conflicts with backend `env` overrides also fail. Safe locale and
 encoding controls retain their existing support.

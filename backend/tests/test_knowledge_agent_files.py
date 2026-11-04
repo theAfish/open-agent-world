@@ -192,6 +192,10 @@ def test_read_connection_cannot_import_write_schemas_build_index_or_forge_ingest
                 if edge.target == r.keys["knowledge"])
     response = r.client.patch(f"/api/edges/{edge.id}", json={"relationship": "knowledge.base.read"})
     assert response.status_code == 200, response.text
+    # Built-in Spaces are seeded when the KB opens. Denied writes must preserve
+    # their full definitions and revisions, without creating any user Spaces.
+    initial_spaces = r.call("knowledge_spaces")["spaces"]
+    assert all(space["builtin"] for space in initial_spaces)
     for name, args in [
         ("knowledge_import_artifact", {}),
         ("knowledge_schema_manage", {"operation": "create"}),
@@ -218,7 +222,7 @@ def test_read_connection_cannot_import_write_schemas_build_index_or_forge_ingest
     assert response.status_code == 422 and "source access is verified" in response.text
     assert r.call("knowledge_overview")["counts"]["sources"] == 0
     assert r.call("knowledge_schemas")["schemas"] == []
-    assert r.call("knowledge_spaces")["spaces"] == []
+    assert r.call("knowledge_spaces")["spaces"] == initial_spaces
 
 
 def test_waiting_for_conversion_releases_graph_lock_and_observes_revocation(research, monkeypatch):

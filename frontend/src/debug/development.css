@@ -1,4 +1,8 @@
 .development-badge { position: fixed; left: 18px; top: 18px; z-index: 1000; display: flex; align-items: center; gap: 6px; border: 1px solid #a98042; border-radius: 7px; background: #26221bf0; color: #efcd91; padding: 6px 9px; font: 11px monospace; cursor: pointer; }
+:root[data-layout="compact"] .development-badge { left: calc(var(--screen-left) + 52px); top: calc(var(--app-top) + var(--screen-top)); width: 44px; height: 44px; padding: 0; justify-content: center; border: 0; border-radius: 12px; background: var(--surface-solid); color: var(--ink-faint); box-shadow: 0 2px 8px var(--shadow); }
+:root[data-layout="compact"] .development-badge svg { width: 17px; height: 17px; }
+:root[data-layout="compact"] .development-badge span { display: none; }
+:root[data-layout="compact"] body:has(.top-bar[data-mobile-menu="true"]) .development-badge { visibility: hidden; }
 .development-backdrop { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 24px; background: #0e11177a; backdrop-filter: blur(5px); }
 .development-panel { width: min(720px, 100%); max-height: calc(100vh - 48px); overflow: auto; background: #f9f8f5; color: #24272b; border: 1px solid #dad7cf; border-radius: 18px; box-shadow: 0 24px 100px #0005; padding: 24px; font-size: 13px; line-height: 1.5; }
 .development-panel header { display: flex; justify-content: space-between; align-items: center; }

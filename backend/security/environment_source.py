@@ -3,12 +3,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Mapping, Protocol
 
 if TYPE_CHECKING:
+    from backend.environment_values import EnvironmentValue
     from backend.execution_config import SecretRequirement
 
 
 @dataclass(frozen=True)
 class ExecutionEnvironmentSnapshot:
-    variables: Mapping[str, "str | SecretRequirement"]
+    variables: Mapping[str, "str | EnvironmentValue | SecretRequirement"]
     secrets: Mapping[str, str] = field(repr=False)
 
 

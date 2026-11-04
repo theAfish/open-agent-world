@@ -219,6 +219,37 @@
 .knowledge-record-label { display: flex; flex-direction: column; gap: 1px; }
 .knowledge-record-label small { color: var(--ink-soft); font-size: 11px; line-height: 1.4; }
 .knowledge-record-detail .knowledge-reading-toolbar h4 { margin: 0; flex: 1; }
+.knowledge-property-builder { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.knowledge-property-builder .knowledge-formbar { justify-content: space-between; }
+.knowledge-segmented { display: inline-flex; gap: 0; }
+.knowledge-segmented > button { border-radius: 0; }
+.knowledge-segmented > button:first-child { border-radius: 6px 0 0 6px; }
+.knowledge-segmented > button:last-child { border-radius: 0 6px 6px 0; }
+.knowledge-segmented > button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.knowledge-property-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.knowledge-property { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.knowledge-property-main { display: grid; grid-template-columns: minmax(120px, 1.4fr) minmax(110px, 1fr) minmax(80px, 0.8fr) auto auto; gap: 6px; align-items: start; }
+.knowledge-property-main.is-custom { grid-template-columns: minmax(110px, 1fr) 2fr auto auto; align-items: center; }
+.knowledge-record-entry { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.knowledge-record-entry > legend { padding: 0 4px; }
+.knowledge-property-main input:not([type="checkbox"]), .knowledge-property-main select, .knowledge-draft { min-width: 0; width: 100%; }
+.knowledge-draft { display: flex; flex-direction: column; gap: 2px; }
+.knowledge-draft input[aria-invalid="true"] { border-color: var(--danger, #c0392b); }
+.knowledge-check { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; white-space: nowrap; }
+.knowledge-property-actions { display: inline-flex; gap: 2px; }
+.knowledge-property-builder textarea { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
+.knowledge-draft-chat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.knowledge-draft-chat > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; }
+.knowledge-draft-body { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+.knowledge-draft-turns, .knowledge-draft-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.knowledge-draft-turns { max-height: 260px; overflow-y: auto; }
+.knowledge-draft-turns > li { padding: 6px 8px; border-radius: 8px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.knowledge-draft-turns > li.is-user { background: var(--accent-soft); align-self: flex-end; max-width: 90%; }
+.knowledge-draft-turns > li.is-assistant { border: 1px solid var(--line); }
+.knowledge-draft-card { display: flex; align-items: center; gap: 8px; margin-top: 6px; white-space: normal; }
+.knowledge-draft-files > li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.knowledge-draft-files > li.is-failed small { color: var(--danger, #c0392b); }
+.knowledge-draft-files > li > button { padding: 1px 4px; }
 .knowledge-status-published { background: color-mix(in srgb, var(--success, #2e8b57) 15%, transparent); }
 .knowledge-status-draft { background: color-mix(in srgb, var(--warning) 15%, transparent); }
 .knowledge-runlog .knowledge-events code { margin-right: 4px; }
@@ -342,12 +373,7 @@
 .knowledge-compact { max-height: 220px; }
 .knowledge-static-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 12px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 .knowledge-static-row small { color: var(--ink-soft); white-space: nowrap; }
-.knowledge-stats { max-height: 320px; }
-.knowledge-stats tbody th { font-weight: 500; }
 .knowledge-graphside .knowledge-insights .knowledge-kind { margin-right: 4px; }
-.knowledge-stats-block { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
-.knowledge-stats-block > h4, .knowledge-stats-block > h5 { margin: 0; }
-.knowledge-stats-block > h5 { font-size: 12px; color: var(--ink-soft); font-weight: 500; }
 .knowledge-insight-head .knowledge-chip-schema { font-size: 10px; color: var(--ink-soft); padding: 1px 6px; border-radius: 999px; background: var(--surface-raised); border: 1px solid var(--line); }
 
 /* Literature → Knowledge: the draft form, the element tables and their source chips. */

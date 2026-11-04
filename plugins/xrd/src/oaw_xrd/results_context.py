@@ -96,7 +96,7 @@ def read_results_context(root, owner_id):
         'unexplained_peak_count': len(result.get('unexplained_peaks', [])),
         'candidate_count': len(result.get('candidates', [])),
         'candidates': [_pick(candidate, ('node_id', 'filename', 'metadata', 'score',
-                        'matched_reference_count', 'reference_count', 'mean_abs_delta',
+                        'matched_reference_count', 'reference_count', 'mean_abs_delta', 'alignment',
                         'fit_input_status')) for candidate in result.get('candidates', [])[:30]],
     }
     for stage in ('preopt', 'fit'):

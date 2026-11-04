@@ -21,6 +21,7 @@ describe.each(["sandbox", "environment"])("%s secret save", (type) => {
     } });
     vi.spyOn(worldApi, "getNodeDocument").mockResolvedValue({ value: { variables: {} }, revision: 3, summary: {} });
     vi.spyOn(worldApi, "getCredentialBindings").mockResolvedValue({});
+    vi.spyOn(worldApi, "getEnvironmentContext").mockResolvedValue({ PATH: "runtime", FLAGS: "global" });
     vi.spyOn(worldApi, "sandboxWorkspace").mockResolvedValue({ profile_id: null, ready: true, variables: [] });
     vi.spyOn(worldApi, "saveEnvironment").mockImplementation(async (_id, value) => ({ value, revision: 4, summary: {} }));
   });
@@ -70,6 +71,32 @@ describe.each(["sandbox", "environment"])("%s secret save", (type) => {
     fireEvent.click(screen.getByRole("button", { name: saveLabel }));
     await screen.findByText("Enter a secret for API_TOKEN, or remove the unused variable.");
     expect(worldApi.saveEnvironment).not.toHaveBeenCalled();
+  });
+
+  it("detects PATH and inherited names and saves operations instead of a captured environment", async () => {
+    if (type === "sandbox") vi.mocked(worldApi.sandboxWorkspace).mockResolvedValue({ profile_id: null, ready: true,
+      variables: [{ name: "FLAGS", value: "global", source: "global", owner: "global", secret: false, configured: true }] });
+    await openEditor();
+    fireEvent.click(screen.getByRole("button", { name: "Add variable" }));
+    fireEvent.change(screen.getByLabelText("Environment variable 1 name"), { target: { value: "path" } });
+    const operation = screen.getByLabelText("Environment variable 1 operation") as HTMLSelectElement;
+    expect(operation.value).toBe("append");
+    expect([...operation.options].map(option => option.value)).toEqual(["append", "prepend"]);
+    await screen.findByText("Already exists in Sandbox runtime.");
+    fireEvent.change(screen.getByLabelText("Environment variable 1 value"), { target: { value: "/workspace/bin\n/opt/tools" } });
+    fireEvent.change(operation, { target: { value: "prepend" } });
+    await screen.findByText(/Prepended directories take priority/);
+    fireEvent.click(screen.getByRole("button", { name: "Add variable" }));
+    fireEvent.change(screen.getByLabelText("Environment variable 2 name"), { target: { value: "flags" } });
+    await screen.findByText("Already exists in Global defaults.");
+    fireEvent.change(screen.getByLabelText("Environment variable 2 operation"), { target: { value: "append" } });
+    fireEvent.change(screen.getByLabelText("Environment variable 2 separator"), { target: { value: " " } });
+    fireEvent.change(screen.getByLabelText("Environment variable 2 value"), { target: { value: "--verbose" } });
+    fireEvent.click(screen.getByRole("button", { name: saveLabel }));
+    await waitFor(() => expect(worldApi.saveEnvironment).toHaveBeenCalledWith(card.id, { variables: {
+      path: { value: "/workspace/bin\n/opt/tools", operation: "prepend" },
+      flags: { value: "--verbose", operation: "append", separator: " " },
+    } }, {}, 3));
   });
 
   it.each(["folder", "file"] as const)("loads and saves a host %s through the shared editor without putting authority in the document", async (kind) => {

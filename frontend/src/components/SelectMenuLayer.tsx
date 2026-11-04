@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { overlayHost } from './Modal';
+import { useInteractionEnvironment } from '../interaction/environment';
 
 interface Item { index: number; label: string; disabled: boolean; group?: string; hidden: boolean }
 interface Menu {
@@ -18,16 +19,19 @@ function itemsFor(select: HTMLSelectElement): Item[] {
   });
 }
 
-function position(select: HTMLSelectElement) {
+function position(select: HTMLSelectElement, height: number, top: number) {
   const box = select.getBoundingClientRect();
   const width = Math.min(Math.max(box.width, 160), window.innerWidth - 16);
-  const below = window.innerHeight - box.bottom - 12;
-  const above = box.top - 12;
+  const topLimit = top + 8, bottomLimit = top + (height || window.innerHeight) - 8;
+  const downTop = Math.min(bottomLimit, Math.max(box.bottom + 4, topLimit));
+  const upBottom = Math.min(bottomLimit, Math.max(box.top - 4, topLimit));
+  const below = Math.max(0, bottomLimit - downTop);
+  const above = Math.max(0, upBottom - topLimit);
   const upwards = below < 180 && above > below;
-  const maxHeight = Math.max(40, Math.min(260, upwards ? above : below));
+  const maxHeight = Math.min(260, upwards ? above : below);
   return {
     left: Math.max(8, Math.min(box.left, window.innerWidth - width - 8)),
-    top: upwards ? box.top - 4 : box.bottom + 4,
+    top: upwards ? upBottom : downTop,
     width, maxHeight,
     transform: upwards ? 'translateY(-100%)' : undefined,
   };
@@ -37,6 +41,8 @@ function position(select: HTMLSelectElement) {
  * Delegation also covers dynamically loaded plugin controls without changing their API.
  */
 export function SelectMenuLayer() {
+  const viewportHeight = useInteractionEnvironment(state => state.height);
+  const viewportTop = useInteractionEnvironment(state => state.top);
   const id = useId();
   const [menu, setMenu] = useState<Menu | null>(null);
   const current = useRef<Menu | null>(null);
@@ -204,7 +210,7 @@ export function SelectMenuLayer() {
 
   if (!menu) return null;
   return createPortal(<div ref={popup} id={id} role="listbox" aria-label={menu.label}
-    className="ui-select-menu nodrag nopan nowheel" style={{ ...position(menu.select), fontSize: menu.fontSize }}>
+    className="ui-select-menu nodrag nopan nowheel" style={{ ...position(menu.select, viewportHeight, viewportTop), fontSize: menu.fontSize }}>
     {menu.items.filter(item => !item.hidden).map((item, index, items) => <div key={item.index}>
       {item.group && item.group !== items[index - 1]?.group && <div className="ui-select-group">{item.group}</div>}
       <div id={`${id}-${item.index}`} role="option" aria-selected={item.index === menu.select.selectedIndex}

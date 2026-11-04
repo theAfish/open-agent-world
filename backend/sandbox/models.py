@@ -44,6 +44,7 @@ class FolderMount:
     source: str
     access: ResourceAccess = ResourceAccess.READ_ONLY
     kind: str = "folder"
+    environment_index: int | None = None
 
     def __post_init__(self):
         import re
@@ -52,14 +53,17 @@ class FolderMount:
         object.__setattr__(self, "access", ResourceAccess(self.access))
         if self.kind not in ("folder", "file"):
             raise ValueError("Invalid environment path type")
+        if self.environment_index is not None and (type(self.environment_index) is not int or self.environment_index < 0):
+            raise ValueError("Invalid folder environment operation index")
 
     @property
     def linux_path(self):
+        name = self.name.upper() if self.environment_index is None else f"{self.name.upper()}/operation-{self.environment_index}"
         if self.kind == "file":
             # Keep the original filename/extension for model loaders.
             source = PureWindowsPath(self.source) if PureWindowsPath(self.source).drive else Path(self.source)
-            return f"/sandbox/files/{self.name.upper()}/{source.name}"
-        return f"/sandbox/folders/{self.name.upper()}"
+            return f"/sandbox/files/{name}/{source.name}"
+        return f"/sandbox/folders/{name}"
 
 
 class SandboxEventType(_StringEnum):

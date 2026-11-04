@@ -6,6 +6,7 @@ import { clampSurfaceSize, type SurfaceSizes, type SurfaceSize } from "./surface
 export { NODE_SURFACE_SIZE, surfaceSizeFor, type SurfaceSize, type SurfaceSizes } from "./surfaceGeometry";
 import type { CardType, LegionNodePresentation, NodePresentation, NodeSurfaceLevel, PluginCatalog, WorldCard } from "../types/world";
 import { cardStudio, type FaceCard } from '../factory/faceDesign';
+import { useInteractionEnvironment } from '../interaction/environment';
 
 export type { NodeSurfaceLevel } from "../types/world";
 
@@ -72,6 +73,12 @@ function baseLevel(presentation: NodePresentation, preferred?: NodeSurfaceLevel)
     ?? SURFACE_ORDER.find(level => presentation.states.includes(level))!;
 }
 
+/** Phone browsing keeps the saved desktop window geometry intact. */
+export function effectiveCanvasSurfaceLevel(card: WorldCard, savedLevel: NodeSurfaceLevel, compact: boolean, catalog: PluginCatalog, preferred?: NodeSurfaceLevel): NodeSurfaceLevel {
+  return compact && (savedLevel === 'inspector' || savedLevel === 'workspace')
+    ? baseLevel(cardPresentation(card, catalog), preferred) : savedLevel;
+}
+
 /** Closing moves to the next smaller supported surface, restoring the chosen compact form. */
 export function collapsedSurface(presentation: NodePresentation, current: NodeSurfaceLevel, base?: NodeSurfaceLevel): NodeSurfaceLevel {
   if (current === "workspace" && presentation.states.includes("inspector")) return "inspector";
@@ -81,6 +88,9 @@ export function collapsedSurface(presentation: NodePresentation, current: NodeSu
 }
 
 interface NodeSurfaceState {
+  /** Screen-space details are transient and never change saved canvas presentation. */
+  mobileSurface?: { nodeId: string; level: 'inspector' | 'workspace' };
+  closeMobileSurface: () => void;
   capturePresentation: (cards: readonly WorldCard[], catalog: PluginCatalog) => Record<string, LegionNodePresentation>;
   restorePresentation: (cards: readonly WorldCard[], catalog: PluginCatalog, presentation?: Record<string, LegionNodePresentation>) => void;
   presentations: Record<string, NodePresentation>;
@@ -123,6 +133,9 @@ function openSurface(state: NodeSurfaceState, id: string, requested?: NodeSurfac
   const presentation = presentationFor(state, id);
   const current = surfaceLevelForNode(id, state.surfaceLevels);
   const level = supportedLevel(presentation, requested ?? presentation.open);
+  if (useInteractionEnvironment.getState().compact && (level === 'inspector' || level === 'workspace')) {
+    return { mobileSurface: { nodeId: id, level } };
+  }
   return {
     baseLevels: { ...state.baseLevels, [id]: baseLevel(presentation,
       current === "node" || current === "preview" ? current : state.baseLevels[id]) },
@@ -139,6 +152,8 @@ function closeSurfaces(state: NodeSurfaceState, target: NodeSurfaceLevel, nodeId
 }
 
 export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get) => ({
+  mobileSurface: undefined,
+  closeMobileSurface: () => set({ mobileSurface: undefined }),
   capturePresentation: (cards, catalog) => {
     const state = get();
     return Object.fromEntries(cards.map(card => [card.id, {
@@ -183,7 +198,8 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
       surfaceLevels[card.id] = supportedLevel(presentation, surfaceLevels[card.id] ?? initial);
       baseLevels[card.id] = baseLevel(presentation, baseLevels[card.id] ?? surfaceLevels[card.id]);
     }
-    return { presentations, surfaceLevels, baseLevels, surfaceSizes };
+    return { presentations, surfaceLevels, baseLevels, surfaceSizes,
+      mobileSurface: state.mobileSurface && cards.some(card => card.id === state.mobileSurface!.nodeId) ? state.mobileSurface : undefined };
   }),
   surfaceSizes: {},
   resizeSurface: (nodeId, level, size) => set(state => {
@@ -230,13 +246,15 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
   selectSurface: (nodeId, level) => set(state => openSurface(state, nodeId, level)),
   openInspector: (nodeId) => set(state => openSurface(state, nodeId, "inspector")),
 
-  closeInspector: (nodeId) => set(state => closeSurfaces(state, "inspector", nodeId)),
+  closeInspector: (nodeId) => set(state => state.mobileSurface?.level === 'inspector' && (!nodeId || state.mobileSurface.nodeId === nodeId)
+    ? { mobileSurface: undefined } : closeSurfaces(state, "inspector", nodeId)),
 
   dismiss: (nodeId) => set((state) => {
     if (!nodeId) {
       return {
         surfaceLevels: { ...state.surfaceLevels, ...Object.fromEntries(Object.entries(state.presentations).map(([id, p]) => [id, baseLevel(p, state.baseLevels[id])])) },
         connectingNodeId: undefined,
+        mobileSurface: undefined,
       };
     }
     return {
@@ -244,13 +262,16 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
         ? { ...state.surfaceLevels, [nodeId]: baseLevel(state.presentations[nodeId], state.baseLevels[nodeId]) }
         : Object.fromEntries(Object.entries(state.surfaceLevels).filter(([id]) => id !== nodeId)),
       connectingNodeId: state.connectingNodeId === nodeId ? undefined : state.connectingNodeId,
+      mobileSurface: state.mobileSurface?.nodeId === nodeId ? undefined : state.mobileSurface,
     };
   }),
 
   openWorkspace: (nodeId) => set(state => openSurface(state, nodeId, "workspace")),
 
-  closeWorkspace: (nodeId) => set(state => closeSurfaces(state, "workspace", nodeId)),
+  closeWorkspace: (nodeId) => set(state => state.mobileSurface?.level === 'workspace' && (!nodeId || state.mobileSurface.nodeId === nodeId)
+    ? { mobileSurface: undefined } : closeSurfaces(state, "workspace", nodeId)),
   closeExpanded: () => set(state => {
+    if (state.mobileSurface) return { mobileSurface: undefined };
     const target = (["workspace", "inspector"] as const).find(level =>
       Object.entries(state.surfaceLevels).some(([id, current]) => state.presentations[id] && current === level
         && collapsedSurface(presentationFor(state, id), current, state.baseLevels[id]) !== current));

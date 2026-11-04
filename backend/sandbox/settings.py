@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from backend.persistence.database import Database
 from .manager import SandboxManager
 from .registry import SandboxRuntimeRegistry
-from backend.execution_config import SecretRequirement
-from .environment import validate_command_environment
+from backend.execution_config import SecretRequirement, validate_profile_variables
+from backend.environment_values import EnvironmentValue
 from backend.security.execution_credentials import GlobalExecutionCredentialStore
 from backend.errors import ResourceValidationError
 from backend.security.execution_folders import FolderRequirement, FileRequirement, PathRequirement, FolderBinding, GlobalExecutionFolderStore
@@ -21,15 +21,12 @@ class SandboxSettings(BaseModel):
 
     workspace_root: str | None = Field(default=None, max_length=4096)
     runtime: str = Field(default="auto", min_length=1, max_length=200)
-    environment_variables: dict[str, StrictStr | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement] = Field(default_factory=dict)
+    environment_variables: dict[str, StrictStr | EnvironmentValue | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement] = Field(default_factory=dict)
 
     @field_validator("environment_variables")
     @classmethod
-    def validate_environment(cls, value: dict[str, str | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement]) -> dict[str, str | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement]:
-        validate_command_environment(
-            {key: item if isinstance(item, str) else "" for key, item in value.items()},
-            allow_target=False, allow_host=True,
-        )
+    def validate_environment(cls, value):
+        validate_profile_variables(value, allow_host=True)
         return value
 
     @field_validator("workspace_root", "runtime")

@@ -67,11 +67,20 @@ export function PluginSurface({ card, slot, level, children }: {
   const executionSources = useExecutionSources(card.id, access.deployed && !(card.id in access.permissions));
   const covered = useLegionWorkspace(s => Boolean(s.activeId));
   const definition = useWorldStore((s) => s.catalog.node_types.find((d) => d.id === card.type));
+  // Catalog refreshes replace definitions. Rebind the host only when its capabilities change,
+  // so views depending on SDK callbacks keep their loaded content and local edits.
+  const stateless = definition?.state?.mode === 'none';
+  const credentialConfiguration = Boolean(definition?.traits.some(trait => trait === 'core.environment' || trait === 'core.sandbox'));
+  const configurablePersistence = Boolean(definition?.state?.mode === 'scoped' && definition.state.userConfigurable && definition.state.supportedScopes.length > 1);
   const runtime = useWorldStore((s) => definition ? s.catalog.frontend_modules?.[definition.plugin_id] : undefined);
   const updateCard = useWorldStore((s) => s.updateCard);
   const source = useWorldStore(s=>xrdCanvasSource(card,s.cards,s.edges));
   const viewCard = useMemo(()=>source?{...card,config:{...card.config,source_node_id:source}}:card,[card,source]);
   const host = useMemo<PluginViewProps["host"]>(() => ({
+    credentials: !access.deployed && credentialConfiguration ? {
+      status: () => worldApi.getCredentialBindings(card.id),
+      set: (reference, value, expectedRevision) => worldApi.bindCredential(card.id, reference, value, expectedRevision),
+    } : undefined,
     executionSources,
     workspace: inWorkspace && navigation ? { activate: view => navigation.activate({ ...view, card_id: view?.card_id ?? card.id }) } : undefined,
     dataSources: access.deployed ? undefined : {
@@ -103,13 +112,13 @@ export function PluginSurface({ card, slot, level, children }: {
         return useNodeSurfaceStore.subscribe((state, previous) => { if (state.drafts[key] !== previous.drafts[key]) listener(); });
       },
     },
-    state: (access.deployed && !(card.id in access.permissions)) || definition?.state?.mode === 'none' ? undefined : {
+    state: (access.deployed && !(card.id in access.permissions)) || stateless ? undefined : {
       get: () => worldApi.cardState(card.id, 'GET', undefined, undefined, sessionId ?? null),
       set: (value, revision) => worldApi.cardState(card.id, 'PUT', value, revision, sessionId ?? null),
       update: (value, revision) => worldApi.cardState(card.id, 'PATCH', value, revision, sessionId ?? null),
       delete: (revision) => worldApi.cardState(card.id, 'DELETE', undefined, revision, sessionId ?? null),
     },
-    setDataPersistence: !access.deployed && definition?.state?.mode === 'scoped' && definition.state.userConfigurable && definition.state.supportedScopes.length > 1
+    setDataPersistence: !access.deployed && configurablePersistence
       ? async value => { await updateCard(card.id, { state_scope: value }); } : undefined,
     deployment: access.plugin_access?.[card.id],
     ...multiphaseHost(source ?? card.id),
@@ -197,7 +206,7 @@ export function PluginSurface({ card, slot, level, children }: {
       useWorldStore.getState().selectCards([nodeId], { syncCanvas: true });
       useNodeSurfaceStore.getState().openWorkspace(nodeId);
     },
-    runAgent: (nodeId, prompt) => useWorldStore.getState().runAgent(nodeId, prompt),
+    runAgent: (nodeId, prompt, freshContext) => useWorldStore.getState().runAgent(nodeId, prompt, freshContext),
     onDocumentChange: subscribeToDocumentChanges,
     registerVisualCapture: (captureKind, capture) => registerPluginVisualCapture(card.id, captureKind, capture),
     delegationAction: (action, arguments_) => worldApi.nodeDelegationAction(card.id, action, arguments_, sessionId ?? null),
@@ -237,7 +246,7 @@ export function PluginSurface({ card, slot, level, children }: {
       state.selectCards([target.id], { syncCanvas: true });
     },
     clearOpenedFile: () => useOpenFiles.getState().clear(card.id),
-  }), [card.id, card.state_scope, source, updateCard, access, definition, sessionId, inWorkspace, navigation, executionSources]);
+  }), [card.id, card.state_scope, source, updateCard, access, stateless, configurablePersistence, credentialConfiguration, sessionId, inWorkspace, navigation, executionSources]);
   const reference = definition?.frontend?.[slot];
   if (covered && !inWorkspace && card.type.startsWith('xrd.')) return null;
   if (!reference || !definition) return <>{children}</>;

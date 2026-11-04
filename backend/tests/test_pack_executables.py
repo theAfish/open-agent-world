@@ -30,6 +30,27 @@ def fixture_spec(tmp_path, *, archive='raw', member=None):
     return ExecutableEnvironmentSpec.from_declaration('fixture', 'native', declaration, tmp_path), declaration
 
 
+def test_context_binds_portable_executable_without_reparsing_or_redeclaring_artifacts(tmp_path):
+    from open_agent_world.plugin_api import PluginContext
+    from backend.packs.spec import read_source_pack
+    from backend.tests.test_pack_spec import source
+    root = source(tmp_path)
+    _, declaration = fixture_spec(root)
+    pack = read_source_pack(root).model_copy(update={'environments': {'native': declaration}})
+    profile = tmp_path / 'profile'
+    environment = PluginContext(profile, root, pack).environment('native')
+    assert environment.spec == ExecutableEnvironmentSpec.from_declaration(pack.owner, 'native', declaration, root)
+    assert environment.status()['status'] == 'missing'
+    assert not profile.exists()
+    handle = environment.prepare()
+    with environment.lease(handle):
+        assert environment.read() == handle
+        assert environment.status()['status'] == 'ready'
+    Path(handle.executable).write_bytes(b'tampered')
+    with pytest.raises(RuntimeError, match='not ready'):
+        environment.read()
+
+
 @pytest.mark.parametrize('archive', ['raw', 'zip'])
 def test_real_portable_fixture_install_verify_and_tamper(tmp_path, archive):
     spec, _ = fixture_spec(tmp_path, archive=archive)

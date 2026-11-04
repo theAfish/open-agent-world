@@ -73,7 +73,7 @@ or render displays a local error instead of silently substituting another view.
 Views receive the current card, definition, surface level, and a card-scoped host
 adapter with `updateConfig` and `getAgentInfo`. Updates go through existing host
 actions and backend validation. The adapter also provides document reads/actions,
-transforms, file-viewer access, `openWorkspace(nodeId)`, `runAgent(nodeId, prompt)`
+transforms, file-viewer access, `openWorkspace(nodeId)`, `runAgent(nodeId, prompt, freshContext?)`
 and `onDocumentChange(listener)`. The latter observes future authoritative
 `node_document` mutations and returns an unsubscribe function; it must not be
 used as a replacement for a plugin's own initial document load. `SchemaFields` is
@@ -92,6 +92,30 @@ without rebuilding the host. React and the public SDK always use host instances.
 
 See [Codex](../../packs/codex/frontend/index.tsx) for a working SDK-based settings
 view and its package-owned icon.
+
+### Human credential configuration
+
+Plugin API 1.42 exposes `host.credentials` on Environment and Sandbox cards in
+the builder UI. It is absent from deployed Workspaces and other card types.
+Use it from explicit user actions; it is not an Agent tool or a grant.
+
+```tsx
+const credentials = host.credentials;
+if (!credentials) throw new Error('Credential configuration is unavailable');
+const configured = await credentials.status(); // { reference: boolean }, no plaintext
+const document = await host.readDocument();
+await credentials.set('ACCESS_KEY', enteredValue, document.revision);
+// Remove a binding with credentials.set('ACCESS_KEY', null, document.revision).
+```
+
+The reference must already be declared by the card's Environment Profile
+document. The backend checks the current document revision, reference ownership
+and edit permissions, and encrypts the binding through the existing store.
+Handle conflicts by reloading the document. Keep entered secrets only in local
+form state, clear them after save, and never copy them into card config, documents,
+`host.state`, drafts or logs. Status returns configured flags only; this interface
+provides no plaintext-read operation. Trusted backend handlers continue using
+their existing credential resolver.
 
 ### Composable workspace sections
 

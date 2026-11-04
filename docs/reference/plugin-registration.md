@@ -279,6 +279,10 @@ Legacy `surfaces` declarations remain supported: `node` is implicit, `preview`
 is the initial state when available, and opening prefers `inspector`, then
 `workspace`, then `preview`. An explicit `presentation` takes precedence;
 the catalog also derives the legacy `surfaces` flags from it for older clients.
+New plugins should declare `presentation` alone, without repeating `surfaces`.
+For `ui.content-surface.v1`, Plugin API 1.42 also accepts
+`content_controls="bottom"` (default `"side"`); the host owns its reserved edge,
+drag grip and actions. See [workspace design](../developers/workspace-design.md).
 The definition controls generic card surfaces; specialized container views still
 own their member layout. Frontend content uses the existing `preview`, `body`
 (inspector), and `workspace` slots.

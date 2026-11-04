@@ -38,7 +38,7 @@ from oaw_knowledge_base import artifact_import  # noqa: E402
 NODE_TYPE = "knowledge.base"
 # Raw upload bodies, broad management actions and publication remain desktop-only.
 # Research agents use reference-based imports and separate bounded preparation tools.
-DESKTOP_ONLY = {"project_import_preview", "settings",
+DESKTOP_ONLY = {"project_import_preview", "project_file_remove", "project_delete", "schema_sample", "settings",
                 "experiment_ingest", "experiment_bundle_manage", "experiment_review", "insight_review"}
 
 
@@ -268,19 +268,20 @@ def test_the_research_formation_deploys_wired_independent_bases(client):
         instances.append(response.json())
     first, second = instances
     a, b = first["node_ids"], second["node_ids"]
-    assert set(a) == {"group", "agent", "conversation", "knowledge"}
+    assert set(a) == {"group", "agent", "conversation", "knowledge", "sandbox"}
     assert set(a.values()).isdisjoint(b.values())
 
     nodes = {node["id"]: node for node in first["nodes"]}
     assert all(nodes[a[key]]["parent_id"] == a["group"] for key in a if key != "group")
     assert nodes[a["knowledge"]]["type"] == NODE_TYPE
     instruction = nodes[a["agent"]]["config"]["system_instruction"]
-    assert "knowledge_projection_save" in instruction and "knowledge_experiment_save" in instruction
-    assert "knowledge_insight_save" in instruction and "INSIGHT EXTRACTION REQUEST" in instruction
-    # The assistant prepares both workflows from conversation; publication remains human-only.
+    # The chat agent answers from the graph; extraction recipes come with the card's own requests.
+    assert "knowledge_graph" in instruction and "knowledge_projection_save" not in instruction
+    # Publication remains human-only; the Sandbox is where the assistant computes.
     assert {(edge["source"], edge["target"], edge["relationship"]) for edge in first["edges"]} == {
         (a["agent"], a["conversation"], "participate"),
-        (a["agent"], a["knowledge"], f"{NODE_TYPE}.research")}
+        (a["agent"], a["knowledge"], f"{NODE_TYPE}.research"),
+        (a["agent"], a["sandbox"], "execute")}
 
     provider = WorldAgentCapabilityProvider(client.app.state.services)
     tools = {tool.name for tool in client.portal.call(provider.list_tools, a["agent"])}

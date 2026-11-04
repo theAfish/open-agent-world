@@ -144,7 +144,8 @@ export function PipelineWorkflow({ card, host, definition, renderResult, renderP
   const [inputs, setInputs] = useState<Awaited<ReturnType<NonNullable<PluginViewProps['host']['getInputs']>>>>(); const [inputError, setInputError] = useState('');
   const queue = useRef(Promise.resolve()); const saveErrors = useRef<Record<string, string>>({});
   const pendingConfig = useRef<Record<string, unknown>>({});
-  const selectedMatch = useRef(''); const initialized = useRef(false); const lastStamp = useRef(''); const launchLock = useRef(false);
+  const selectedMatch = useRef(''); const initialized = useRef(false); const launchLock = useRef(false);
+  const navigated = useRef(false); const lastRunId = useRef(''); const followRun = useRef<string>();
   const stepId = useId(); const running = card.status === 'running' || card.status === 'waiting'; const busy = running || starting || multiphase.running;
   const configure = (patch: Record<string, unknown>) => {
     Object.assign(pendingConfig.current, patch);
@@ -165,7 +166,9 @@ export function PipelineWorkflow({ card, host, definition, renderResult, renderP
         const state = (details.workflow ?? {}) as Workflow;
         const last = details.last_run as { run_id?: string; id?: string; status?: string; workflow_stage?: Stage } | undefined;
         const active = state.active_stage ?? last?.workflow_stage ?? (card.config.workflow_stage as Stage) ?? 'search';
-        const stamp = JSON.stringify([last?.run_id ?? last?.id, last?.status, state.match_run_id, state.preopt?.run_id, state.preopt?.status, state.fit?.run_id, state.fit?.status, Boolean(next)]);
+        const runId = last?.run_id ?? last?.id ?? '';
+        const inFlight = ['running', 'waiting', 'starting'].includes(last?.status ?? '');
+        if (inFlight && followRun.current === undefined) followRun.current = '';
         setWorkflow(state); setLastStatus(last?.status ?? ''); setActiveStage(active); setProgress(details.progress as Progress | undefined); setArchive(String(details.archive ?? ''));
         if (next) {
           setResult(next);
@@ -176,9 +179,11 @@ export function PipelineWorkflow({ card, host, definition, renderResult, renderP
             setSelected((saved ?? next.candidates?.slice(0, 3).map(candidate => candidate.node_id) ?? []).filter(id => ids.has(id)).slice(0, 10)); selectedMatch.current = matchKey;
           }
         }
-        if (!initialized.current) { setStep(state.fit ? 3 : state.preopt ? 2 : next ? 1 : 0); initialized.current = true; }
-        else if (stamp !== lastStamp.current && last?.status && !['running', 'waiting'].includes(last.status)) setStep(stageStep(active));
-        lastStamp.current = stamp;
+        if (!initialized.current) { if (!navigated.current) setStep(state.fit ? 3 : state.preopt ? 2 : next ? 1 : 0); initialized.current = true; }
+        else if (followRun.current !== undefined && runId && runId !== followRun.current && last?.status && !inFlight) {
+          setStep(stageStep(active)); followRun.current = undefined;
+        }
+        lastRunId.current = runId;
       } catch (reason) { if (alive) setError(String(reason)); }
       finally { if (alive && (running || starting)) timer = setTimeout(load, 1000); }
     };
@@ -200,6 +205,7 @@ export function PipelineWorkflow({ card, host, definition, renderResult, renderP
   const start = async (stage: Stage) => {
     if (launchLock.current || running) return;
     launchLock.current = true; setStarting(true); setError(''); setActiveStage(stage); setProgress(undefined);
+    followRun.current = lastRunId.current;
     try {
       await queue.current;
       if (Object.values(saveErrors.current).some(Boolean) || Object.values(invalidRef.current).some(Boolean)) throw new Error('参数有误，请修正后重试');
@@ -210,13 +216,14 @@ export function PipelineWorkflow({ card, host, definition, renderResult, renderP
       await host.updateConfig({ workflow_stage: stage, ...(stage === 'search' ? {} : { workflow_match_run_id: matchId, selected_candidate_ids: stage === 'fit' ? eligible.map(candidate => candidate.candidate_id) : selected }), ...(stage === 'fit' ? { workflow_preopt_run_id: workflow.preopt!.run_id } : {}) });
       if (!host.runAnalysis) throw new Error('请刷新页面');
       await host.runAnalysis();
-    } catch (reason) { setError(String(reason)); } finally { launchLock.current = false; setStarting(false); }
+    } catch (reason) { followRun.current = undefined; setError(String(reason)); } finally { launchLock.current = false; setStarting(false); }
   };
   const fields = (items: { name: string; label: string; fallback: number; min: number; max: number; integer?: boolean }[]) => items.map(field => <StageNumber key={field.name} {...field} config={card.config} schema={definition.config_schema ?? {}} disabled={busy} save={configure} invalid={reportInvalid}/>);
   const done = [Boolean(result), Boolean(result), Boolean(workflow.preopt?.result), Boolean(workflow.fit?.result)];
   const multiphaseCandidates = result?.candidates?.map(candidate => candidate.node_id) ?? [];
-  const viewSingle = (next: number) => { multiphase.setEnabled(false); setStep(next); };
+  const viewSingle = (next: number) => { navigated.current = true; multiphase.setEnabled(false); setStep(next); };
   const viewMultiphase = (stage: 'search' | 'review') => {
+    navigated.current = true;
     multiphase.setEnabled(true); setMultiphaseStage(stage); setStep(1);
     setMultiphaseSelection(card.id, { lane: stage === 'review' ? 'pywpem' : 'agent', scope: stage, follow: true });
   };
@@ -238,27 +245,26 @@ export function PipelineWorkflow({ card, host, definition, renderResult, renderP
   return <section className={`xrd-panel xrd-match-ui xrd-pipeline nodrag nopan${multiphase.enabled ? ' is-multiphase' : ''}`} aria-busy={busy}>
     {multiphase.enabled && multiphase.running && <MultiphaseGlow running/>}
     <nav className="xrd-workflow-navigation" aria-label="检索步骤">
-      <div className="xrd-workflow-route" role="group" aria-label="检索流程">
+      <div className="xrd-workflow-route xrd-workflow-search" role="group" aria-label="检索流程">
         <span className="xrd-route-label">检索</span>
-        <div className="xrd-workflow-step"><button type="button" aria-label="01 参数设置" aria-current={!multiphase.enabled && step === 0 ? 'step' : undefined} aria-controls={stepId} disabled={busy} onClick={() => viewSingle(0)}>参数设置</button></div>
-        <div className="xrd-workflow-step"><button type="button" aria-label="02 匹配结果" aria-current={!multiphase.enabled && step === 1 ? 'step' : undefined} aria-controls={stepId} disabled={busy || !result} onClick={() => viewSingle(1)}>匹配结果</button><ActivityStatus active={(running || starting) && activeStage === 'search'} label="检索" status={done[1] ? 'completed' : activeStage === 'search' ? lastStatus : 'idle'}/></div>
+        <div className="xrd-workflow-step"><button type="button" aria-label="01 参数设置" aria-current={!multiphase.enabled && step === 0 ? 'step' : undefined} aria-controls={stepId} disabled={busy} onClick={() => viewSingle(0)}><span className="xrd-route-number" aria-hidden="true">01</span>参数设置</button></div>
+        <div className="xrd-workflow-step"><button type="button" aria-label="02 匹配结果" aria-current={!multiphase.enabled && step === 1 ? 'step' : undefined} aria-controls={stepId} disabled={busy || !result} onClick={() => viewSingle(1)}><span className="xrd-route-number" aria-hidden="true">02</span>匹配结果</button><ActivityStatus active={(running || starting) && activeStage === 'search'} label="检索" status={done[1] ? 'completed' : activeStage === 'search' ? lastStatus : 'idle'}/></div>
       </div>
       <div className="xrd-workflow-route" role="group" aria-label="单相流程">
         <span className="xrd-route-label">单相</span>
-        <div className="xrd-workflow-step"><button type="button" aria-label="03 结构预优化" aria-current={!multiphase.enabled && step === 2 ? 'step' : undefined} disabled={busy || !result || !matchId} onClick={() => viewSingle(2)}>结构预优化</button><ActivityStatus active={(running || starting) && activeStage === 'preopt'} label="结构预优化" status={done[2] ? 'completed' : activeStage === 'preopt' ? lastStatus : 'idle'}/></div>
-        <div className="xrd-workflow-step"><button type="button" aria-label="04 全谱拟合" aria-current={!multiphase.enabled && step === 3 ? 'step' : undefined} disabled={busy || !workflow.preopt} onClick={() => viewSingle(3)}>全谱拟合</button><ActivityStatus active={(running || starting) && activeStage === 'fit'} label="全谱拟合" status={done[3] ? 'completed' : activeStage === 'fit' ? lastStatus : 'idle'}/></div>
+        <div className="xrd-workflow-step"><button type="button" aria-label="03 结构预优化" aria-current={!multiphase.enabled && step === 2 ? 'step' : undefined} disabled={busy || !result || !matchId} onClick={() => viewSingle(2)}><span className="xrd-route-number" aria-hidden="true">03</span>结构预优化</button><ActivityStatus active={(running || starting) && activeStage === 'preopt'} label="结构预优化" status={done[2] ? 'completed' : activeStage === 'preopt' ? lastStatus : 'idle'}/></div>
+        <div className="xrd-workflow-step"><button type="button" aria-label="04 全谱拟合" aria-current={!multiphase.enabled && step === 3 ? 'step' : undefined} disabled={busy || !workflow.preopt} onClick={() => viewSingle(3)}><span className="xrd-route-number" aria-hidden="true">04</span>全谱拟合</button><ActivityStatus active={(running || starting) && activeStage === 'fit'} label="全谱拟合" status={done[3] ? 'completed' : activeStage === 'fit' ? lastStatus : 'idle'}/></div>
       </div>
       <div className="xrd-workflow-route" role="group" aria-label="多相流程">
         <span className="xrd-route-label">多相</span>
-        <div className="xrd-workflow-step"><button type="button" aria-label="03 组合筛选" aria-current={multiphase.enabled && multiphaseStage === 'search' ? 'step' : undefined} disabled={running || starting || !matchId || multiphaseCandidates.length < 2} onClick={() => viewMultiphase('search')}>组合筛选</button><ActivityStatus active={multiphase.running && !reviewRunning} label="组合筛选" status={searchDone || reviewStatus !== 'idle' ? 'completed' : multiphase.state.status}/></div>
-        <div className="xrd-workflow-step"><button type="button" aria-label="04 联合复核" aria-current={multiphase.enabled && multiphaseStage === 'review' ? 'step' : undefined} disabled={running || starting || !matchId || !multiphase.state.run_id} onClick={() => viewMultiphase('review')}>联合复核</button><ActivityStatus active={reviewRunning} label="联合复核" status={reviewStatus}/></div>
+        <div className="xrd-workflow-step"><button type="button" aria-label="03 组合筛选" aria-current={multiphase.enabled && multiphaseStage === 'search' ? 'step' : undefined} disabled={running || starting || !matchId || multiphaseCandidates.length < 2} onClick={() => viewMultiphase('search')}><span className="xrd-route-number" aria-hidden="true">03</span>组合筛选</button><ActivityStatus active={multiphase.running && !reviewRunning} label="组合筛选" status={searchDone || reviewStatus !== 'idle' ? 'completed' : multiphase.state.status}/></div>
+        <div className="xrd-workflow-step"><button type="button" aria-label="04 联合复核" aria-current={multiphase.enabled && multiphaseStage === 'review' ? 'step' : undefined} disabled={running || starting || !matchId || !multiphase.state.run_id} onClick={() => viewMultiphase('review')}><span className="xrd-route-number" aria-hidden="true">04</span>联合复核</button><ActivityStatus active={reviewRunning} label="联合复核" status={reviewStatus}/></div>
       </div>
     </nav>
     <div className="action-row xrd-workflow-actions">
       {!finalDiscussion && <RunHistory host={host}/>}
       {!finalDiscussion && result && host.openResultsConversation && <button type="button" className="xrd-results-discussion" aria-label="结果讨论" title={discussionPending ? '正在打开结果讨论…' : '结果讨论'} disabled={discussionPending} aria-busy={discussionPending} onClick={() => void openDiscussion()}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 1-8 8H5l-3 3v-7a8 8 0 0 1 8-12h2a8 8 0 0 1 8 8Z"/><path d="M7 10h8M7 14h5"/></svg></button>}
       <RunTimer stage={multiphase.enabled && multiphaseStage === "review" && multiphase.state.pywpem_review?.status === "running" ? multiphase.state.pywpem_review.progress?.stage ?? "联合复核" : undefined} timing={multiphase.enabled ? multiphase.state.timing?.[multiphaseStage] : stageTiming[step <= 1 ? "search" : step === 2 ? "preopt" : "fit"]}/>
-      {step === 1 && !multiphase.enabled && <span className="xrd-mode-hint">选择后续分支</span>}
       {!multiphase.enabled && step > 0 && <button type="button" disabled={busy} onClick={() => setStep(step - 1)} aria-label={`返回${steps[step - 1]}`} title={`返回${steps[step - 1]}`}><ActionIcon name="back"/></button>}
       {multiphase.enabled && <span className="xrd-multiphase-actions" ref={setMultiphaseActionContainer}/> }
       {finalDiscussion && <RunHistory host={host}/>}
@@ -266,10 +272,10 @@ export function PipelineWorkflow({ card, host, definition, renderResult, renderP
       {step === 1 && !multiphase.enabled && <MultiphaseButton enabled={multiphase.enabled} running={multiphase.running} disabled={busy || !matchId || multiphaseCandidates.length < 2} onClick={() => multiphase.enabled ? viewSingle(1) : viewMultiphase('search')}/>}
       {!multiphase.enabled && <>
       {running ? <button type="button" className="primary-button" aria-label={`停止${labels[activeStage]}`} title={`停止${labels[activeStage]}`} onClick={() => void host.stopAnalysis?.().catch(reason => setError(String(reason)))}><ActionIcon name="stop"/></button> : <>
-      {step === 0 && <button type="button" className="primary-button" disabled={busy || Boolean(missing || inputError || invalidMessage)} aria-label={result ? '重新检索' : '开始检索'} title={result ? '重新检索' : '开始检索'} onClick={() => void start('search')}><ActionIcon name={result ? 'restart' : 'play'}/></button>}
+      {step === 0 && <button type="button" className="primary-button xrd-primary-action" disabled={busy || Boolean(missing || inputError || invalidMessage)} aria-label={result ? '重新检索' : '开始检索'} onClick={() => void start('search')}><ActionIcon name={result ? 'restart' : 'play'}/><span>{result ? '重新检索' : '开始检索'}</span></button>}
       {step === 1 && <SinglePhaseButton disabled={busy || !selected.length || !matchId} onClick={() => setStep(2)}/>}
-      {step === 2 && <button type="button" className="primary-button" disabled={busy || !selected.length || !matchId || Boolean(invalidMessage)} aria-label={workflow.preopt?.status==='completed'?'重新预优化':'开始预优化'} title={workflow.preopt?.status==='completed'?'重新预优化':'开始预优化'} onClick={() => void start('preopt')}><ActionIcon name={workflow.preopt?.status==='completed'?'restart':'play'}/></button>}
-      {step === 3 && <button type="button" className="primary-button" disabled={busy || !eligible.length || selectionChanged || Boolean(invalidMessage)} aria-label={workflow.fit?.status==='completed'?'重新全谱拟合':'开始全谱拟合'} title={workflow.fit?.status==='completed'?'重新全谱拟合':'开始全谱拟合'} onClick={() => void start('fit')}><ActionIcon name={workflow.fit?.status==='completed'?'restart':'play'}/></button>}
+      {step === 2 && <button type="button" className="primary-button xrd-primary-action" disabled={busy || !selected.length || !matchId || Boolean(invalidMessage)} aria-label={workflow.preopt?.status==='completed'?'重新预优化':'开始预优化'} onClick={() => void start('preopt')}><ActionIcon name={workflow.preopt?.status==='completed'?'restart':'play'}/><span>{workflow.preopt?.status==='completed'?'重新预优化':'开始预优化'}</span></button>}
+      {step === 3 && <button type="button" className="primary-button xrd-primary-action" disabled={busy || !eligible.length || selectionChanged || Boolean(invalidMessage)} aria-label={workflow.fit?.status==='completed'?'重新全谱拟合':'开始全谱拟合'} onClick={() => void start('fit')}><ActionIcon name={workflow.fit?.status==='completed'?'restart':'play'}/><span>{workflow.fit?.status==='completed'?'重新全谱拟合':'开始全谱拟合'}</span></button>}
       </>}
       {step === 0 && <button type="button" disabled={busy || !result} aria-label="进入匹配结果" title="进入匹配结果" onClick={() => setStep(1)}><ActionIcon name="next"/></button>}
       {step >= 2 && <button type="button" disabled={busy || step === 3 || !eligible.length || selectionChanged} aria-label={step === 3 ? '已到流程末步' : '进入全谱拟合'} title={step === 3 ? '已到流程末步' : '进入全谱拟合'} onClick={() => setStep(3)}><ActionIcon name="next"/></button>}

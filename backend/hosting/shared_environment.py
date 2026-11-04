@@ -12,8 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from starlette.responses import JSONResponse
 
 from backend.errors import ResourceValidationError, RevisionConflictError
-from backend.execution_config import SecretRequirement
-from backend.sandbox.environment import validate_command_environment
+from backend.environment_values import EnvironmentValue
+from backend.execution_config import SecretRequirement, validate_profile_variables
+from backend.sandbox.environment import environment_step, validate_command_environment
 from backend.sandbox.models import SandboxValidationError
 from backend.security.environment_source import ExecutionEnvironmentSnapshot
 from backend.security.llm_settings import LlmSettingsStore, SecretStorageError
@@ -31,12 +32,12 @@ def environment_cipher(secret):
 class EnvironmentDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(default=0, ge=0, strict=True)
-    environment_variables: dict[str, StrictStr | SecretRequirement] = Field(default_factory=dict, max_length=100)
+    environment_variables: dict[str, StrictStr | EnvironmentValue | SecretRequirement] = Field(default_factory=dict, max_length=100)
 
     @field_validator("environment_variables")
     @classmethod
     def validate_variables(cls, values):
-        validate_command_environment({k: v if isinstance(v, str) else "" for k, v in values.items()}, allow_target=False)
+        validate_profile_variables(values)
         return values
 
 
@@ -102,7 +103,7 @@ class SharedEnvironmentStore:
                                            environment_variables=edit.environment_variables, encrypted_secrets=encrypted)
             values = self.decrypt(document)
             validate_command_environment({
-                name: value if isinstance(value, str) else values[value.secret_ref]
+                name: environment_step(value, values[value.secret_ref]) if isinstance(value, SecretRequirement) else environment_step(value)
                 for name, value in document.environment_variables.items()}, allow_target=False)
             db.execute("INSERT INTO application_settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json",
                        (SETTINGS_KEY, document.model_dump_json()))
@@ -181,7 +182,7 @@ class SharedEnvironmentSource:
             cipher = environment_cipher(self.config.secret)
             values = {ref: cipher.decrypt(value.encode()).decode() for ref, value in document.encrypted_secrets.items()}
             validate_command_environment({
-                name: value if isinstance(value, str) else values[value.secret_ref]
+                name: environment_step(value, values[value.secret_ref]) if isinstance(value, SecretRequirement) else environment_step(value)
                 for name, value in document.environment_variables.items()}, allow_target=False)
             return ExecutionEnvironmentSnapshot(document.environment_variables, values)
         except (httpx.HTTPError, ValueError, InvalidToken, SandboxValidationError):

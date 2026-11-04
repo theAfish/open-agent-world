@@ -12,7 +12,8 @@ import { FolderPathInput } from "../shell/FolderPathInput";
 import type { EnvironmentFolderBinding } from "../api/client";
 
 type EnvironmentVariableKind = "value" | "secret" | "path";
-export interface EnvironmentVariableRow { id: number; name: string; kind: EnvironmentVariableKind; value: string; folderPath?: string; access?: "read_only" | "read_write" }
+type EnvironmentOperation = "replace" | "append" | "prepend";
+export interface EnvironmentVariableRow { id: number; name: string; kind: EnvironmentVariableKind; value: string; folderPath?: string; access?: "read_only" | "read_write"; operation?: EnvironmentOperation; separator?: string }
 let environmentRowId = 0;
 const NO_SECRETS: Record<string, string> = {};
 const newEnvironmentVariable = (): EnvironmentVariableRow => ({ id: ++environmentRowId, name: "", kind: "value", value: "" });
@@ -33,18 +34,30 @@ export function environmentVariablesFromValue(value: unknown, folders: Record<st
   const variables = objectValue(root.variables ?? {}, "variables");
   return Object.entries(variables).map(([name, item]) => {
     const object = item && !Array.isArray(item) && typeof item === "object" ? item as Record<string, unknown> : undefined;
+    const operation = object?.operation;
+    if (operation !== undefined && !["replace", "append", "prepend"].includes(String(operation))) throw new Error(t("Invalid environment operation."));
+    if (object?.separator !== undefined && object.separator !== null && typeof object.separator !== "string") throw new Error(t("The separator must be text."));
+    const editing = { ...(operation !== undefined ? { operation: operation as EnvironmentOperation } : {}),
+      ...(typeof object?.separator === "string" ? { separator: object.separator } : {}) };
+    const operationKeys = ["operation", "separator"];
     const pathKind = typeof object?.path_ref === "string" ? "path" : typeof object?.folder_ref === "string" ? "folder" : typeof object?.file_ref === "string" ? "file" : undefined;
     if (pathKind) {
-      requireOnlyKeys(object!, [`${pathKind}_ref`], t("Path (file or folder)"));
+      requireOnlyKeys(object!, [`${pathKind}_ref`, ...operationKeys], t("Path (file or folder)"));
       const reference = String(object![`${pathKind}_ref`]);
       return { id: ++environmentRowId, name, kind: "path", value: reference,
-        folderPath: folders[reference]?.path ?? "", access: folders[reference]?.access ?? "read_only" };
+        folderPath: folders[reference]?.path ?? "", access: folders[reference]?.access ?? "read_only", ...editing };
     }
     const secret = item && !Array.isArray(item) && typeof item === "object" && typeof (item as Record<string, unknown>).secret_ref === "string";
-    if (typeof item !== "string" && !secret) throw new Error(t("Variable “{v0}” must be a text value or secret reference.", { v0: String(name) }));
-    if (secret) requireOnlyKeys(item as Record<string, unknown>, ["secret_ref"], t("Secret reference “{v0}”", { v0: String(name) }));
-    return { id: ++environmentRowId, name, kind: secret ? "secret" : "value", value: secret ? String((item as Record<string, unknown>).secret_ref) : String(item) };
+    const literal = typeof object?.value === "string";
+    if (typeof item !== "string" && !secret && !literal) throw new Error(t("Variable “{v0}” must be a text value or secret reference.", { v0: String(name) }));
+    if (secret) requireOnlyKeys(object!, ["secret_ref", ...operationKeys], t("Secret reference “{v0}”", { v0: String(name) }));
+    if (literal) requireOnlyKeys(object!, ["value", ...operationKeys], t("Value"));
+    return { id: ++environmentRowId, name, kind: secret ? "secret" : "value", value: secret ? String(object!.secret_ref) : literal ? String(object!.value) : String(item), ...editing };
   });
+}
+
+function rowOperation(row: EnvironmentVariableRow): EnvironmentOperation {
+  return row.operation ?? (row.name.trim().toUpperCase() === "PATH" ? "append" : "replace");
 }
 
 export function environmentVariablesToValue(rows: EnvironmentVariableRow[]): Record<string, unknown> {
@@ -56,7 +69,12 @@ export function environmentVariablesToValue(rows: EnvironmentVariableRow[]): Rec
     names.add(name.toUpperCase());
     const value = row.value.trim();
     if (row.kind === "secret" && !value) throw new Error(t("Give “{v0}” a secret reference name.", { v0: String(name) }));
-    return [name, row.kind === "path" ? { [`${row.kind}_ref`]: value } : row.kind === "secret" ? { secret_ref: value } : row.value];
+    const operation = rowOperation(row);
+    if (name.toUpperCase() === "PATH" && operation === "replace") throw new Error(t("PATH supports append or prepend to preserve the Sandbox's base paths."));
+    if (name.toUpperCase() === "PATH" && row.separator !== undefined) throw new Error(t("PATH uses the runtime's automatic separator."));
+    const item = row.kind === "path" ? { path_ref: value } : row.kind === "secret" ? { secret_ref: value } : { value: row.value };
+    return [name, operation === "replace" ? (row.kind === "value" ? row.value : item)
+      : { ...item, operation, ...(name.toUpperCase() !== "PATH" && row.separator !== undefined ? { separator: row.separator } : {}) }];
   }));
   return { variables };
 }
@@ -87,12 +105,27 @@ function EnvironmentPathInput({ value, onChange, disabled, label, access }: {
   </>;
 }
 
-export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, onSecretsChange, bindings, allowSecrets = true }: {
+export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, onSecretsChange, bindings, allowSecrets = true, ownerId, existingVariables }: {
   rows: EnvironmentVariableRow[]; onChange(rows: EnvironmentVariableRow[]): void; disabled: boolean;
   secrets: Record<string, string>; onSecretsChange(secrets: Record<string, string>): void; bindings: Record<string, boolean>;
   allowSecrets?: boolean;
+  ownerId?: string; existingVariables?: Record<string, string>;
 }) {
   useLocale();
+  const [context, setContext] = useState<Record<string, string>>({});
+  const [contextError, setContextError] = useState(false);
+  useEffect(() => {
+    if (!ownerId || disabled) return;
+    let active = true;
+    void worldApi.getEnvironmentContext(ownerId).then(value => {
+      if (active) { setContext(value); setContextError(false); }
+    }, () => { if (active) setContextError(true); });
+    return () => { active = false; };
+  }, [ownerId, disabled]);
+  const known: Record<string, string> = { PATH: "runtime",
+    ...Object.fromEntries(Object.entries(context).filter(([, source]) => !existingVariables || source === "runtime")), ...existingVariables };
+  const sourceLabel = (source: string) => source === "runtime" ? t("Sandbox runtime") : source === "global" ? t("Global defaults")
+    : source === "shared" ? t("Shared environment") : source === "linked" || source === "invocation" ? t("Environment Profile") : t("This configuration");
   const latestRows = useRef(rows);
   const latestOnChange = useRef(onChange);
   latestRows.current = rows;
@@ -102,14 +135,28 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
     latestOnChange.current(latestRows.current.map((row) => row.id === id ? { ...row, ...change } : row));
   };
   return <fieldset className="environment-variables-editor" disabled={disabled}>
+    <small>{t("Applies only to Sandbox commands and their child processes. Your computer's environment is unchanged.")}</small>
+    {contextError && <small>{t("Could not refresh existing variable names. Operations are resolved again when a command runs.")}</small>}
     {rows.length === 0 && <p className="variables-empty">{t("No variables.")}</p>}
     {rows.map((row, index) => <div className="environment-variable-row" key={row.id}>
       <div className="variable-name-row">
         <input aria-label={t("Environment variable {v0} name", { v0: String(index + 1) })} value={row.name} placeholder={t("Name, e.g. REGION")}
-          onChange={(event) => patch(row.id, { name: event.target.value })} />
+          onChange={(event) => patch(row.id, { name: event.target.value,
+            ...(event.target.value.trim().toUpperCase() === "PATH" && row.name.trim().toUpperCase() !== "PATH" ? { operation: "append", separator: undefined } : {}) })} />
         <button type="button" className="variable-remove" aria-label={t("Remove environment variable {v0}", { v0: String(index + 1) })}
           onClick={() => onChange(rows.filter((item) => item.id !== row.id))}><X size={14} /></button>
       </div>
+      <div className="variable-value-row variable-operation-row">
+        <select aria-label={t("Environment variable {v0} operation", { v0: String(index + 1) })} value={rowOperation(row)}
+          onChange={event => patch(row.id, { operation: event.target.value as EnvironmentOperation })}>
+          {row.name.trim().toUpperCase() !== "PATH" && <option value="replace">{known[row.name.trim().toUpperCase()] ? t("Replace") : t("Set value")}</option>}
+          <option value="append">{t("Append")}</option><option value="prepend">{t("Prepend")}</option>
+        </select>
+        {rowOperation(row) !== "replace" && row.name.trim().toUpperCase() !== "PATH" && <input
+          aria-label={t("Environment variable {v0} separator", { v0: String(index + 1) })} value={row.separator ?? ""}
+          placeholder={t("Separator (empty = join directly)")} onChange={event => patch(row.id, { separator: event.target.value })} />}
+      </div>
+      {known[row.name.trim().toUpperCase()] && <small>{t("Already exists in {v0}.", { v0: sourceLabel(known[row.name.trim().toUpperCase()]) })}</small>}
       <div className="variable-value-row">
         <select aria-label={t("Environment variable {v0} type", { v0: String(index + 1) })} value={row.kind}
           onChange={(event) => patch(row.id, { kind: event.target.value as EnvironmentVariableKind,
@@ -120,13 +167,18 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
         {row.kind === "path" ? <select className="variable-folder-access" aria-label={t("Environment variable {v0} access", { v0: String(index + 1) })}
           value={row.access ?? "read_only"} onChange={event => patch(row.id, { access: event.target.value as EnvironmentVariableRow["access"] })}>
           <option value="read_only">{t("Read only")}</option><option value="read_write">{t("Read and write")}</option>
-        </select> : <input aria-label={t("Environment variable {v0} value", { v0: String(index + 1) })} value={row.kind === "secret" ? secrets[row.value] ?? "" : row.value}
+        </select> : row.kind === "value" && row.name.trim().toUpperCase() === "PATH" ? <textarea
+          aria-label={t("Environment variable {v0} value", { v0: String(index + 1) })} value={row.value} rows={3}
+          placeholder={t("One absolute Sandbox directory per line")} onChange={event => patch(row.id, { value: event.target.value })} />
+        : <input aria-label={t("Environment variable {v0} value", { v0: String(index + 1) })} value={row.kind === "secret" ? secrets[row.value] ?? "" : row.value}
           type={row.kind === "secret" ? "password" : "text"} autoComplete="off"
           placeholder={row.kind === "secret" ? (bindings[row.value] ? t("Configured — enter to replace") : t("Enter secret")) : t("Value")}
           onChange={(event) => row.kind === "secret"
             ? onSecretsChange({ ...secrets, [row.value]: event.target.value })
             : patch(row.id, { value: event.target.value })} />}
       </div>
+      {row.name.trim().toUpperCase() === "PATH" && <small>{t("Keeps the Sandbox's base PATH. Directory separators are chosen by the runtime. Use Path to authorize a host folder.")}
+        {rowOperation(row) === "prepend" && <> {t("Prepended directories take priority over existing commands with the same name.")}</>}</small>}
       {(row.kind === "path") && <>
         <EnvironmentPathInput key={row.value} value={row.folderPath ?? ""} disabled={disabled} onChange={folderPath => patch(row.id, { folderPath })}
           label={t("Environment variable {v0} path", { v0: String(index + 1) })} access={row.access ?? "read_only"} />
@@ -248,6 +300,7 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
       </div>
       {environment ? <>
         <EnvironmentVariablesEditor rows={environmentRows} onChange={rows => { setEnvironmentRows(rows); setDirty(true); }} disabled={busy || !document}
+          ownerId={card.id}
           secrets={secrets} onSecretsChange={value => { setSecrets(value); setDirty(true); }} bindings={bindings} />
       </> : <>
         <div className="execution-target-fields">

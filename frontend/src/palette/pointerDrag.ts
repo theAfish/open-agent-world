@@ -42,10 +42,11 @@ let cancelCurrent: (() => void) | undefined;
 
 /** Only this disposable visual moves. No world node or React position state exists yet. */
 export function startPalettePointerDrag(event: PointerEvent, source: HTMLElement, item: PalettePointerItem,
-  callbacks: { start(): void; end(): void; discardTarget?(): HTMLElement | null }): () => void {
+  callbacks: { start(): void; end(): void; cancelClick?(): void; discardTarget?(): HTMLElement | null }): () => void {
   if (event.button !== 0 || !event.isPrimary) return () => {};
   cancelCurrent?.();
   const pointerId = event.pointerId;
+  const touch = event.pointerType === 'touch';
   const origin = { x: event.clientX, y: event.clientY };
   let x = origin.x, y = origin.y;
   let offsetX = 0, offsetY = 0;
@@ -94,6 +95,7 @@ export function startPalettePointerDrag(event: PointerEvent, source: HTMLElement
     window.removeEventListener("pointermove", move, true);
     window.removeEventListener("pointerup", up, true);
     window.removeEventListener("pointercancel", cancelPointer, true);
+    window.removeEventListener("pointerdown", otherPointer, true);
     window.removeEventListener("keydown", key, true);
     window.removeEventListener("blur", cancel);
     document.removeEventListener("visibilitychange", visibility);
@@ -109,12 +111,19 @@ export function startPalettePointerDrag(event: PointerEvent, source: HTMLElement
   };
   const cancel = () => finish();
   const cancelPointer = (next: PointerEvent) => { if (next.pointerId === pointerId) cancel(); };
+  const otherPointer = (next: PointerEvent) => { if (next.pointerType === 'touch' && next.pointerId !== pointerId) cancel(); };
   const move = (next: PointerEvent) => {
     if (next.pointerId !== pointerId) return;
     if (!source.isConnected || !(next.buttons & 1)) { cancel(); return; }
     x = next.clientX; y = next.clientY;
     if (!active) {
-      if (Math.hypot(x - origin.x, y - origin.y) < 5) return;
+      const dx = x - origin.x, dy = y - origin.y;
+      if (Math.hypot(dx, dy) < (touch ? 10 : 5)) return;
+      // Horizontal motion belongs to the native card row; only an upward pull
+      // starts placement. Never turn browsing/downward dismissal into discard.
+      if (touch && (Math.abs(dx) >= Math.abs(dy) || dy >= 0)) {
+        callbacks.cancelClick?.(); cancel(); return;
+      }
       const visual = source.querySelector<HTMLElement>("[data-deck-visual]");
       if (!visual) { cancel(); return; }
       const box = visual.getBoundingClientRect();
@@ -134,6 +143,7 @@ export function startPalettePointerDrag(event: PointerEvent, source: HTMLElement
       document.body.append(preview);
       document.body.classList.add("is-palette-dragging");
       active = true;
+      if (touch) source.setPointerCapture(pointerId);
       callbacks.start();
     }
     next.preventDefault();
@@ -148,10 +158,11 @@ export function startPalettePointerDrag(event: PointerEvent, source: HTMLElement
     if (next.key === "Escape") { next.preventDefault(); next.stopImmediatePropagation(); cancel(); }
   };
   const visibility = () => { if (document.hidden) cancel(); };
-  source.setPointerCapture(pointerId);
+  if (!touch) source.setPointerCapture(pointerId);
   window.addEventListener("pointermove", move, { capture: true, passive: false });
   window.addEventListener("pointerup", up, true);
   window.addEventListener("pointercancel", cancelPointer, true);
+  window.addEventListener("pointerdown", otherPointer, true);
   // Cancel the preview before canvas hotkeys see Escape.
   window.addEventListener("keydown", key, true);
   window.addEventListener("blur", cancel);

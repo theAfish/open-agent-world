@@ -226,7 +226,7 @@ def minimal_darwin_environment(
     home: Path, tmpdir: Path,
     extra: Mapping[str, str] | None = None, *,
     resources: Path | None = None,
-    invocation_env: Mapping[str, str] | None = None,
+    invocation_env: Mapping[str, object] | None = None,
 ) -> dict[str, str]:
     from .environment import validate_command_environment, apply_invocation_environment
     environment = {
@@ -241,7 +241,7 @@ def minimal_darwin_environment(
         if not isinstance(extra, Mapping):
             raise SandboxValidationError("env must be an object")
         for key, value in extra.items():
-            if key not in {"LANG", "LC_ALL", "TZ", "TERM"}:
+            if key not in {"LANG", "LC_ALL", "TZ", "TERM"} or not isinstance(value, str):
                 raise SandboxValidationError(f"environment key is outside the allowlist: {key}")
             validate_command_environment({key: value})
             environment[key] = value
@@ -596,7 +596,7 @@ class DarwinSeatbeltBackend(SandboxBackend):
     async def _execute_record(
         self, owner: _Record, execution: _Execution, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
-        invocation_env: Mapping[str, str] | None = None,
+        invocation_env: Mapping[str, object] | None = None,
         runtime_mount: RuntimeMount | None = None,
         execution_policy: Mapping[str, Any] | None = None,
         managed_python: bool = True,

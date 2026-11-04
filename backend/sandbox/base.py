@@ -68,7 +68,7 @@ class SandboxBackend(ABC):
         *,
         timeout_seconds: float | None = None,
         env: Mapping[str, str] | None = None,
-        invocation_env: Mapping[str, str] | None = None,
+        invocation_env: Mapping[str, object] | None = None,
         runtime_mount: RuntimeMount | None = None,
         execution_policy: Mapping[str, object] | None = None,
         folder_mounts: Sequence[FolderMount] = (),
@@ -78,7 +78,9 @@ class SandboxBackend(ABC):
         Replace its argument_index with the materialized runtime file path.
         Cached bundles must remain inaccessible to commands without a mount.
         invocation_env contains explicitly authorized application variables and
-        the reserved target JSON carrier. Validate it with the shared policy and
+        the reserved target JSON carrier. Values are strings or ordered operation
+        steps; use apply_invocation_environment to compose them with runtime defaults.
+        Validate it with the shared policy and
         apply it only to the isolated command, never to host helpers. Unsupported
         configuration must raise SandboxValidationError, never be ignored.
         execution_policy is host-owned configuration captured at admission;

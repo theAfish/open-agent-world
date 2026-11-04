@@ -9,11 +9,77 @@ import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { useWorldStore } from '../state/worldStore';
 import type { WorldCard } from '../types/world';
 import { CardContent, WorldCardNode } from './CardFrame';
+import { useInteractionEnvironment } from '../interaction/environment';
+import { worldApi } from '../api/client';
 
 vi.mock('./AgentCard', () => ({ AgentCardBody: () => <div>Agent settings</div> }));
 vi.mock('./NodeWorkspace', () => ({ WorkspaceSurface: () => <div>Agent workspace</div> }));
+vi.mock('../plugins/PluginSurface', () => ({ PluginSurface: ({children,card}: {children?: React.ReactNode;card:WorldCard}) => card.type === 'test.instrument' ? <div>Instrument preview</div> : children }));
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); useEquipmentPanel.setState({ openIds: [] }); });
+afterEach(() => {
+  cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover;
+  delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
+  delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
+  useEquipmentPanel.setState({ openIds: [] });
+  useInteractionEnvironment.setState({ compact: false });
+  useNodeSurfaceStore.setState({ mobileSurface: undefined });
+});
+
+it('moves one text editor outside the canvas and retains its draft across mobile close and reopen', async () => {
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
+  vi.spyOn(worldApi, 'getText').mockResolvedValue({ content: 'Original', revision: 1, history: [] });
+  const card: WorldCard = { id: 'mobile-text', type: 'text', name: 'Phone notes', status: 'available', config: {},
+    position: { x: 240, y: 180 }, size: { width: 300, height: 190 }, expanded: false };
+  useWorldStore.setState({ cards: [card], edges: [], events: [], catalog: TEST_CATALOG });
+  useNodeSurfaceStore.setState({ surfaceLevels: { [card.id]: 'preview' }, baseLevels: { [card.id]: 'preview' }, dragging: false, connectingNodeId: undefined });
+  useNodeSurfaceStore.getState().syncCards([card], TEST_CATALOG);
+  useInteractionEnvironment.setState({ compact: true });
+  const props = { id: card.id, data: { card }, selected: false, dragging: false } as ComponentProps<typeof WorldCardNode>;
+  const { container } = render(<ReactFlowProvider><div className="react-flow__viewport"><WorldCardNode {...props} /></div></ReactFlowProvider>);
+  act(() => useNodeSurfaceStore.getState().openPrimary(card.id));
+  const editor = await screen.findByDisplayValue('Original');
+  expect(editor.closest('dialog')).not.toBeNull();
+  expect(editor.closest('.react-flow__viewport')).toBeNull();
+  expect(container.querySelector('.world-card')?.getAttribute('data-surface-level')).toBe('preview');
+  fireEvent.change(editor, { target: { value: 'Unsaved phone draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Back to canvas' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  act(() => useNodeSurfaceStore.getState().openPrimary(card.id));
+  expect(screen.getByDisplayValue('Unsaved phone draft')).toBe(editor);
+  expect(screen.getAllByRole('textbox', { name: 'Contents' })).toHaveLength(1);
+});
+
+it('renders a preview-only content instrument without card print or title bars and retains rename/delete and handles', () => {
+  Object.defineProperty(HTMLElement.prototype,'showPopover',{configurable:true,value:vi.fn()});
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  const card: WorldCard = {id:'instrument',type:'test.instrument',name:'Counter',status:'available',config:{},
+    position:{x:0,y:0},size:{width:360,height:192},expanded:false};
+  const definition = {...TEST_CATALOG.node_types[0], id:card.type, label:'Counter', traits:['ui.content-surface.v1','ui.ellipse.v1'],
+    frontend:{preview:'instrument'}, presentation:{states:['preview' as const],initial:'preview' as const,open:'preview' as const}};
+  const catalog = {...TEST_CATALOG,node_types:[...TEST_CATALOG.node_types,definition]};
+  useWorldStore.setState({cards:[card],edges:[],events:[],catalog});
+  useNodeSurfaceStore.getState().syncCards([card],catalog);
+  useNodeSurfaceStore.setState({surfaceLevels:{[card.id]:'preview'},connectingNodeId:undefined,dragging:false});
+  const props = {id:card.id,data:{card},selected:false,dragging:false} as ComponentProps<typeof WorldCardNode>;
+  const {container} = render(<ReactFlowProvider><WorldCardNode {...props}/></ReactFlowProvider>);
+  expect(container.querySelector('.world-card')?.getAttribute('data-content-surface')).toBe('true');
+  expect(container.querySelector('.world-card')?.getAttribute('data-card-shape')).toBe('ellipse');
+  expect((container.querySelector('.world-card') as HTMLElement).style.borderRadius).toBe('50%');
+  expect(container.querySelector('.node-surface-header, .world-card-print, .card-finish-layer')).toBeNull();
+  expect(screen.getByText('Instrument preview')).toBeTruthy();
+  fireEvent.click(screen.getByLabelText('Card details'));
+  expect(screen.getByRole('button',{name:'Remove Counter'})).toBeTruthy();
+  expect(container.querySelectorAll('.semantic-handle')).toHaveLength(4);
+  const panel = screen.getByRole('dialog',{name:'Card details'});
+  fireEvent.pointerDown(panel);
+  expect(screen.getByRole('dialog',{name:'Card details'})).toBe(panel);
+  // A canvas/background press need not move focus to dismiss the menu.
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole('dialog',{name:'Card details'})).toBeNull();
+});
 
 it('lets a card opt out of expanded title/footer bars while retaining its collectible face and actions', () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
@@ -33,6 +99,24 @@ it('lets a card opt out of expanded title/footer bars while retaining its collec
   expect(container.querySelector('.content-surface-controls')).toBeNull();
   expect(container.querySelector('.node-surface-header')).not.toBeNull();
   expect(container.querySelector('.world-card')?.getAttribute('data-finish')).toBe('starlight');
+});
+
+it.each(['preview', 'inspector'] as const)('uses the declared bottom control edge on a content-owned %s surface', level => {
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', { configurable: true, value: vi.fn() });
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  const card: WorldCard = { id: 'bottom-controls', type: 'test.instrument', name: 'Instrument', status: 'idle', config: {},
+    position: { x: 0, y: 0 }, size: { width: 360, height: 240 }, expanded: false };
+  const definition = { ...TEST_CATALOG.node_types[0], id: card.type, traits: ['ui.content-surface.v1'],
+    presentation: { states: [level], initial: level, open: level, content_controls: 'bottom' as const } };
+  const catalog = { ...TEST_CATALOG, node_types: [definition] };
+  useWorldStore.setState({ cards: [card], edges: [], events: [], catalog });
+  useNodeSurfaceStore.getState().syncCards([card], catalog);
+  const props = { id: card.id, data: { card }, selected: false, dragging: false } as ComponentProps<typeof WorldCardNode>;
+  const { container } = render(<ReactFlowProvider><WorldCardNode {...props} /></ReactFlowProvider>);
+  expect(container.querySelector('.world-card')?.getAttribute('data-content-controls')).toBe('bottom');
+  expect(container.querySelector('.content-surface-grip.node-drag-region')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Card details' }));
+  expect(screen.getByRole('button', { name: 'Remove Instrument' })).toBeTruthy();
 });
 
 it('shows a missing placeholder instead of dispatching a same-named installed implementation', () => {

@@ -1,5 +1,9 @@
 import { AppearanceButtons, SettingsButton } from './PreferenceButtons';
-import { Activity, LibraryBig, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { Activity, LibraryBig, RefreshCw, Wifi, WifiOff, Menu, X, LayoutTemplate } from "lucide-react";
+import { useEffect, useId, useRef, useState } from 'react';
+import { useInteractionEnvironment } from '../interaction/environment';
+import { Popover } from '../components/Floating';
+import { useLegionWorkspace } from '../state/legionWorkspace';
 import { useLocale, t } from "../i18n";
 import { HelpMenu } from './HelpMenu';
 import { useCardLibrary } from "../state/cardLibrary";
@@ -8,7 +12,21 @@ import { AccountButton } from '../auth/AccountButton';
 
 export function TopBar() {
   useLocale();
+  const compact = useInteractionEnvironment(state => state.compact);
+  const [expanded, setExpanded] = useState(false);
+  const root = useRef<HTMLElement>(null);
+  const actionsId = useId();
+  const mobile = compact;
+  useEffect(() => {
+    if (!mobile || !expanded) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setExpanded(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setExpanded(false); };
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); };
+  }, [mobile, expanded]);
   const cards = useWorldStore((state) => state.cards);
+  const workspaces = cards.filter(card => card.type === 'legion');
   const edges = useWorldStore((state) => state.edges);
   const syncState = useWorldStore((state) => state.syncState);
   const socketState = useWorldStore((state) => state.socketState);
@@ -22,7 +40,9 @@ export function TopBar() {
       : t("Offline");
 
   return (
-    <aside className="top-bar" aria-label={t("World status and controls")}>
+    <aside ref={root} className="top-bar" data-mobile-menu={mobile ? String(expanded) : undefined} aria-label={t("World status and controls")}>
+      {mobile && <button className="top-icon-button world-menu-toggle" type="button" aria-label={t(expanded ? 'Hide world controls' : 'World menu')}
+        aria-expanded={expanded} aria-controls={actionsId} onClick={() => setExpanded(value => !value)}>{expanded ? <X size={20} /> : <Menu size={20} />}</button>}
       <div className="world-status">
         <button
           type="button"
@@ -42,8 +62,14 @@ export function TopBar() {
         </div>
       </div>
 
-      <div className="top-actions">
+      <div id={actionsId} className="top-actions">
         <AccountButton />
+        {mobile && workspaces.length > 0 && <Popover label={t('Workspaces')} placement="right" className="mobile-workspace-menu"
+          trigger={<button className="top-icon-button" type="button" aria-label={t('Workspaces')} title={t('Workspaces')}><LayoutTemplate size={18} /></button>}>
+          {close => <nav aria-label={t('Workspaces')}>{workspaces.map(workspace => <button key={workspace.id} type="button" onClick={() => {
+            close(); setExpanded(false); useLegionWorkspace.getState().open(workspace.id);
+          }}>{workspace.name}</button>)}</nav>}
+        </Popover>}
         <button type="button" className="top-icon-button" data-tutorial="library" onClick={useCardLibrary.getState().show} aria-label={t("Open Pack and Card Library")} title={t("Packs, Cards and Decks")}><LibraryBig size={16} /></button>
         <SettingsButton />
         <button

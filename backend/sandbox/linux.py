@@ -162,7 +162,7 @@ def validate_relative_path(raw: str) -> str:
     return str(path)
 
 
-def minimal_linux_environment(extra: Mapping[str, str] | None = None, *, invocation_env: Mapping[str, str] | None = None) -> dict[str, str]:
+def minimal_linux_environment(extra: Mapping[str, str] | None = None, *, invocation_env: Mapping[str, object] | None = None) -> dict[str, str]:
     from .environment import validate_command_environment, apply_invocation_environment
     environment = {
         "PATH": "/sandbox/home/.local/bin:/sandbox/home/bin:/usr/bin:/bin", "HOME": "/sandbox/home", "TMPDIR": "/tmp",
@@ -175,7 +175,7 @@ def minimal_linux_environment(extra: Mapping[str, str] | None = None, *, invocat
         if not isinstance(extra, Mapping):
             raise SandboxValidationError("env must be an object")
         for key, value in extra.items():
-            if key not in {"LANG", "LC_ALL", "TZ", "TERM"}:
+            if key not in {"LANG", "LC_ALL", "TZ", "TERM"} or not isinstance(value, str):
                 raise SandboxValidationError(f"environment key is outside the allowlist: {key}")
             validate_command_environment({key: value})
             environment[key] = value
@@ -498,7 +498,7 @@ class LinuxSandboxBackend(SandboxBackend):
         self, record: _Record, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
         _unit_name: str | None = None,
-        invocation_env: Mapping[str, str] | None = None,
+        invocation_env: Mapping[str, object] | None = None,
         runtime_mount: RuntimeMount | None = None,
         folder_mounts=(),
         execution_policy: Mapping[str, Any] | None = None,

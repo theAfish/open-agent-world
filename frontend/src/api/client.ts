@@ -439,6 +439,10 @@ export const worldApi = {
     return request<SandboxSettings>("/settings/sandbox");
   },
 
+  getEnvironmentContext(id: string): Promise<Record<string, string>> {
+    return request(`/nodes/${encodeURIComponent(id)}/environment-context`);
+  },
+
   saveSandboxSettings(settings: SandboxSettings & { secrets?: Record<string, string>; folders?: Record<string, EnvironmentFolderBinding> }): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox", {
       method: "PUT", body: JSON.stringify({
@@ -808,10 +812,10 @@ export const worldApi = {
     return asRecord(body);
   },
 
-  runAgent(nodeId: string, prompt: string): Promise<Record<string, unknown>> {
+  runAgent(nodeId: string, prompt: string, freshContext = false): Promise<Record<string, unknown>> {
     return request<Record<string, unknown>>(`/agents/${encodeURIComponent(nodeId)}/run`, {
       method: "POST",
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, ...(freshContext ? { fresh_context: true } : {}) }),
     });
   },
 
@@ -1082,7 +1086,7 @@ export interface EnvironmentFolderBinding { path: string; access: "read_only" | 
 export interface SandboxSettings {
   workspace_root: string | null;
   runtime: string;
-  environment_variables?: Record<string, string | { secret_ref: string } | { folder_ref: string } | { file_ref: string } | { path_ref: string }>;
+  environment_variables?: Record<string, string | (({ value: string } | { secret_ref: string } | { folder_ref: string } | { file_ref: string } | { path_ref: string }) & { operation?: "replace" | "append" | "prepend"; separator?: string })>;
   secret_bindings?: Record<string, boolean>;
   folder_bindings?: Record<string, EnvironmentFolderBinding>;
   backup_paths?: string[];

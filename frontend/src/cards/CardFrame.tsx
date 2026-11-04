@@ -2,9 +2,10 @@ import { ExecutionGraphCard } from './ExecutionGraph';
 import { JobsCard } from './Jobs';
 import { isMissingCard, MissingPlugin } from "./MissingPlugin";
 import { CardLODView } from './CardLODView';
-import { useCardRenderLOD } from '../canvas/useCardRendering';
+import { useCardRenderLOD, useHydrationLease } from '../canvas/useCardRendering';
 import { ConnectionDropSurface } from "./ConnectionDropSurface";
 import { t, useLocale } from "../i18n";
+import { CardMoveGrip } from './CardMoveGrip';
 import { MinisterRoleSettings } from './MinisterRoleCard';
 import { MinisterAgent } from './Minister';
 import { canAppointMinister, MINISTER_ROLE_CARD, useMinisterRole, openMinisterSettings } from '../state/ministerRole';
@@ -15,10 +16,11 @@ import { BarracksBody } from "./Barracks";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { BookOpen, Maximize2, Minus, ExternalLink, Trash2, X } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from 'react-dom';
 import { ConnectionHoverHint, clearConnectionHoverHint, updateConnectionHoverHint } from "./ConnectionHoverHint";
 import { CardName } from "./CardName";
 import { IconButton } from "../components/IconButton";
-import { NODE_SURFACE_RADIUS, collapsedSurface, cardPresentation, nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
+import { NODE_SURFACE_RADIUS, collapsedSurface, cardPresentation, effectiveCanvasSurfaceLevel, nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { cardStudio } from '../factory/faceDesign';
 import { DesignedCard } from '../factory/PrintedCardView';
 import { useWorldStore } from "../state/worldStore";
@@ -46,6 +48,9 @@ import { useCardFinish } from "./useCardFinish";
 import { finishLabel, normalizeCardFinish } from "./cardFinish";
 import { WorldCardPrint } from './WorldCardPrint';
 import { ContentSurfaceControls, hasContentSurface } from './ContentSurfaceControls';
+import { cardBoundaryShape } from '../edges/nodeGeometry';
+import { useInteractionEnvironment } from '../interaction/environment';
+import { CardSurfaceMount, MobileCardSurface } from './MobileCardSurface';
 
 const DRAG_THRESHOLD_PX = 5;
 const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, summary, [role='button'], [role='separator'], [contenteditable]:not([contenteditable='false']), .nodrag, .react-flow__handle";
@@ -113,7 +118,13 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   const generationPhase = generation?.targetId === card.id ? generation.phase : undefined;
   const displayStatus = card.missing_plugin ? "unavailable" : activity.phase === "idle" ? card.status : activity.phase;
   const catalog = useWorldStore((state) => state.catalog);
-  const level = useNodeSurfaceStore((state) => surfaceLevelForNode(card.id, state.surfaceLevels));
+  const savedLevel = useNodeSurfaceStore((state) => surfaceLevelForNode(card.id, state.surfaceLevels));
+  const base = useNodeSurfaceStore(state => state.baseLevels[card.id]);
+  const compact = useInteractionEnvironment(state => state.compact);
+  const level = data.surfaceLevel ?? effectiveCanvasSurfaceLevel(card, savedLevel, compact, catalog, base);
+  const mobileSurface = useNodeSurfaceStore(state => state.mobileSurface?.nodeId === card.id ? state.mobileSurface : undefined);
+  const mobileInspector = mobileSurface?.level === 'inspector';
+  const mobileWorkspace = mobileSurface?.level === 'workspace';
   const showPreview = useNodeSurfaceStore((state) => state.showPreview);
   const hidePreview = useNodeSurfaceStore((state) => state.hidePreview);
   const openPrimary = useNodeSurfaceStore((state) => state.openPrimary);
@@ -132,7 +143,15 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   // Unknown plugin bodies may still own local drafts. Host editors retain drafts
   // outside their mounts, so their hidden DOM and subscriptions can be released.
   const [inspectorVisited, setInspectorVisited] = useState(level === 'inspector');
-  useEffect(() => { if (level === 'inspector') setInspectorVisited(true); }, [level]);
+  const [mobileInspectorVisited, setMobileInspectorVisited] = useState(mobileInspector);
+  const [mobileWorkspaceVisited, setMobileWorkspaceVisited] = useState(mobileWorkspace);
+  const [inspectorHost] = useState(() => Object.assign(document.createElement('div'), { className: 'card-surface-owner card-inspector-owner' }));
+  const [workspaceHost] = useState(() => Object.assign(document.createElement('div'), { className: 'card-surface-owner card-workspace-owner' }));
+  useEffect(() => {
+    if (level === 'inspector') setInspectorVisited(true);
+    if (mobileInspector) setMobileInspectorVisited(true);
+    if (mobileWorkspace) setMobileWorkspaceVisited(true);
+  }, [level, mobileInspector, mobileWorkspace]);
   const definition = catalog.node_types.find((item) => item.id === card.type);
   const hostInspector = !definition?.frontend?.body && (['text', 'conversation', 'sandbox', 'image'].includes(card.type)
     || definition?.traits.includes('ui.task-board.v1'));
@@ -144,13 +163,23 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
 
   const support = nodeSurfaceSupport(card.type, catalog);
   const presentation = cardPresentation(card, catalog);
+  const boundaryShape = cardBoundaryShape(card, visualLevel, catalog);
   const authoredSlot = level === 'node' ? 'preview' : level === 'inspector' ? 'body' : level;
   const authoredFace = definition?.authoring && definition.frontend?.[authoredSlot] === 'oaw.authoring-card';
   const customFace = Boolean(cardStudio(card, catalog)) && (!definition?.authoring || authoredFace) && !isMissingCard(card, catalog);
+  const studioSurface = Boolean(cardStudio(card, catalog)) && !isMissingCard(card, catalog);
+  const inspectorCustom = studioSurface && (!definition?.authoring || definition.frontend?.body === 'oaw.authoring-card');
+  const workspaceCustom = studioSurface && (!definition?.authoring || definition.frontend?.workspace === 'oaw.authoring-card');
   const contentSurface = !customFace && !isMissingCard(card, catalog) && hasContentSurface(definition)
-    && (visualLevel === 'inspector' || visualLevel === 'workspace');
-  const base = useNodeSurfaceStore(state => state.baseLevels[card.id]);
+    && (visualLevel === 'inspector' || visualLevel === 'workspace'
+      || (visualLevel === 'preview' && presentation.states.length === 1));
   const canCollapseInspector = collapsedSurface(presentation, "inspector", base) !== "inspector";
+  const openMobileWorkspace = support.workspace ? () => {
+    if (definition?.traits.includes('library.readable')) {
+      inspectorHost.closest('.world-card')?.dispatchEvent(new Event('oaw:expand-reader'));
+      cardRef.current?.dispatchEvent(new Event('oaw:expand-reader'));
+    } else openWorkspace(card.id);
+  } : undefined;
 
   useEffect(() => {
     if (dragging && pointerStart.current) pointerStart.current.moved = true;
@@ -175,17 +204,19 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
     <article
       ref={cardRef}
       className={`world-card node-surface card-finish-surface world-card--${card.type} is-${visualLevel} ${customFace ? 'factory-custom-surface' : ''} ${selected ? "is-selected" : ""} ${card.status === "running" ? "is-running" : ""} ${card.status === "error" ? "is-error" : ""} ${card.ephemeral ? "is-ephemeral" : ""}`}
-      style={{ "--card-kind": definition?.color, borderRadius: NODE_SURFACE_RADIUS[visualLevel] } as CSSProperties}
+      style={{ "--card-kind": definition?.color, borderRadius: boundaryShape === 'ellipse' ? '50%' : NODE_SURFACE_RADIUS[visualLevel] } as CSSProperties}
       aria-label={`${label} ${card.name}`}
       data-missing={isMissingCard(card, catalog) || undefined}
       data-card-id={card.id}
       data-card-revision={card.revision}
       data-card-type={card.type}
+      data-card-shape={boundaryShape}
       data-finish={normalizeCardFinish(card.finish)}
-      data-card-print={!customFace && (visualLevel === 'node' || visualLevel === 'preview') ? 'collectible' : undefined}
+      data-card-print={!customFace && !contentSurface && (visualLevel === 'node' || visualLevel === 'preview') ? 'collectible' : undefined}
       data-card-expanded={visualLevel === "inspector" || visualLevel === "workspace" ? "true" : "false"}
       data-surface-level={level}
       data-content-surface={contentSurface || undefined}
+      data-content-controls={contentSurface ? presentation.content_controls ?? 'side' : undefined}
       data-render-lod="full"
       data-activity={activity.phase}
       data-equipment-detail={data.equipmentDetail || undefined}
@@ -222,7 +253,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
         if (visualLevel === "node" || visualLevel === "preview") openPrimary(card.id);
       }}
     >
-      {!customFace && (visualLevel === 'node' || visualLevel === 'preview') && <WorldCardPrint />}
+      {!customFace && !contentSurface && (visualLevel === 'node' || visualLevel === 'preview') && <WorldCardPrint />}
       {!card.ephemeral && <ConnectionDropSurface nodeId={card.id} />}
       <ActivityGlow phase={activity.phase} />
       {promotion && <div className="minister-promotion-sweep" aria-hidden="true" />}
@@ -238,8 +269,8 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
       )) : null}
 
       {visualLevel !== "inspector" && <EquipmentToggle card={card} />}
-      {customFace ? authoredFace ? <PluginSurface card={card} level={level} slot={authoredSlot} /> : <DesignedCard card={card} level={level} /> : visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
-        {contentSurface ? <ContentSurfaceControls card={card} level="inspector" /> : <header className={`card-header node-surface-header node-drag-region ${visualLevel === "inspector" ? "card-finish-surface" : ""}`}>
+      {customFace ? authoredFace ? <PluginSurface card={card} level={level} slot={authoredSlot} /> : <DesignedCard card={card} level={level} /> : visualLevel === "workspace" ? <CardSurfaceMount host={workspaceHost} active={!mobileWorkspace} className="mobile-card-inline-workspace" /> : <>
+        {contentSurface ? <ContentSurfaceControls card={card} level={visualLevel === 'preview' ? 'preview' : 'inspector'} /> : <header className={`card-header node-surface-header node-drag-region ${visualLevel === "inspector" ? "card-finish-surface" : ""}`}>
           {visualLevel !== "preview" && <div className="card-kind-icon" data-material-layer="top-print" aria-hidden="true"><CatalogIcon definition={definition} size={18} /></div>}
           <div className="card-title-group" data-material-layer="top-print">
             {visualLevel !== "preview" && <span className="card-eyebrow">{isMissingCard(card, catalog) ? `MISSING · ${card.type}` : label}</span>}
@@ -268,14 +299,12 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
           {visualLevel === 'inspector' && <CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />}
         </header>}
 
-        {!contentSurface && <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
+        {(!contentSurface || visualLevel === 'preview') && <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
           {visualLevel === 'preview' && <div className="node-preview-body"><NodePreview card={card} /></div>}
           {presentation.open !== "preview" && <span className="node-preview-hint" data-material-layer="top-print">{t(presentation.open === "workspace" ? "Open workspace" : "Click for details")}</span>}
         </div>}
 
-        <div className="card-body node-inspector-content nodrag nopan" aria-hidden={visualLevel !== "inspector"}>
-          {(visualLevel === 'inspector' || (inspectorVisited && retainedInspector)) && <CardContent card={card} level={level} />}
-        </div>
+        <CardSurfaceMount host={inspectorHost} active={!mobileInspector} className="card-body node-inspector-content nodrag nopan" hidden={visualLevel !== 'inspector'} />
 
         {visualLevel === 'inspector' && !contentSurface && <footer className="card-footer node-inspector-footer nodrag nopan">
           {definition?.traits.includes("core.agent") && !card.ephemeral ? <EquipmentToggle card={card} />
@@ -296,8 +325,17 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
           </div>
         </footer>}
       </>}
-      {!customFace && (visualLevel === "node" || visualLevel === "preview") && <CardFinishLayer finish={card.finish} quality={finishQuality} />}
+      {!customFace && !contentSurface && (visualLevel === "node" || visualLevel === "preview") && <CardFinishLayer finish={card.finish} quality={finishQuality} />}
     </article>
+    {mobileSurface && <MobileCardSurface card={card} level={mobileSurface.level} host={mobileWorkspace ? workspaceHost : inspectorHost} onWorkspace={openMobileWorkspace} />}
+    {((!customFace && (visualLevel === 'inspector' || (inspectorVisited && retainedInspector))) || mobileInspector || mobileInspectorVisited) && createPortal(
+      inspectorCustom ? definition?.authoring && definition.frontend?.body === 'oaw.authoring-card'
+        ? <PluginSurface card={card} level="inspector" slot="body" /> : <DesignedCard card={card} level="inspector" />
+        : <CardContent card={card} level={mobileInspector ? 'inspector' : level} />, inspectorHost)}
+    {(mobileWorkspaceVisited || mobileWorkspace || (!customFace && visualLevel === 'workspace')) && createPortal(
+      workspaceCustom ? definition?.authoring && definition.frontend?.workspace === 'oaw.authoring-card'
+        ? <PluginSurface card={card} level="workspace" slot="workspace" /> : <DesignedCard card={card} level="workspace" />
+        : <WorkspaceSurface card={card} />, workspaceHost)}
     {card.minister && !isMissingCard(card, catalog) && <MinisterAgent card={card} nodeHovered={ministerNodeHovered && level === 'node'} />}
   </>);
 });
@@ -321,10 +359,12 @@ function CollectionAwareCard(props: NodeProps<CanvasNode>) {
 }
 export const WorldCardNode = memo(function WorldCardNode(props: NodeProps<CanvasNode>) {
   const lod = useCardRenderLOD(props.id, props.data.renderLOD);
+  const mobileActive = useNodeSurfaceStore(state => state.mobileSurface?.nodeId === props.id);
+  useHydrationLease(props.id, 'mobile-surface', mobileActive);
   const start = useRef<{ x: number; y: number; level: NodeSurfaceLevel; light: boolean; moved: boolean }>();
   const activated = useRef(false);
-  if (lod === 'offscreen') return null;
-  const light = lod !== 'full' && !props.data.collectionOwner;
+  if (lod === 'offscreen' && !mobileActive) return null;
+  const light = !mobileActive && lod !== 'full' && !props.data.collectionOwner;
   // Keep the common click ancestor mounted when selection on mouse-down
   // replaces the proxy. Hydration is immediate, including during a held press.
   return <div className="card-render-boundary"
@@ -366,6 +406,7 @@ export const WorldCardNode = memo(function WorldCardNode(props: NodeProps<Canvas
     onClickCapture={event => {
       if (activated.current && event.detail !== 0) { activated.current = false; event.preventDefault(); event.stopPropagation(); }
     }}>
+    {!props.data.card.ephemeral && !props.data.equipmentDetail && !props.data.collectionOwner && <CardMoveGrip />}
     {light ? <CardLODView {...props} data={{ ...props.data, renderLOD: lod }} /> : <CollectionAwareCard {...props} />}
   </div>;
 });

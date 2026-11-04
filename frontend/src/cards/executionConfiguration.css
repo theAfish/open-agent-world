@@ -13,12 +13,15 @@
 .environment-variable-row { border: 1px solid var(--line); background: var(--card-soft); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .execution-config .variable-name-row input,
 .execution-config .variable-value-row input,
+.execution-config .variable-value-row textarea,
 .execution-config .folder-path-row input,
 .execution-config .variable-value-row > select,
 .execution-target-settings .skill-setting input:not([type="checkbox"]),
 .execution-target-settings .skill-setting select { min-width: 0; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--surface-soft) 88%, transparent); color: var(--ink); font-size: 10px; box-shadow: inset 0 1px 3px color-mix(in srgb, var(--shadow) 55%, transparent), inset 0 1px 0 var(--highlight); }
 .environment-variables-editor .variable-value-row > select { width: 85px; min-width: 0; flex: 0 0 85px; }
 .environment-variables-editor .variable-value-row > input { width: 0; min-width: 0; flex: 1 1 0; }
+.environment-variables-editor .variable-value-row > textarea { width: 0; min-width: 0; min-height: 70px; height: auto; padding-block: 8px; flex: 1 1 0; resize: vertical; }
+.environment-variables-editor .variable-operation-row > select { flex-basis: 105px; width: 105px; }
 .environment-variables-editor .variable-value-row > .variable-folder-access { width: auto; flex: 1 1 0; }
 .environment-variables-editor .folder-path-control { width: 100%; min-width: 0; }
 .environment-variables-editor small { overflow-wrap: anywhere; line-height: 1.5; }

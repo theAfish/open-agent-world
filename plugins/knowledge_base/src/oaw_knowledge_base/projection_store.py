@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import json
 import uuid
 
-from sqlalchemy import Column, Index, Integer, MetaData, String, Table, Text, func, insert, select, update
+from sqlalchemy import Column, Index, Integer, MetaData, String, Table, Text, delete, func, insert, select, update
 
 from .errors import KnowledgeError
 from .experiment_store import ConflictingRevision
@@ -111,6 +111,22 @@ class ProjectionStore:
             return [_row(row) for row in connection.execute(
                 query.order_by(RUNS.c.updated_at.desc(), RUNS.c.id).limit(limit).offset(offset),
             ).mappings()]
+
+    def delete_for_project(self, project_id):
+        with self._write() as connection:
+            connection.execute(delete(RUNS).where(RUNS.c.project_id == project_id))
+
+    def latest_completed(self, kind):
+        """The newest completed result of each project/Space pair, so a running or failed
+        rerun leaves the last good result in place."""
+        ranked = select(RUNS.c.id, func.row_number().over(
+            partition_by=(RUNS.c.project_id, RUNS.c.space_id),
+            order_by=RUNS.c.generation.desc(),
+        ).label("position")).where(RUNS.c.kind == kind, RUNS.c.status == "completed").subquery()
+        query = select(RUNS).join(ranked, ranked.c.id == RUNS.c.id).where(ranked.c.position == 1)
+        with self.engine.connect() as connection:
+            return [_row(row) for row in connection.execute(
+                query.order_by(RUNS.c.created_at, RUNS.c.id)).mappings()]
 
     def prepare(self, *, project_id, project_name, space, sources, fingerprint, actor, rerun=False):
         with self._write() as connection:
