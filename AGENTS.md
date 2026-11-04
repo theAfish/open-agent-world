@@ -25,3 +25,6 @@
 - Report which tests actually ran, their results, and important coverage gaps.
 - Do not claim full validation based only on targeted tests.
 - If validation becomes disproportionately expensive, explain the remaining risk instead of expanding the test scope automatically.
+
+## UI/UX
+- Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.

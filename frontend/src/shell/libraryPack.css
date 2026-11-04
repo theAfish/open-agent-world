@@ -16,8 +16,8 @@
 .library-pack.is-opened .pack-cover { clip-path: polygon(0 3%, 9% 1%, 18% 3%, 27% 1%, 36% 3%, 45% 1%, 54% 3%, 63% 1%, 72% 3%, 81% 1%, 90% 3%, 100% 1%, 100% 100%, 0 100%); }
 .pack-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; color: var(--ink-soft, #788897); opacity: 0; animation: packLoadingIn 240ms 160ms ease forwards; pointer-events: none; }
 .pack-loading > span { width: 36px; height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--pack-color) 60%, transparent); }
-.pack-loading > small { font-size: 10px; line-height: 1.4; max-width: 80%; }
-.pack-edition { display: block; padding: 0 8px; font-size: 9px; line-height: 1.5; font-weight: 500; letter-spacing: .08em; text-align: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-soft, #6e7b82); }
+.pack-loading > small { font-size: 0.625rem; line-height: 1.4; max-width: 80%; }
+.pack-edition { display: block; padding: 0 8px; font-size: 0.5625rem; line-height: 1.5; font-weight: 500; letter-spacing: .08em; text-align: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-soft, #6e7b82); }
 .library-pack > .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .library-pack.is-revealing :is(.pack-webgl, .pack-cover, .pack-reveal-cards) { animation: packOpeningDip 2100ms ease-in-out both; }
 .library-pack.is-revealing :is(.pack-edition, .pack-catalog-copy) { visibility: hidden; }

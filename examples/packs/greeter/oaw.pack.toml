@@ -3,9 +3,13 @@ schema_version = 3
 [distribution]
 id = "example.greeter"
 name = "Greeter"
+presentation = "src/oaw_pack_example_greeter/pack.json"
+
+[distribution.preview]
+icon = "sparkles"
 
 [compatibility]
-oaw = ">=0.1.0,<1"
+oaw = ">=0.1.0"
 plugin_api = "1.26"
 
 [plugin]

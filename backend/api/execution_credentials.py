@@ -9,6 +9,40 @@ from backend.security.execution_folders import folder_store
 router = APIRouter(prefix="/nodes", tags=["execution-credentials"])
 
 
+@router.get("/{node_id}/environment-context")
+async def environment_context(node_id: str, services=Depends(get_services)):
+    """Names and origins only; never inspect the host environment or credentials."""
+    from backend.execution_config import effective_variables
+    from backend.sandbox.settings import SandboxSettingsStore
+    from backend.sandbox.environment import HOST_ENVIRONMENT_NAMES
+    async with services._node_mutation(read_only=True):
+        snapshot, _ = requirements(services, node_id)
+        node = services.world.get_card(node_id)
+        names = {"PATH": "runtime"}
+        if "core.sandbox" in services.plugins.node_type(node.type).traits:
+            if services.sandbox_backend is not None:
+                from pathlib import Path
+                info = await services.sandbox_backend.get(node_id)
+                if info.platform == "windows":
+                    from backend.sandbox.environment import minimal_windows_environment
+                    base = minimal_windows_environment(Path("."), storage_directory=Path("."))
+                elif info.platform in {"linux", "macos"}:
+                    from backend.sandbox.linux import minimal_linux_environment
+                    # POSIX runtimes share these base names, including locale
+                    # and managed npm settings. Values remain runtime-private.
+                    base = minimal_linux_environment()
+                else:
+                    base = {}
+                names.update({name.upper(): "runtime" for name in base})
+            _, variables = effective_variables(services, node_id)
+            names.update({name.upper(): source for name, _, _, source in variables})
+        else:
+            defaults = SandboxSettingsStore(services.database, services.settings.data_root).read()
+            names.update({name.upper(): "global" for name in defaults.environment_variables if name.upper() not in HOST_ENVIRONMENT_NAMES})
+            names.update({name.upper(): "local" for name in snapshot["value"].get("variables", {})})
+        return names
+
+
 @router.put("/{node_id}/environment")
 async def save_environment(node_id: str, request: Request, services=Depends(get_services)):
     """Save portable configuration and private bindings in one host-only operation."""

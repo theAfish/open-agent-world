@@ -21,6 +21,22 @@ Marketplace previews read its packaging, accent color and card count without
 executing Pack code or loading arbitrary artwork URLs. Codex demonstrates this
 with `src/oaw_codex/pack.json` and premium packaging.
 
+For the same first-card icon and Pack artwork in Store previews, declare the
+existing runtime image files explicitly:
+
+```toml
+[distribution.preview]
+icon = "bot"
+icon_asset = "src/my_pack/assets/logo.svg"
+artwork_asset = "src/my_pack/assets/cover.png"
+```
+
+The image paths are optional and relative to the project. The builder embeds a
+code-free `manifest.preview` snapshot; images must be self-contained, supported
+image formats, at most 256 KiB each. Store and Library use the same `PackSurface`.
+Archives containing this new snapshot require an OAW Host that supports it;
+omitting it preserves the previous manifest shape.
+
 Default setup prepares Core, bundled Packs and optional runtime SDKs. Use
 `--core-only` for Core alone, or `--plugin-path` for selected projects. Schema 3 source loading does not require
 editable installation. The setup scripts prepare dependencies in the same `--profile`
@@ -40,7 +56,7 @@ name = "Research"
 
 [compatibility]
 plugin_api = "1.35"
-oaw = ">=0.1.0,<1"
+oaw = ">=0.1.0"
 
 [plugin]
 owner = "example.research"

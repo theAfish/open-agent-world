@@ -1,5 +1,5 @@
-.pack-dependencies { min-width: 0; margin-block: 16px; font-size: 12px; overflow-wrap: anywhere; }
-.pack-dependencies h4 { margin: 0 0 8px; font-size: 13px; }
+.pack-dependencies { min-width: 0; margin-block: 16px; font-size: 0.75rem; overflow-wrap: anywhere; }
+.pack-dependencies h4 { margin: 0 0 8px; font-size: 0.8125rem; }
 .pack-dependencies p { margin: 6px 0; }
 .pack-dependencies ul { padding-inline-start: 18px; }
 .pack-dependencies summary { cursor: pointer; color: var(--ink-soft); }
@@ -9,7 +9,7 @@
 .pack-environment-heading > span { color: var(--ink-soft); }
 .pack-environment[data-state="failed"] .pack-environment-heading > span { color: var(--danger); }
 .pack-environment > p { color: var(--ink-faint); }
-.pack-operations { display: grid; gap: 8px; margin-block: 12px; font-size: 12px; overflow-wrap: anywhere; }
+.pack-operations { display: grid; gap: 8px; margin-block: 12px; font-size: 0.75rem; overflow-wrap: anywhere; }
 .pack-operations summary { cursor: pointer; color: var(--ink-soft); }
 .pack-operation { padding-block: 5px; line-height: 1.5; overflow-wrap: anywhere; }
 .pack-removal-resources { padding-inline-start: 20px; overflow-wrap: anywhere; }

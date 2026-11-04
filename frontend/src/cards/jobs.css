@@ -1,7 +1,7 @@
-.jobs-board { container: jobs-board / inline-size; width: 100%; min-width: 0; height: 100%; box-sizing: border-box; padding: 12px; overflow: auto; color: var(--ink); font: 12px/1.5 var(--font-ui); }
+.jobs-board { container: jobs-board / inline-size; width: 100%; min-width: 0; height: 100%; box-sizing: border-box; padding: 12px; overflow: auto; color: var(--ink); font: 0.75rem/1.5 var(--font-ui); }
 .jobs-board > .jobs-toolbar { flex-wrap: nowrap; gap: 6px; padding: 0; margin-bottom: 10px; font: inherit; }
 .jobs-toolbar > select { flex: 0 1 auto; width: auto; min-width: 0; max-width: 150px; height: 28px; padding: 3px 24px 3px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-soft); background-color: var(--surface-raised); font: inherit; text-overflow: ellipsis; cursor: pointer; }
-.jobs-toolbar > .jobs-filter { width: 132px; height: 24px; padding-block: 1px; border-radius: 5px; background-color: transparent; font-size: 11px; }
+.jobs-toolbar > .jobs-filter { width: 132px; height: 24px; padding-block: 1px; border-radius: 5px; background-color: transparent; font-size: 0.6875rem; }
 .jobs-toolbar > .jobs-filter:has(option[value="all"]:checked) { width: 76px; }
 .jobs-toolbar > select:disabled { cursor: default; opacity: .6; }
 .jobs-toolbar-actions { display: flex; flex: 1 0 52px; justify-content: flex-end; align-items: center; min-width: 0; gap: 4px; }
@@ -18,29 +18,29 @@
 .job-tile-toggle { display: block; width: 100%; min-width: 0; padding: 10px; border: 0; border-radius: inherit; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .job-tile-toggle:hover { background: color-mix(in srgb, var(--surface-soft) 45%, transparent); }
 .job-tile-toggle:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
-.job-tile-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; line-height: 18px; }
+.job-tile-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; font-weight: 650; line-height: 18px; }
 .job-tile[data-expanded="true"] .job-tile-title { white-space: normal; }
-.job-tile-state { display: flex; align-items: center; gap: 6px; height: 16px; margin-top: 3px; font-size: 11px; line-height: 16px; white-space: nowrap; }
+.job-tile-state { display: flex; align-items: center; gap: 6px; height: 16px; margin-top: 3px; font-size: 0.6875rem; line-height: 16px; white-space: nowrap; }
 .job-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; color: var(--job-color); }
 .job-status > svg { flex: 0 0 auto; }
-.job-monitor-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); font-size: 10px; }
+.job-monitor-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); font-size: 0.625rem; }
 .job-monitor-state::before { content: '·'; margin-right: 6px; }
 .job-observation-indicator { display: inline-flex; flex: 0 0 auto; margin-left: auto; color: var(--danger); }
 .job-tile-details { padding: 0 10px 10px; }
-.job-observation-error, .jobs-error { color: var(--danger); font-size: 11px; overflow-wrap: anywhere; }
+.job-observation-error, .jobs-error { color: var(--danger); font-size: 0.6875rem; overflow-wrap: anywhere; }
 .job-controls { display: flex; justify-content: flex-end; gap: 3px; margin-top: 6px; }
 .job-metadata { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; border-top: 1px solid var(--line); padding-top: 10px; margin: 8px 0 0; }
-.job-metadata dt { font-size: 10px; color: var(--ink-soft); }
-.job-metadata dd { margin: 1px 0 0; font-size: 11px; white-space: pre-wrap; }
+.job-metadata dt { font-size: 0.625rem; color: var(--ink-soft); }
+.job-metadata dd { margin: 1px 0 0; font-size: 0.6875rem; white-space: pre-wrap; }
 .job-metadata-detail { grid-column: 1 / -1; }
 .job-cancel-confirm { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
 .job-cancel-confirm p { margin: 0 0 8px; }
-.job-cancel-confirm button { margin: 3px 6px 3px 0; white-space: normal; font-size: 11px; }
+.job-cancel-confirm button { margin: 3px 6px 3px 0; white-space: normal; font-size: 0.6875rem; }
 @container jobs-board (max-width: 360px) {
   .job-tile-toggle { padding: 8px; }
   .job-tile-details { padding: 0 8px 8px; }
   .jobs-board > .jobs-toolbar { gap: 4px; }
-  .jobs-toolbar > select { max-width: 120px; font-size: 11px; }
+  .jobs-toolbar > select { max-width: 120px; font-size: 0.6875rem; }
   .jobs-toolbar-actions { gap: 2px; }
 }
 @container jobs-board (max-width: 240px) {

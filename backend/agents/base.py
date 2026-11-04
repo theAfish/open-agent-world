@@ -53,6 +53,32 @@ class AgentCapabilityProvider(Protocol):
         """Claim input only after the runtime has included/accepted it."""
         ...
 
+    async def conversation_attachments(self, agent_id: str, run_id: str) -> list[dict[str, Any]]:
+        """List sent attachments visible to this Run's current conversation history.
+
+        Returns references and metadata, never file bytes or host paths. A Run
+        outside a conversation returns an empty list.
+        """
+        ...
+
+    async def read_conversation_attachment(
+        self, agent_id: str, run_id: str, version_id: str, path: str,
+        *, max_bytes: int = 32 * 1024 * 1024,
+    ) -> bytes:
+        """Read verified, bounded bytes from a listed current-session attachment."""
+        ...
+
+    async def publish_conversation_attachment(
+        self, agent_id: str, run_id: str, name: str, data: bytes, *, request_key: str,
+    ) -> dict[str, Any]:
+        """Retain runtime-produced bytes and return an attachment reference.
+
+        Repeating the same key and contents is idempotent. Publish does not send
+        a message; invoke the authorized send_conversation_message tool with the
+        returned version_id/path to deliver the file.
+        """
+        ...
+
     async def invoke_tool(
         self,
         agent_id: str,

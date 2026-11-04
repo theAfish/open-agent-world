@@ -203,7 +203,7 @@ def prepare_export(record: LegionRecord, request: CreatorRequest, registry) -> t
         # A Pack version loads its owning plugin's full contribution set.
         dependencies.append(PackDependency(id=packs[0].id, version="==" + descriptors[owner].version))
     manifest = PackManifest(schema_version=2, kind="content", id=request.id, name=request.name,
-        version=request.version, compatibility={"oaw": f">={__version__},<1", "plugin_api": PLUGIN_API_VERSION, "frontend_api": 1},
+        version=request.version, compatibility={"oaw": f">={__version__}", "plugin_api": PLUGIN_API_VERSION, "frontend_api": 1},
         dependencies=Dependencies(packs=tuple(dependencies)), content=Content(legions=("content/legion.json",)), creator=request.creator)
     preset = LegionBlueprintPreset(id=manifest.id + ".legion", name=record.name,
         description=record.description, revision=record.revision, blueprint=blueprint)

@@ -33,7 +33,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.42"
+PLUGIN_API_VERSION = "1.43"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -702,14 +702,26 @@ class PluginRegistry:
                     raise ValueError(f"Capability {grant.kind!r} needs a registered operation definition")
 
     def _validate_registration(self, staged: PluginRegistration) -> None:
-        from backend.state.schema import StateSchema
+        # Keep every check ahead of the commit, in the same validation order.
+        self._validate_assets(staged)
+        self._validate_contribution_ownership(staged)
+        self._validate_presets(staged)
+        self._validate_packs(staged)
+        self._validate_state_schemas(staged)
+        for node in staged.nodes.values():
+            self._validate_node(node, staged)
+        self._validate_capabilities(staged)
+        self._validate_relationships(staged)
 
+    @staticmethod
+    def _validate_assets(staged: PluginRegistration) -> None:
         for asset in staged.assets.values():
             if not isinstance(asset.content, bytes) or not asset.content or len(asset.content) > 5 * 1024 * 1024:
                 raise ValueError("public assets require 1 byte to 5 MiB of content")
             if asset.media_type not in {"image/svg+xml", "image/png", "image/jpeg", "image/webp", "image/gif"}:
                 raise ValueError("unsupported public asset media type")
 
+    def _validate_contribution_ownership(self, staged: PluginRegistration) -> None:
         contribution_sets = (
             ("background_job_provider", "background job provider", self._background_job_providers, staged.background_job_providers),
             ("legion_preset", "Legion preset", self._legion_presets, staged.legion_presets),
@@ -749,6 +761,7 @@ class PluginRegistry:
                     f"{label} {duplicate!r} is already owned by plugin {owner!r}"
                 )
 
+    def _validate_presets(self, staged: PluginRegistration) -> None:
         for preset in staged.legion_presets.values():
             from backend.legions.presets import plugin_preset_record
             # Validate against a temporary registry, before publishing any contribution.
@@ -769,11 +782,12 @@ class PluginRegistry:
                 candidate.validate_relationship_order(nodes[edge.source].type, nodes[edge.target].type, edge.relationship)
                 candidate.validate_direction(edge.relationship, edge.direction)
 
+    def _validate_packs(self, staged: PluginRegistration) -> None:
         # Source and schema 3 Packs may collect canonical host cards without
         # taking ownership.
         host_cards = {key for key in self._nodes
                       if self.node_type_owner_id(key) == "open-agent-world.core"}
-        covered = set()
+        covered_node_types = set()
         for pack in staged.packs.values():
             if not pack.cards and not staged.legion_presets:
                 raise ValueError("A Pack must contain cards or Legion presets")
@@ -783,9 +797,13 @@ class PluginRegistry:
                 raise ValueError(f"pack {pack.id!r} contains duplicate cards")
             if not set(pack.cards) <= staged.nodes.keys() | host_cards:
                 raise ValueError(f"pack {pack.id!r} may reference only this plugin's node types or host cards")
-            covered.update(pack.cards)
-        if staged.nodes.keys() - covered:
+            covered_node_types.update(pack.cards)
+        if staged.nodes.keys() - covered_node_types:
             raise ValueError("Every registered node type must belong to a pack")
+
+    @staticmethod
+    def _validate_state_schemas(staged: PluginRegistration) -> None:
+        from backend.state.schema import StateSchema
 
         for schema in staged.state_schemas.values():
             if not isinstance(schema, StateSchema):
@@ -793,212 +811,250 @@ class PluginRegistry:
             if "." not in schema.id:
                 raise ValueError("state schema ids must be namespaced")
 
-        for definition in staged.nodes.values():
-            validate_tutorials(definition.tutorials)
-            definition.resolved_presentation()
-            if definition.default_equipment:
-                if not all(isinstance(item, DefaultEquipment) for item in definition.default_equipment):
-                    raise TypeError("Default equipment entries must be DefaultEquipment declarations")
-                if "core.agent" not in definition.traits:
-                    raise ValueError("Default equipment requires an Agent owner")
-                if len(definition.default_equipment) > 16 or len({item.key for item in definition.default_equipment}) != len(definition.default_equipment):
-                    raise ValueError("Default equipment requires at most 16 unique slots")
-                for item in definition.default_equipment:
-                    target = staged.nodes.get(item.type)
-                    relationship = staged.relationships.get(item.relationship)
-                    if target is None or relationship is None:
-                        raise ValueError("Default equipment types and relationships must belong to the declaring plugin")
-                    if (target.document is None or target.document.initial_value is None or target.state is not None
-                        or target.lifecycle or target.execution or target.template_handler or target.resource_actions
-                        or target.default_equipment or "core.agent" in target.traits):
-                        raise ValueError("Default equipment supports inert document resources only")
-                    def matches(source, dest):
-                        return ((not relationship.source_types or source.id in relationship.source_types)
-                            and (not relationship.target_types or dest.id in relationship.target_types)
-                            and relationship.source_traits <= source.traits and relationship.target_traits <= dest.traits)
-                    if relationship.generated or not (matches(definition, target) or matches(target, definition)):
-                        raise ValueError("Default equipment relationship cannot connect its owner and target")
-            if definition.card_face is not None:
-                face = CardFaceSpec.model_validate(definition.card_face)
-                if face.image_asset is not None:
-                    asset = staged.assets.get(face.image_asset)
-                    if asset is None or not asset.media_type.startswith("image/"):
-                        raise ValueError("card face image must reference an image asset registered by the same plugin")
-            if definition.authoring is not None:
-                from backend.packs.interfaces import CardInterface
-                interface = CardInterface.model_validate(definition.authoring)
-                actions = {interface.action, *(binding.logic_id for binding in interface.function.button_bindings or [])}
-                if actions - definition.resource_actions.keys():
-                    raise ValueError("Card interfaces must bind registered resource actions")
-            elif 'oaw.authoring-card' in definition.frontend.values():
-                raise ValueError("The authoring renderer requires a validated Card interface")
-            if definition.icon_asset is not None and definition.icon_asset not in staged.assets:
-                raise ValueError("node icon must reference an asset registered by the same plugin")
-            for slot, reference in definition.frontend.items():
-                if slot not in {"preview", "body", "settings", "workspace"}:
-                    raise ValueError(f"unknown frontend slot {slot!r}")
-                self.validate_identifier(reference, "frontend view")
-            if (
-                not definition.statuses
-                or definition.default_status not in definition.statuses
-            ):
-                raise ValueError(
-                    f"node type {definition.id!r} has an invalid default status"
-                )
-            if (
-                definition.template_status is not None
-                and definition.template_status not in definition.statuses
-            ):
-                raise ValueError(
-                    f"node type {definition.id!r} has an invalid template status"
-                )
-            if definition.template_status is not None:
-                default_config = definition.config_model().model_dump(mode="json")
-                try:
-                    validated_template_config = definition.config_model.model_validate({
-                        **default_config,
-                        "status": definition.template_status,
-                    }).model_dump(mode="json")
-                except ValidationError as exc:
-                    raise ValueError(
-                        f"node type {definition.id!r} template status cannot be "
-                        "represented by its config model"
-                    ) from exc
-                if validated_template_config.get("status") != definition.template_status:
-                    raise ValueError(
-                        f"node type {definition.id!r} template status cannot be "
-                        "represented by its config model"
-                    )
-            if definition.template_handler is not None and not definition.templateable:
-                raise ValueError(
-                    f"node type {definition.id!r} provides a template handler but is not "
-                    "templateable"
-                )
-            if (
-                definition.template_handler is not None
-                and definition.template_handler.payload_version < 1
-            ):
-                raise ValueError(
-                    f"node type {definition.id!r} template payload version must be positive"
-                )
-            for name, action in definition.resource_actions.items():
-                if not _IDENTIFIER.fullmatch(name) or not callable(action.handler):
-                    raise ValueError("resource actions require a valid name and handler")
-                if action.capability_kind and action.capability_kind not in staged.capability_handlers:
-                    raise ValueError("resource action capabilities must be owned by the same plugin")
-            if definition.deployment is not None:
-                if not isinstance(definition.deployment, NodeDeploymentDefinition):
-                    raise TypeError("deployment must be a NodeDeploymentDefinition")
-                definition.deployment.validate_node(definition)
-            if definition.document is not None:
-                document = definition.document
-                document.model()
-                if document.initial_value is not None:
-                    document.model.model_validate(document.initial_value)
-                if not all(callable(fn) for fn in (document.capture, document.summarize, document.remap_references)):
-                    raise TypeError("document capture, summary and reference remapping must be callable")
-                for name, action in document.actions.items():
-                    if not name or name == "replace" or not callable(action.handler):
-                        raise ValueError("document actions require a handler and cannot use reserved name 'replace'")
-                    if (action.capability_kind and action.capability_kind not in staged.capability_handlers
-                        and not (action.read_only and any(
-                            existing_action.read_only and existing_action.capability_kind == action.capability_kind
-                            for existing_node in self._nodes.values() if existing_node.document
-                            for existing_action in existing_node.document.actions.values()))):
-                        raise ValueError("document action capabilities must be owned by the same plugin, or reuse an installed read-only operation")
-            if definition.summoning:
-                if definition.document is None or definition.summoning.capability_kind not in staged.capability_handlers:
-                    raise ValueError("Summoning requires a document and a capability owned by the same plugin")
-                if definition.container is None:
-                    raise ValueError("Summoning catalogs require a container")
-            if definition.container:
-                if definition.container.member_display not in {"cards", "workspace"}:
-                    raise ValueError("Unknown container member display")
-                if definition.container.member_display == "workspace" and not definition.frontend.get("workspace"):
-                    raise ValueError("Workspace member display requires a frontend workspace")
-            if definition.container and definition.container.document_field:
-                member = staged.nodes.get(definition.container.member_type)
-                if member is None or member.document is None or member.lifecycle is not None:
-                    raise ValueError("Document collections require an owned document-only member type")
-                if definition.document is None or definition.container.document_field not in definition.document.model.model_fields:
-                    raise ValueError("Document collection field must be present in the container document")
-            if definition.execution is not None:
-                execution = definition.execution
-                if definition.document is None:
-                    raise ValueError("executable nodes require a document")
-                if not all(callable(fn) for fn in (execution.items, execution.apply_outcome, execution.policy)):
-                    raise TypeError("execution callbacks must be callable")
-                if not execution.summoning and execution.executor_relationship not in staged.relationships:
-                    raise ValueError("executor relationship must be owned by the same plugin")
-                if execution.control_capability_kind and execution.control_capability_kind not in staged.capability_handlers:
-                    raise ValueError("execution control capability must be owned by the same plugin")
+    def _validate_node(self, node: NodeTypeDefinition, staged: PluginRegistration) -> None:
+        validate_tutorials(node.tutorials)
+        node.resolved_presentation()
+        self._validate_default_equipment(node, staged)
+        self._validate_node_presentation(node, staged)
+        self._validate_node_template(node)
+        self._validate_resource_actions(node, staged)
+        if node.deployment is not None:
+            if not isinstance(node.deployment, NodeDeploymentDefinition):
+                raise TypeError("deployment must be a NodeDeploymentDefinition")
+            node.deployment.validate_node(node)
+        self._validate_node_document(node, staged)
+        self._validate_node_container(node, staged)
+        self._validate_node_execution(node, staged)
+        self._validate_node_config(node)
+
+    @staticmethod
+    def _validate_default_equipment(node: NodeTypeDefinition, staged: PluginRegistration) -> None:
+        if node.default_equipment:
+            if not all(isinstance(equipment, DefaultEquipment) for equipment in node.default_equipment):
+                raise TypeError("Default equipment entries must be DefaultEquipment declarations")
+            if "core.agent" not in node.traits:
+                raise ValueError("Default equipment requires an Agent owner")
+            if len(node.default_equipment) > 16 or len({equipment.key for equipment in node.default_equipment}) != len(node.default_equipment):
+                raise ValueError("Default equipment requires at most 16 unique slots")
+            for equipment in node.default_equipment:
+                resource_node = staged.nodes.get(equipment.type)
+                relationship = staged.relationships.get(equipment.relationship)
+                if resource_node is None or relationship is None:
+                    raise ValueError("Default equipment types and relationships must belong to the declaring plugin")
+                if (resource_node.document is None or resource_node.document.initial_value is None or resource_node.state is not None
+                    or resource_node.lifecycle or resource_node.execution or resource_node.template_handler or resource_node.resource_actions
+                    or resource_node.default_equipment or "core.agent" in resource_node.traits):
+                    raise ValueError("Default equipment supports inert document resources only")
+                def matches(source_node, target_node):
+                    return ((not relationship.source_types or source_node.id in relationship.source_types)
+                        and (not relationship.target_types or target_node.id in relationship.target_types)
+                        and relationship.source_traits <= source_node.traits and relationship.target_traits <= target_node.traits)
+                if relationship.generated or not (matches(node, resource_node) or matches(resource_node, node)):
+                    raise ValueError("Default equipment relationship cannot connect its owner and target")
+
+    def _validate_node_presentation(self, node: NodeTypeDefinition, staged: PluginRegistration) -> None:
+        if node.card_face is not None:
+            face = CardFaceSpec.model_validate(node.card_face)
+            if face.image_asset is not None:
+                asset = staged.assets.get(face.image_asset)
+                if asset is None or not asset.media_type.startswith("image/"):
+                    raise ValueError("card face image must reference an image asset registered by the same plugin")
+        if node.authoring is not None:
+            from backend.packs.interfaces import CardInterface
+            interface = CardInterface.model_validate(node.authoring)
+            actions = {interface.action, *(binding.logic_id for binding in interface.function.button_bindings or [])}
+            if actions - node.resource_actions.keys():
+                raise ValueError("Card interfaces must bind registered resource actions")
+        elif 'oaw.authoring-card' in node.frontend.values():
+            raise ValueError("The authoring renderer requires a validated Card interface")
+        if node.icon_asset is not None and node.icon_asset not in staged.assets:
+            raise ValueError("node icon must reference an asset registered by the same plugin")
+        for slot, reference in node.frontend.items():
+            if slot not in {"preview", "body", "settings", "workspace"}:
+                raise ValueError(f"unknown frontend slot {slot!r}")
+            self.validate_identifier(reference, "frontend view")
+
+    @staticmethod
+    def _validate_node_template(node: NodeTypeDefinition) -> None:
+        if (
+            not node.statuses
+            or node.default_status not in node.statuses
+        ):
+            raise ValueError(
+                f"node type {node.id!r} has an invalid default status"
+            )
+        if (
+            node.template_status is not None
+            and node.template_status not in node.statuses
+        ):
+            raise ValueError(
+                f"node type {node.id!r} has an invalid template status"
+            )
+        if node.template_status is not None:
+            default_config = node.config_model().model_dump(mode="json")
             try:
-                default_config = definition.config_model().model_dump(mode="json")
+                validated_template_config = node.config_model.model_validate({
+                    **default_config,
+                    "status": node.template_status,
+                }).model_dump(mode="json")
             except ValidationError as exc:
                 raise ValueError(
-                    f"node type {definition.id!r} config model must provide defaults "
-                    "for palette creation"
+                    f"node type {node.id!r} template status cannot be "
+                    "represented by its config model"
                 ) from exc
-            if definition.data_consumer is not None:
-                consumer = definition.data_consumer
-                if any(not isinstance(default_config.get(name), str)
-                       for name in (consumer.source_field, consumer.schema_field)):
-                    raise ValueError("data consumer fields must name string config fields with defaults")
+            if validated_template_config.get("status") != node.template_status:
+                raise ValueError(
+                    f"node type {node.id!r} template status cannot be "
+                    "represented by its config model"
+                )
+        if node.template_handler is not None and not node.templateable:
+            raise ValueError(
+                f"node type {node.id!r} provides a template handler but is not "
+                "templateable"
+            )
+        if (
+            node.template_handler is not None
+            and node.template_handler.payload_version < 1
+        ):
+            raise ValueError(
+                f"node type {node.id!r} template payload version must be positive"
+            )
 
-        operations: dict[str, CapabilityDefinition] = {}
-        for definition in (*self._capabilities.values(), *staged.capabilities.values()):
-            names = [definition.tool_name, definition.target_parameter,
-                     *(s.parameter for s in definition.selectors), *(s.argument for s in definition.selectors)]
-            if any(not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,63}", name) or keyword.iskeyword(name) for name in names):
-                raise ValueError("Capability operation and selector names must be valid tool identifiers")
-            selectors = [definition.target_parameter, *(s.parameter for s in definition.selectors)]
-            if len(set(selectors)) != len(selectors) or set(selectors) & definition.input_schema.get("properties", {}).keys():
-                raise ValueError("Capability selectors must not collide with operation parameters")
-            arguments = [s.argument for s in definition.selectors]
-            if len(set(arguments)) != len(arguments) or set(arguments) & definition.input_schema.get("properties", {}).keys():
-                raise ValueError("Selector destination arguments must be unique and separate from operation parameters")
-            if any(s.argument in set(selectors) - {s.parameter} for s in definition.selectors):
-                raise ValueError("Selector destination arguments must not overwrite other selectors")
-            if any(s.include_members and not s.document_action for s in definition.selectors):
-                raise ValueError("Member selectors require an authorized document action")
-            if any(not isinstance(s.required, bool) for s in definition.selectors):
-                raise ValueError("Selector required must be a boolean")
-            if definition.kind in staged.capabilities and definition.kind not in staged.capability_handlers:
+    @staticmethod
+    def _validate_resource_actions(node: NodeTypeDefinition, staged: PluginRegistration) -> None:
+        for name, action in node.resource_actions.items():
+            if not _IDENTIFIER.fullmatch(name) or not callable(action.handler):
+                raise ValueError("resource actions require a valid name and handler")
+            if action.capability_kind and action.capability_kind not in staged.capability_handlers:
+                raise ValueError("resource action capabilities must be owned by the same plugin")
+
+    def _validate_node_document(self, node: NodeTypeDefinition, staged: PluginRegistration) -> None:
+        if node.document is not None:
+            document = node.document
+            document.model()
+            if document.initial_value is not None:
+                document.model.model_validate(document.initial_value)
+            if not all(callable(fn) for fn in (document.capture, document.summarize, document.remap_references)):
+                raise TypeError("document capture, summary and reference remapping must be callable")
+            for name, action in document.actions.items():
+                if not name or name == "replace" or not callable(action.handler):
+                    raise ValueError("document actions require a handler and cannot use reserved name 'replace'")
+                if (action.capability_kind and action.capability_kind not in staged.capability_handlers
+                    and not (action.read_only and any(
+                        existing_action.read_only and existing_action.capability_kind == action.capability_kind
+                        for existing_node in self._nodes.values() if existing_node.document
+                        for existing_action in existing_node.document.actions.values()))):
+                    raise ValueError("document action capabilities must be owned by the same plugin, or reuse an installed read-only operation")
+
+    @staticmethod
+    def _validate_node_container(node: NodeTypeDefinition, staged: PluginRegistration) -> None:
+        if node.summoning:
+            if node.document is None or node.summoning.capability_kind not in staged.capability_handlers:
+                raise ValueError("Summoning requires a document and a capability owned by the same plugin")
+            if node.container is None:
+                raise ValueError("Summoning catalogs require a container")
+        if node.container:
+            if node.container.member_display not in {"cards", "workspace"}:
+                raise ValueError("Unknown container member display")
+            if node.container.member_display == "workspace" and not node.frontend.get("workspace"):
+                raise ValueError("Workspace member display requires a frontend workspace")
+        if node.container and node.container.document_field:
+            member = staged.nodes.get(node.container.member_type)
+            if member is None or member.document is None or member.lifecycle is not None:
+                raise ValueError("Document collections require an owned document-only member type")
+            if node.document is None or node.container.document_field not in node.document.model.model_fields:
+                raise ValueError("Document collection field must be present in the container document")
+
+    @staticmethod
+    def _validate_node_execution(node: NodeTypeDefinition, staged: PluginRegistration) -> None:
+        if node.execution is not None:
+            execution = node.execution
+            if node.document is None:
+                raise ValueError("executable nodes require a document")
+            if not all(callable(fn) for fn in (execution.items, execution.apply_outcome, execution.policy)):
+                raise TypeError("execution callbacks must be callable")
+            if not execution.summoning and execution.executor_relationship not in staged.relationships:
+                raise ValueError("executor relationship must be owned by the same plugin")
+            if execution.control_capability_kind and execution.control_capability_kind not in staged.capability_handlers:
+                raise ValueError("execution control capability must be owned by the same plugin")
+
+    @staticmethod
+    def _validate_node_config(node: NodeTypeDefinition) -> None:
+        try:
+            default_config = node.config_model().model_dump(mode="json")
+        except ValidationError as exc:
+            raise ValueError(
+                f"node type {node.id!r} config model must provide defaults "
+                "for palette creation"
+            ) from exc
+        if node.data_consumer is not None:
+            consumer = node.data_consumer
+            if any(not isinstance(default_config.get(name), str)
+                   for name in (consumer.source_field, consumer.schema_field)):
+                raise ValueError("data consumer fields must name string config fields with defaults")
+
+    def _validate_capabilities(self, staged: PluginRegistration) -> None:
+        operations_by_name: dict[str, CapabilityDefinition] = {}
+        for capability in (*self._capabilities.values(), *staged.capabilities.values()):
+            self._validate_capability_selectors(capability)
+            if capability.kind in staged.capabilities and capability.kind not in staged.capability_handlers:
                 raise ValueError("Capability definitions must own their handlers")
-            previous = operations.get(definition.tool_name)
-            if previous is not None and (
-                previous.description, previous.input_schema, previous.target_parameter, previous.selectors, previous.target_capabilities
-            ) != (definition.description, definition.input_schema, definition.target_parameter, definition.selectors, definition.target_capabilities):
-                raise ValueError(f"Conflicting contracts for operation {definition.tool_name!r}")
-            operations[definition.tool_name] = definition
+            previous_operation = operations_by_name.get(capability.tool_name)
+            if previous_operation is not None and (
+                previous_operation.description, previous_operation.input_schema, previous_operation.target_parameter, previous_operation.selectors, previous_operation.target_capabilities
+            ) != (capability.description, capability.input_schema, capability.target_parameter, capability.selectors, capability.target_capabilities):
+                raise ValueError(f"Conflicting contracts for operation {capability.tool_name!r}")
+            operations_by_name[capability.tool_name] = capability
 
         known_handlers = (
             self._capability_handlers.keys() | staged.capability_handlers.keys()
         )
-        for definition in staged.capabilities.values():
-            required = set(definition.target_capabilities)
-            for selector in definition.selectors:
-                required.update(selector.capability_kinds)
-            if required - known_handlers:
-                raise ValueError(f"Capability {definition.kind!r} references unregistered capability kinds: "
-                                 + ", ".join(sorted(required - known_handlers)))
-        for definition in staged.relationships.values():
-            if not definition.directions or not definition.directions <= {
+        for capability in staged.capabilities.values():
+            required_handlers = set(capability.target_capabilities)
+            for selector in capability.selectors:
+                required_handlers.update(selector.capability_kinds)
+            if required_handlers - known_handlers:
+                raise ValueError(f"Capability {capability.kind!r} references unregistered capability kinds: "
+                                 + ", ".join(sorted(required_handlers - known_handlers)))
+
+    @staticmethod
+    def _validate_capability_selectors(capability: CapabilityDefinition) -> None:
+        tool_identifiers = [capability.tool_name, capability.target_parameter,
+                 *(selector.parameter for selector in capability.selectors), *(selector.argument for selector in capability.selectors)]
+        if any(not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,63}", name) or keyword.iskeyword(name) for name in tool_identifiers):
+            raise ValueError("Capability operation and selector names must be valid tool identifiers")
+        selector_parameters = [capability.target_parameter, *(selector.parameter for selector in capability.selectors)]
+        if len(set(selector_parameters)) != len(selector_parameters) or set(selector_parameters) & capability.input_schema.get("properties", {}).keys():
+            raise ValueError("Capability selectors must not collide with operation parameters")
+        destination_arguments = [selector.argument for selector in capability.selectors]
+        if len(set(destination_arguments)) != len(destination_arguments) or set(destination_arguments) & capability.input_schema.get("properties", {}).keys():
+            raise ValueError("Selector destination arguments must be unique and separate from operation parameters")
+        if any(selector.argument in set(selector_parameters) - {selector.parameter} for selector in capability.selectors):
+            raise ValueError("Selector destination arguments must not overwrite other selectors")
+        if any(selector.include_members and not selector.document_action for selector in capability.selectors):
+            raise ValueError("Member selectors require an authorized document action")
+        if any(not isinstance(selector.required, bool) for selector in capability.selectors):
+            raise ValueError("Selector required must be a boolean")
+
+    def _validate_relationships(self, staged: PluginRegistration) -> None:
+        known_handlers = self._capability_handlers.keys() | staged.capability_handlers.keys()
+        for relationship in staged.relationships.values():
+            if not relationship.directions or not relationship.directions <= {
                 "forward",
                 "bidirectional",
             }:
                 raise ValueError(
-                    f"relationship {definition.id!r} has invalid directions"
+                    f"relationship {relationship.id!r} has invalid directions"
                 )
-            missing = [
+            missing_handlers = [
                 grant.kind
-                for grant in definition.capabilities
+                for grant in relationship.capabilities
                 if grant.kind not in known_handlers
             ]
-            if missing:
+            if missing_handlers:
                 raise ValueError(
-                    f"relationship {definition.id!r} references unregistered "
-                    "capability handlers: " + ", ".join(missing)
+                    f"relationship {relationship.id!r} references unregistered "
+                    "capability handlers: " + ", ".join(missing_handlers)
                 )
 
     def _commit_owned(

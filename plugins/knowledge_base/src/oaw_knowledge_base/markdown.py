@@ -19,8 +19,11 @@ import csv
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import zipfile
+from importlib.util import find_spec
 from pathlib import Path
 
 from .errors import KnowledgeError
@@ -44,17 +47,16 @@ VISION_PROMPT = (
     "titles or legends. If it is a chart, plot or gel image, also describe its type "
     "and what it shows. Reply with plain text or markdown only, no commentary.")
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
+NATIVE_CONVERSION_TIMEOUT = 120
 
 
 def available_engines(mineru_base_url=None, *, resolve_secret=None, resolve_model=None,
                       vision_model=""):
     """What this deployment can actually run, for the overview action."""
     engines = ["text", "tabular"]
-    try:
-        import pymupdf4llm  # noqa: F401
-    except ImportError:
-        pass
-    else:
+    # Overview holds the canvas mutation lock. Detect installation without
+    # loading the PDF engine and its native layout/NumPy dependencies here.
+    if find_spec('pymupdf4llm') is not None:
         engines.insert(0, "pymupdf4llm")
     if mineru_base_url and _secret(MINERU_TOKEN_ENV, resolve_secret):
         engines.append("mineru")
@@ -201,7 +203,40 @@ def _csv_markdown(data, delimiter):
     return _rows_to_markdown_table(rows)
 
 
+def _native_markdown(kind, data):
+    # Native PDF/NumPy initialization can block Windows thread creation. Keep
+    # it outside the host, including when another import submits a new job.
+    request = json.dumps({'kind': kind, 'paths': sys.path,
+                          'data': base64.b64encode(data).decode('ascii')}).encode()
+    allowed = {'PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'HOME',
+               'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'LANG', 'LC_ALL',
+               'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'OMP_NUM_THREADS'}
+    environment = {key: value for key, value in os.environ.items() if key.upper() in allowed}
+    try:
+        result = subprocess.run([sys.executable, '-I', '-S',
+            str(Path(__file__).with_name('conversion_worker.py'))], input=request,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=NATIVE_CONVERSION_TIMEOUT,
+            env=environment,
+            **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+    except subprocess.TimeoutExpired as error:
+        raise KnowledgeError(f'Local {kind.upper()} conversion timed out after {NATIVE_CONVERSION_TIMEOUT}s. '
+            'The source is retained; retry its conversion.') from error
+    except OSError as error:
+        raise KnowledgeError(f'Could not start local {kind.upper()} conversion: {error}') from error
+    try:
+        response = json.loads(result.stdout)
+    except (ValueError, UnicodeDecodeError):
+        raise KnowledgeError(f'Local {kind.upper()} converter exited without a result (exit {result.returncode})') from None
+    if not response.get('ok'):
+        raise KnowledgeError(response.get('error') or f'Local {kind.upper()} conversion failed')
+    return response['text']
+
+
 def _xlsx_markdown(data):
+    return _native_markdown('xlsx', data)
+
+
+def _xlsx_markdown_local(data):
     try:
         from openpyxl import load_workbook
     except ImportError as error:
@@ -239,6 +274,10 @@ def _text_markdown(data, filename):
 
 
 def _pymupdf_markdown(data):
+    return _native_markdown('pdf', data)
+
+
+def _pymupdf_markdown_local(data):
     import pymupdf4llm
 
     with tempfile.TemporaryDirectory() as directory:

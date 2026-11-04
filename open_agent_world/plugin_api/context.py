@@ -30,9 +30,12 @@ class PluginEnvironment:
     def read(self) -> EnvironmentHandle | ExecutableHandle:
         from backend.packs.executables import ExecutableEnvironmentManager
         if isinstance(self.manager, ExecutableEnvironmentManager):
-            if self.status().get('management') == 'external':
+            try:
+                return self.manager.read(self.spec)
+            except RuntimeError:
+                if not self.spec.accept_external:
+                    raise
                 return self.manager.read_external(self.spec)
-            return self.manager.read(self.spec)
         return self.manager.read_python(self.spec)
 
     def prepare(self) -> EnvironmentHandle | ExecutableHandle:

@@ -21,6 +21,7 @@ from packaging.version import Version
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, model_serializer
 
 from backend.packs.interfaces import CardInterface
+from backend.packs.metadata import PREVIEW_ICON, PREVIEW_IMAGE_LIMIT, preview_image_media_type
 from backend.plugins.registry import PackDefinition
 
 ENTRY_POINT_GROUP = "open_agent_world.plugins"
@@ -78,7 +79,7 @@ class BackendComponent(SpecModel):
 
 class CompatibilitySpec(SpecModel):
     plugin_api: str = Field(pattern=r"^\d+\.\d+$")
-    oaw: str = ">=0.1.0,<1"
+    oaw: str = ">=0.1.0"
     frontend_api: Literal[1] = 1
 
     @field_validator("oaw")
@@ -86,6 +87,17 @@ class CompatibilitySpec(SpecModel):
     def oaw_version(cls, value: str) -> str:
         SpecifierSet(value)
         return value
+
+
+class PreviewSpec(SpecModel):
+    icon: str | None = Field(default=None, pattern=PREVIEW_ICON)
+    icon_asset: str | None = None
+    artwork_asset: str | None = None
+
+    @field_validator("icon_asset", "artwork_asset")
+    @classmethod
+    def image_paths(cls, value: str | None) -> str | None:
+        return relative_path(value) if value is not None else None
 
 
 class FrontendComponent(SpecModel):
@@ -296,6 +308,7 @@ class PackSpec(SpecModel):
     contributions: Contributions = Field(default_factory=Contributions)
     designs: dict[str, CardInterface] = Field(default_factory=dict)
     presentation: PackDefinition | None = None
+    preview: PreviewSpec | None = None
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
@@ -305,6 +318,8 @@ class PackSpec(SpecModel):
             data.pop("designs", None)
         if self.presentation is None:
             data.pop("presentation", None)
+        if self.preview is None:
+            data.pop("preview", None)
         return data
 
     @field_validator("version")
@@ -416,6 +431,7 @@ class _Distribution(SpecModel):
     version: str | None = None
     name: str | None = None
     presentation: str | None = None
+    preview: PreviewSpec | None = None
 
 
 class _Plugin(SpecModel):
@@ -620,6 +636,15 @@ def read_source_pack(root: Path) -> PackSpec:
     compatibility = declaration.compatibility
     presentation = (PackDefinition.model_validate_json(reader.read(declaration.distribution.presentation))
                     if declaration.distribution.presentation else None)
+    preview = declaration.distribution.preview
+    if preview:
+        for relative in (preview.icon_asset, preview.artwork_asset):
+            if relative is None:
+                continue
+            parts = PurePosixPath(relative).parts
+            if any(reader.root.joinpath(*parts[:index]).is_symlink() for index in range(1, len(parts) + 1)):
+                raise ValueError("Preview images must not contain symlink paths")
+            preview_image_media_type(reader.read(relative, max_bytes=PREVIEW_IMAGE_LIMIT))
     if cards or designs:
         required_api = '1.39' if designs else '1.38' if entrypoints else '1.37'
         compatibility = compatibility or CompatibilitySpec(plugin_api=required_api)
@@ -703,7 +728,7 @@ def read_source_pack(root: Path) -> PackSpec:
     return PackSpec(distribution_id=declaration.distribution.id, version=version,
                     name=declaration.distribution.name or project["name"], owner=owner,
                     packs=packs, node_types=node_types, contributions=contributions, designs=designs,
-                    presentation=presentation,
+                    presentation=presentation, preview=preview,
                     entrypoints=entrypoints, backend=backend, frontend=frontend,
                     environments=environments, features=declaration.features, prerequisites=declaration.prerequisites,
                     dependencies=declaration.dependencies, dependency_groups=groups, source_files=reader.files,

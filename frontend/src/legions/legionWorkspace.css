@@ -10,21 +10,21 @@
 .legion-window-titlebar { display: flex; flex-shrink: 0; align-items: center; gap: 8px; min-height: 46px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--chrome); }
 .legion-window-mark { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; color: var(--accent-strong); }
 .legion-window-title { display: flex; min-width: 0; margin-right: auto; }
-.legion-window-title strong { font-size: 14px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legion-window-title strong { font-size: 0.875rem; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legion-workspace-switcher { position: relative; min-width: 0; }
 .legion-window-titlebar .legion-workspace-trigger { display: flex; align-items: center; padding: 0 5px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
 .legion-workspace-trigger > svg { flex-shrink: 0; color: var(--ink-faint); transition: transform 120ms ease; }
 .legion-workspace-trigger > svg.is-open { transform: rotate(180deg); }
 .legion-window-titlebar .legion-workspace-trigger:hover { background: var(--surface-soft); }
 .legion-workspace-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(300px, calc(100vw - 40px)); max-height: min(420px, calc(100dvh - 90px)); overflow-y: auto; padding: 6px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-solid); box-shadow: 0 12px 32px var(--shadow); }
-.legion-workspace-menu-label { padding: 6px 9px 8px; color: var(--ink-faint); font-size: 10px; }
+.legion-workspace-menu-label { padding: 6px 9px 8px; color: var(--ink-faint); font-size: 0.625rem; }
 .legion-window-titlebar .legion-workspace-menu button { display: flex; align-items: center; width: 100%; height: 38px; border: 0; background: transparent; color: var(--ink-soft); text-align: left; cursor: pointer; }
 .legion-workspace-menu button > span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .legion-workspace-menu button > svg { flex-shrink: 0; }
 .legion-window-titlebar .legion-workspace-menu button[aria-checked="true"] { color: var(--accent-strong); background: var(--accent-soft); }
 .legion-window-titlebar .legion-workspace-menu button:hover, .legion-window-titlebar .legion-workspace-menu button:focus-visible { background: var(--surface-soft); outline: 1px solid var(--line-strong); outline-offset: -1px; }
-.legion-window-status { font-size: 12px; color: var(--ink-soft); }
-.legion-window-titlebar button { min-height: 30px; height: 30px; padding: 0 10px; gap: 6px; font-size: 12px; border-radius: 6px; box-shadow: none; white-space: nowrap; }
+.legion-window-status { font-size: 0.75rem; color: var(--ink-soft); }
+.legion-window-titlebar button { min-height: 30px; height: 30px; padding: 0 10px; gap: 6px; font-size: 0.75rem; border-radius: 6px; box-shadow: none; white-space: nowrap; }
 .legion-window-main { position: relative; display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .legion-unplaced-bar { display: flex; flex: 0 1 auto; min-width: 30px; gap: 4px; padding-left: 9px; overflow-x: auto; border-left: 1px solid var(--line); }
 .legion-unplaced-card { display: grid; place-items: center; flex: 0 0 30px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 4px; color: var(--ink-soft); background: transparent; cursor: pointer; }
@@ -34,25 +34,25 @@
 .legion-card-drawer { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 5; display: flex; flex-direction: column; width: min(900px, calc(100% - 32px)); height: min(560px, 80%); min-height: 0; overflow: hidden; background: var(--surface-solid); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 24px 64px var(--shadow-deep), 0 8px 24px var(--shadow), var(--panel-shadow); }
 .legion-card-drawer[hidden] { display: none; }
 .legion-card-drawer > header { display: flex; flex-shrink: 0; height: 28px; border-bottom: 1px solid var(--line); background: var(--chrome); align-items: center; gap: 7px; padding-left: 10px; }
-.legion-card-drawer > header strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.legion-card-drawer > header strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.6875rem; }
 .legion-layout-palette { display: flex; flex-direction: column; flex: 0 0 228px; min-height: 0; border-right: 1px solid var(--line); background: var(--chrome); }
-.legion-layout-palette > header { display: flex; justify-content: space-between; padding: 19px 16px 0; font-size: 12px; }
-.legion-layout-palette > header span { font: 10px monospace; color: var(--ink-faint); }
-.legion-layout-palette p, .legion-layout-palette footer { font-size: 11px; line-height: 1.7; color: var(--ink-soft); padding: 0 16px; }
+.legion-layout-palette > header { display: flex; justify-content: space-between; padding: 19px 16px 0; font-size: 0.75rem; }
+.legion-layout-palette > header span { font: 0.625rem monospace; color: var(--ink-faint); }
+.legion-layout-palette p, .legion-layout-palette footer { font-size: 0.6875rem; line-height: 1.7; color: var(--ink-soft); padding: 0 16px; }
 .legion-layout-palette footer { border-top: 1px solid var(--line); margin-top: auto; padding: 14px 16px; }
 .legion-layout-card-list { overflow-y: auto; min-height: 0; padding: 4px 10px 14px; }
 .legion-hidden-sections { margin-bottom: 14px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-soft); }
-.legion-hidden-sections h3 { margin: 0; font-size: 12px; }
+.legion-hidden-sections h3 { margin: 0; font-size: 0.75rem; }
 .legion-hidden-sections > p { padding: 0; margin: 6px 0 10px; }
 .legion-hidden-section { display: flex; flex-direction: column; gap: 4px; padding: 9px 0; border-top: 1px solid var(--line); }
 .legion-hidden-section strong, .legion-hidden-section small { overflow-wrap: anywhere; }
-.legion-hidden-section strong { font-size: 11px; }
-.legion-hidden-section small { color: var(--ink-faint); font-size: 10px; }
-.legion-hidden-section button { align-self: flex-start; margin-top: 3px; font-size: 10px; }
+.legion-hidden-section strong { font-size: 0.6875rem; }
+.legion-hidden-section small { color: var(--ink-faint); font-size: 0.625rem; }
+.legion-hidden-section button { align-self: flex-start; margin-top: 3px; font-size: 0.625rem; }
 .legion-layout-card { display: flex; align-items: center; gap: 9px; width: 100%; padding: 12px 10px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-raised); color: var(--ink-soft); text-align: left; cursor: grab; }
 .legion-layout-card span { display: grid; gap: 4px; flex: 1; min-width: 0; }
-.legion-layout-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.legion-layout-card small { color: var(--ink-faint); font-size: 10px; }
+.legion-layout-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.6875rem; }
+.legion-layout-card small { color: var(--ink-faint); font-size: 0.625rem; }
 .legion-layout-card[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
 .legion-layout-stage { flex: 1; min-width: 0; overflow: auto; background: var(--surface-soft); }
 .legion-layout-root { width: 100%; height: 100%; }
@@ -67,7 +67,7 @@
 .legion-pane-tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .legion-tab-item { display: flex; align-items: stretch; flex: 0 0 auto; max-width: 220px; border-right: 1px solid var(--line); border-top: 2px solid transparent; color: var(--ink-faint); }
 .legion-tab-item.is-active { border-top-color: var(--accent); color: var(--ink); background: var(--surface-solid); }
-.legion-workspace-tab { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 0 12px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.legion-workspace-tab { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 0 12px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 0.75rem; cursor: pointer; }
 .legion-workspace-pane[data-single-view]:not(.is-editing) > .legion-pane-titlebar { background: var(--surface-solid); border-bottom-color: transparent; }
 .legion-workspace-pane[data-single-view]:not(.is-editing) .legion-tab-item { border-color: transparent; max-width: 100%; }
 .legion-workspace-pane[data-single-view]:not(.is-editing) .legion-workspace-tab { font-weight: 600; color: var(--ink-soft); }
@@ -78,7 +78,7 @@
 .legion-workspace-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
 .legion-tab-close { align-self: center; display: grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; padding: 0; margin-right: 3px; border: 0; border-radius: 3px; background: transparent; color: var(--ink-faint); cursor: pointer; }
 .legion-tab-close:hover { background: var(--surface-soft); color: var(--ink); }
-.legion-add-tab { display: flex; align-items: center; gap: 3px; flex-shrink: 0; padding: 0 7px; border: 0; border-left: 1px solid var(--line); background: var(--accent-soft); color: var(--accent-strong); font-size: 10px; cursor: pointer; }
+.legion-add-tab { display: flex; align-items: center; gap: 3px; flex-shrink: 0; padding: 0 7px; border: 0; border-left: 1px solid var(--line); background: var(--accent-soft); color: var(--accent-strong); font-size: 0.625rem; cursor: pointer; }
 .legion-pane-titlebar.is-tab-drop { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 .legion-tab-item.is-drop-before { box-shadow: inset 2px 0 var(--accent); }
 .legion-pane-mount { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
@@ -87,27 +87,27 @@
 .legion-pane-content > .workspace-content { height: 100%; min-width: 0; overflow: auto; }
 .legion-pane-content.has-inspector { padding: 14px; }
 .legion-pane-placeholder, .legion-layout-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; flex: 1; height: 100%; text-align: center; padding: 20px; color: var(--ink-faint); }
-.legion-pane-placeholder strong { font-size: 14px; color: var(--ink-soft); }
-.legion-pane-placeholder span, .legion-layout-empty p { font-size: 12px; max-width: 360px; line-height: 1.8; }
-.legion-layout-empty h2 { color: var(--ink); font-size: 21px; margin: 0; font-weight: 550; }
+.legion-pane-placeholder strong { font-size: 0.875rem; color: var(--ink-soft); }
+.legion-pane-placeholder span, .legion-layout-empty p { font-size: 0.75rem; max-width: 360px; line-height: 1.8; }
+.legion-layout-empty h2 { color: var(--ink); font-size: 1.3125rem; margin: 0; font-weight: 550; }
 .legion-layout-empty { background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 20px 20px; }
 .legion-layout-recipes { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .legion-layout-recipes button { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }
 .legion-dock-targets { position: absolute; inset: 32px 8px 8px; pointer-events: none; z-index: 4; }
-.legion-dock-targets button { position: absolute; pointer-events: auto; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-raised); color: var(--ink); font-size: 10px; padding: 7px 9px; cursor: pointer; }
+.legion-dock-targets button { position: absolute; pointer-events: auto; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-raised); color: var(--ink); font-size: 0.625rem; padding: 7px 9px; cursor: pointer; }
 .legion-dock-targets [data-dock-side="left"] { left: 0; top: 50%; transform: translateY(-50%); }
 .legion-dock-targets [data-dock-side="right"] { right: 0; top: 50%; transform: translateY(-50%); }
 .legion-dock-targets [data-dock-side="top"] { left: 50%; top: 0; transform: translateX(-50%); }
 .legion-dock-targets [data-dock-side="bottom"] { left: 50%; bottom: 0; transform: translateX(-50%); }
 .legion-dock-preview { position: absolute; inset: 28px 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--accent-soft) 90%, transparent); border: 2px solid var(--accent); color: var(--accent-strong); pointer-events: none; z-index: 3; }
-.legion-dock-preview strong { font-size: 12px; }.legion-dock-preview span { font-size: 10px; }
+.legion-dock-preview strong { font-size: 0.75rem; }.legion-dock-preview span { font-size: 0.625rem; }
 .legion-dock-preview[data-dock-preview="left"] { right: 50%; }.legion-dock-preview[data-dock-preview="right"] { left: 50%; }
 .legion-dock-preview[data-dock-preview="top"] { bottom: 50%; }.legion-dock-preview[data-dock-preview="bottom"] { top: 50%; }
-.legion-window-footer { flex-shrink: 0; display: flex; align-items: center; min-height: 36px; gap: 9px; padding: 2px 12px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 11px; background: var(--chrome); }
+.legion-window-footer { flex-shrink: 0; display: flex; align-items: center; min-height: 36px; gap: 9px; padding: 2px 12px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 0.6875rem; background: var(--chrome); }
 .legion-footer-hint { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legion-window-footer > span:first-child { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .legion-window-footer i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
-.legion-window-error, .legion-window-close-prompt { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 16px; font-size: 12px; border-bottom: 1px solid var(--line); }
+.legion-window-error, .legion-window-close-prompt { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 16px; font-size: 0.75rem; border-bottom: 1px solid var(--line); }
 .legion-window-error { color: var(--danger); }.legion-window-close-prompt span { margin-right: auto; }
 @media (max-width: 1000px) {
   .legion-window-titlebar { gap: 5px; flex-wrap: wrap; }
@@ -124,14 +124,14 @@
 .legion-workspace-pane.is-dragging { outline: 1px dashed var(--accent); outline-offset: -4px; }
 .legion-pane-mount { position: relative; z-index: 0; }
 .legion-pane-mount > .workspace-section-host { container: legion-pane / inline-size; }
-.legion-section-unavailable { align-self: center; padding: 24px; color: var(--ink-faint); font-size: 12px; }
-.legion-section-list { margin: -2px 0 12px 12px; font-size: 11px; color: var(--ink-soft); }
+.legion-section-unavailable { align-self: center; padding: 24px; color: var(--ink-faint); font-size: 0.75rem; }
+.legion-section-list { margin: -2px 0 12px 12px; font-size: 0.6875rem; color: var(--ink-soft); }
 .legion-section-list summary { cursor: pointer; padding: 5px 0; }
 .legion-section-row { display: flex; gap: 3px; margin: 4px 0; }
 .legion-section-row button { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-raised); color: var(--ink-soft); padding: 5px; cursor: pointer; }
 .legion-section-row button:first-child { flex: 1; min-width: 0; text-align: left; cursor: grab; }
 .legion-section-row button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.legion-section-row small { display: block; font-size: 9px; color: var(--ink-faint); margin-top: 2px; }
+.legion-section-row small { display: block; font-size: 0.5625rem; color: var(--ink-faint); margin-top: 2px; }
 .legion-section-row button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 
 .legion-workspace-preferences { display: flex; flex-shrink: 0; align-items: center; gap: 4px; }
@@ -145,8 +145,8 @@
 /* Compact workspaces navigate the same live views one at a time. Desktop split
    ratios and tab selection remain presentation data for the desktop renderer. */
 .legion-compact-navigation { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--chrome); }
-.legion-compact-navigation select { flex: 1; min-width: 0; width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background-color: var(--surface-solid); font: inherit; font-size: 14px; text-overflow: ellipsis; }
-.legion-compact-count { flex-shrink: 0; color: var(--ink-soft); font-size: 11px; font-variant-numeric: tabular-nums; }
+.legion-compact-navigation select { flex: 1; min-width: 0; width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background-color: var(--surface-solid); font: inherit; font-size: 0.875rem; text-overflow: ellipsis; }
+.legion-compact-count { flex-shrink: 0; color: var(--ink-soft); font-size: 0.6875rem; font-variant-numeric: tabular-nums; }
 .legion-compact-navigation button { flex-shrink: 0; min-height: 44px; }
 .legion-compact-pane { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .legion-compact-pane[hidden] { display: none; }

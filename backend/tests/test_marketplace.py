@@ -90,6 +90,23 @@ async def test_protocol_and_sanitized_dtos():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('field', ['icon_url', 'artwork_url'])
+async def test_preview_metadata_cannot_introduce_third_party_image_urls(field):
+    fake = FakeMarketplace()
+    payload = {'items': [{**fake.listing, 'preview': {field: 'https://third-party.example/image.png'}}], 'next_cursor': None}
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        return httpx.Response(200, headers={'Content-Type': 'application/json'}, stream=Stream([json.dumps(payload).encode()]))
+
+    client = MarketplaceClient('https://marketplace.test', transport=httpx.MockTransport(transport))
+    with pytest.raises(MarketplaceError):
+        await client.list_packs()
+    assert [request.url.host for request in requests] == ['marketplace.test']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('status,expected', [(404,404), (429,429), (500,503), (503,503), (504,504), (302,503), (401,503)])
 async def test_http_failure_sanitized(status, expected):
     fake = FakeMarketplace(); fake.status = status

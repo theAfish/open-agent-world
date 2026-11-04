@@ -188,9 +188,41 @@ async def remove_version(pack_id: str, version: str, services=Depends(get_servic
     return status(services)
 
 
+class EnvironmentRetryRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    pack_id: str
+    environment_id: str
+
+
 @router.post("/environment/retry", dependencies=[Depends(mutation_request)])
-async def retry(services=Depends(get_services)):
-    services.plugin_bootstrap.enqueue()
+async def retry(request: EnvironmentRetryRequest | None = None, services=Depends(get_services)):
+    if request is None:
+        services.plugin_bootstrap.enqueue()
+        return status(services)
+    from backend.packs.planning import environment_status, manifest_spec, prepare_declared
+    manager = services.pack_installations
+
+    def resolve():
+        manifest = manager.selected().get(request.pack_id)
+        if manifest:
+            return manifest_spec(manifest), manager.version_path(manifest.id, manifest.version)
+        spec = manager.source_specs().get(request.pack_id)
+        if spec is None or not manager.source_enrolled(request.pack_id):
+            raise ResourceValidationError('Pack is not enrolled')
+        return spec, services.plugins.pack_roots.get(spec.owner) or spec.source_root
+
+    spec, root = resolve()
+    declaration = spec.environments.get(request.environment_id)
+    if declaration is None:
+        raise ResourceValidationError('Pack does not declare this environment')
+    if declaration.target != 'host-worker' or declaration.management != 'managed' or declaration.provider not in {'python', 'executable'}:
+        raise ResourceValidationError('Prepare this environment through its execution platform settings')
+    current = environment_status(spec.owner, request.environment_id, declaration, root, manager.root.parent)
+    if current['state'] != 'preparing':
+        await checked(partial(prepare_declared, spec.owner, request.environment_id, declaration, root, manager.root.parent))
+    live, live_root = resolve()
+    if (live.version, live.owner, live_root) != (spec.version, spec.owner, root):
+        raise ResourceValidationError('Pack selection changed during environment preparation; refresh its details')
     return status(services)
 
 

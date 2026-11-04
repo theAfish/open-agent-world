@@ -12,6 +12,7 @@ import { deploymentRequest } from './api';
 import './deployment.css';
 import { isHosted } from '../auth/hostedSession';
 import { AccountButton } from '../auth/AccountButton';
+import { useApplicationAppearance } from '../shell/useAppearance';
 
 type PublishedWorkspace = {
   id: string; name: string; cards: WorldCard[]; legion: WorldCard; legions?: WorldCard[];
@@ -22,6 +23,7 @@ type PublishedWorkspace = {
 
 /** Authentication and scoped data bootstrap; all workspace rendering stays shared. */
 export function RuntimeApp({ name }: { name: string }) {
+  useApplicationAppearance();
   const locale = useLocale(state => state.locale);
   const theme = useWorldStore(state => state.theme);
   const [app, setApp] = useState<PublishedWorkspace>();

@@ -573,6 +573,110 @@ class WorldAgentCapabilityProvider:
             # Refresh delivery badges without manufacturing another chat message.
             await self.services._publish_conversation_message(self.services.conversations.get_message(claimed[-1]))
 
+    def _conversation_file_scope(self, agent_id, run_id):
+        scope = self._conversation_input_scope(agent_id, run_id)
+        if scope is None:
+            return None
+        manager = self.services._require_run_manager()
+        run = manager.get_run(run_id)
+        context = manager.current_context
+        if run.agent_id != agent_id or context.context_id != scope[1] or run.context_id != scope[1]:
+            raise ResourceValidationError('Conversation files require this Run\'s current session')
+        # Delegated runtimes inherit the admitting conversation Run's history
+        # boundary; they must not see follow-ups that have not been accepted.
+        boundary = run
+        while boundary.caller_kind != 'conversation':
+            boundary = manager.get_run(boundary.parent_run_id)
+        return (*scope, boundary.lifecycle.get('conversation_max_sequence'))
+
+    def _conversation_attachment_entries(self, agent_id, run_id):
+        from backend.errors import NotFoundError, PermissionDeniedError
+        scope = self._conversation_file_scope(agent_id, run_id)
+        if scope is None:
+            return []
+        conversation_id, session_id, max_sequence = scope
+        store = self.services.resources.artifacts
+        store.authorize(self.services, conversation_id, agent_id)
+        result = {}
+        for message in self.services.conversations.context_messages(conversation_id, session_id, max_sequence):
+            for attachment in message.attachments:
+                key = (attachment.version_id, attachment.path)
+                try:
+                    store.authorize(self.services, conversation_id, agent_id, version_id=attachment.version_id)
+                    if store.get(attachment.version_id)['state'] != 'ready':
+                        continue
+                except (NotFoundError, PermissionDeniedError):
+                    # Retained messages may outlive a released file or removed
+                    # collection reference. Only list currently readable files.
+                    continue
+                result[key] = {**attachment.model_dump(mode='json'), 'message_id': message.id,
+                    'sequence': message.sequence, 'conversation_id': conversation_id, 'session_id': session_id}
+        return sorted(result.values(), key=lambda entry: entry['sequence'])
+
+    async def conversation_attachments(self, agent_id, run_id):
+        async with self.services._node_mutation(read_only=True):
+            return self._conversation_attachment_entries(agent_id, run_id)
+
+    async def read_conversation_attachment(self, agent_id, run_id, version_id, path, *, max_bytes=32 * 1024 * 1024):
+        from contextlib import aclosing
+        from backend.errors import PermissionDeniedError
+        if type(max_bytes) is not int or not 0 < max_bytes <= 32 * 1024 * 1024:
+            raise ResourceValidationError('Attachment read limit must be between 1 byte and 32 MiB')
+
+        def authorize():
+            attachment = next((entry for entry in self._conversation_attachment_entries(agent_id, run_id)
+                if entry['version_id'] == version_id and entry['path'] == path), None)
+            if attachment is None:
+                raise PermissionDeniedError('Attachment is not in this Run\'s visible conversation history')
+            if attachment['size_bytes'] > max_bytes:
+                raise ResourceValidationError(f'Attachment exceeds the {max_bytes}-byte transfer limit')
+            return attachment
+
+        async with self.services._node_mutation(read_only=True):
+            attachment = authorize()
+        content = bytearray()
+        store = self.services.resources.artifacts
+        # ArtifactStore takes its own lock before graph access. Never hold the
+        # graph lock while awaiting its stream; reauthorize after every read.
+        async with aclosing(store.read(self.services, attachment['conversation_id'], version_id, path, agent_id)) as stream:
+            async for chunk in stream:
+                async with self.services._node_mutation(read_only=True):
+                    authorize()
+                if len(content) + len(chunk) > max_bytes:
+                    raise ResourceValidationError(f'Attachment exceeds the {max_bytes}-byte transfer limit')
+                content.extend(chunk)
+        async with self.services._node_mutation(read_only=True):
+            authorize()
+        return bytes(content)
+
+    async def publish_conversation_attachment(self, agent_id, run_id, name, data, *, request_key):
+        import hashlib
+        from backend.conversations.attachments import resolve
+        from backend.conversations.models import ConversationAttachmentRef
+        if not isinstance(data, bytes) or len(data) > 32 * 1024 * 1024:
+            raise ResourceValidationError('Runtime attachments must be bytes of at most 32 MiB')
+        if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128:
+            raise ResourceValidationError('Attachment request_key must contain 1 to 128 characters')
+        async with self.services._node_mutation(read_only=True):
+            scope = self._conversation_file_scope(agent_id, run_id)
+            if scope is None:
+                raise ResourceValidationError('Publishing attachments requires an active conversation Run')
+            conversation_id, session_id, _ = scope
+
+        async def chunks():
+            from backend.sandbox.transfers import CHUNK_BYTES
+            for offset in range(0, len(data), CHUNK_BYTES):
+                yield data[offset:offset + CHUNK_BYTES]
+
+        record = await self.services.resources.artifacts.upload(self.services, conversation_id, session_id, name, chunks(),
+            agent_id=agent_id, run_id=run_id, request_key=request_key, expected_sha256=hashlib.sha256(data).hexdigest())
+        async with self.services._node_mutation(read_only=True):
+            if self._conversation_file_scope(agent_id, run_id) is None:
+                raise ResourceValidationError('Publishing attachments requires an active conversation Run')
+            attachment = resolve(self.services, conversation_id, session_id,
+                [ConversationAttachmentRef(version_id=record['version_id'], path=name)], agent_id)[0]
+            return {**attachment.model_dump(mode='json'), 'conversation_id': conversation_id, 'session_id': session_id}
+
     async def publish_execution(self, agent_id, run_id, snapshot):
         from backend.plugins.execution_graph import ExecutionSnapshot, MAX_EXECUTION_BYTES
         manager = self.services._require_run_manager()

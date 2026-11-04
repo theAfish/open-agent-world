@@ -6,7 +6,7 @@ name = "Hello World"
 
 [compatibility]
 plugin_api = "1.35"
-oaw = ">=0.1.0,<1"
+oaw = ">=0.1.0"
 
 [plugin]
 owner = "community.hello"

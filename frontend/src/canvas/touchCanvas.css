@@ -2,7 +2,7 @@
 .world-canvas [data-touch-connection="source"] { outline-color: var(--accent); }
 .world-canvas [data-touch-connection="valid"] { outline: 3px solid var(--success); outline-offset: 5px; }
 .world-canvas [data-touch-connection="invalid"] { outline: 2px dashed var(--danger); outline-offset: 5px; }
-.touch-connection-hint { position: absolute; z-index: 50; left: 50%; top: max(12px, var(--safe-top)); transform: translateX(-50%); max-width: calc(100% - 140px); padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-solid); color: var(--ink); box-shadow: var(--panel-shadow); pointer-events: none; font-size: 13px; text-align: center; overflow-wrap: anywhere; }
+.touch-connection-hint { position: absolute; z-index: 50; left: 50%; top: max(12px, var(--safe-top)); transform: translateX(-50%); max-width: calc(100% - 140px); padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-solid); color: var(--ink); box-shadow: var(--panel-shadow); pointer-events: none; font-size: 0.8125rem; text-align: center; overflow-wrap: anywhere; }
 .touch-connection-hint[data-valid="true"] { border-color: var(--success); }
 :root[data-layout="compact"] .top-bar[data-mobile-menu="false"]:not(:has([data-tutorial-highlight])) > :is(.world-status, .top-actions) { display: none; }
 :root[data-layout="compact"] .top-bar[data-mobile-menu] {
@@ -19,7 +19,7 @@
 :root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .world-status { justify-content: flex-end; padding-right: 8px; }
 :root[data-layout="compact"] .top-bar[data-mobile-menu="true"] :is(.topology-summary, .connection-status span) { display: flex; }
 :root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .connection-status { width: auto; gap: 6px; }
-:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .topology-summary { flex: 0 1 auto; font-size: 10px; }
+:root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .topology-summary { flex: 0 1 auto; font-size: 0.625rem; }
 :root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .top-actions { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 :root[data-layout="compact"] .top-bar[data-mobile-menu="true"] .top-icon-button { width: 100%; height: 44px; }
 .mobile-workspace-menu nav { display: grid; gap: 4px; width: min(260px, calc(100vw - 100px)); max-height: calc(var(--app-height) - 120px); overflow-y: auto; }
@@ -57,11 +57,11 @@
 }
 .mobile-canvas-options button {
   display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 12px;
-  border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; text-align: start;
+  border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 0.8125rem; text-align: start;
 }
 .mobile-canvas-options button:is(:hover, [aria-pressed="true"]) { background: var(--accent-soft); color: var(--accent-strong); }
-.mobile-canvas-options p { margin: 3px 8px 8px; color: var(--ink-faint); font-size: 11px; line-height: 1.5; }
-.mobile-canvas-mode { display: flex; align-items: center; gap: 8px; padding: 0 0 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); color: var(--accent-strong); font-size: 12px; box-shadow: 0 2px 8px var(--shadow); }
+.mobile-canvas-options p { margin: 3px 8px 8px; color: var(--ink-faint); font-size: 0.6875rem; line-height: 1.5; }
+.mobile-canvas-mode { display: flex; align-items: center; gap: 8px; padding: 0 0 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); color: var(--accent-strong); font-size: 0.75rem; box-shadow: 0 2px 8px var(--shadow); }
 .mobile-canvas-mode button { min-height: 44px; padding: 0 12px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--ink); }
 :root[data-layout="compact"] .world-minimap.react-flow__minimap { top: calc(var(--screen-top) + 54px); right: var(--screen-right); bottom: auto; margin: 0; }
 :root[data-layout="compact"] .mobile-canvas-tools :is(.map-atlas, .glue-tool-hint) { width: min(280px, calc(100vw - var(--screen-left) - var(--screen-right))); max-height: calc(var(--app-height) - 180px); }

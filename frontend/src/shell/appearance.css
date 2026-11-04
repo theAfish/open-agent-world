@@ -1,0 +1,11 @@
+.appearance-settings { max-width: 560px; gap: 24px; font-size: var(--font-size-body); }
+.appearance-text-size { display: grid; gap: 12px; min-width: 0; }
+.appearance-text-heading, .appearance-text-controls { display: flex; align-items: center; gap: 12px; }
+.appearance-text-heading { justify-content: space-between; }
+.appearance-text-heading output { font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+.appearance-settings .appearance-text-controls input[type="range"] { flex: 1; min-width: 0; width: 0; height: 24px; padding: 0; border: 0; box-shadow: none; background: transparent; accent-color: var(--accent); cursor: pointer; }
+.appearance-text-controls button { flex-shrink: 0; }
+.appearance-reset { justify-self: start; }
+.appearance-shortcut { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; cursor: pointer; }
+.appearance-settings .appearance-shortcut input { flex: 0 0 16px; width: 16px; height: 16px; margin: 3px 0 0; padding: 0; box-shadow: none; }
+.appearance-preview { margin: 0; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--surface-soft); font-size: var(--font-size-body); line-height: var(--line-height-body); overflow-wrap: anywhere; }

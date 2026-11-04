@@ -71,20 +71,39 @@ def test_retrying_an_older_attachment_does_not_restore_an_old_project_file(resea
     r = research
     project = r.call("knowledge_project_manage", operation="create", name="Measurements")["project"]
     original = r.attach("report.txt", b"Original measurement: 10")
-    first = r.call("knowledge_import_artifact", source=r.keys["conversation"],
+    first = r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"],
         project_id=project["id"], relative_path="measurements/report.txt", **ref(original))
     r.wait(first)
     updated = r.attach("report.txt", b"Updated measurement: 20")
-    second = r.call("knowledge_import_artifact", source=r.keys["conversation"],
+    second = r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"],
         project_id=project["id"], relative_path="measurements/report.txt", **ref(updated))
     r.wait(second)
-    repeated = r.call("knowledge_import_artifact", source=r.keys["conversation"],
+    repeated = r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"],
         project_id=project["id"], relative_path="measurements/report.txt", **ref(original))
     assert repeated["reused"] and not repeated["current"]
     files = r.call("knowledge_projects", project_id=project["id"])["project"]["files"]
     assert [(f["id"], f["relative_path"]) for f in files] == [
         (second["source"]["id"], "measurements/report.txt")]
     assert "Original measurement" in r.call("knowledge_markdown", source_id=first["source"]["id"])["markdown"]
+
+
+def test_native_agent_saves_records_with_original_evidence_without_reconversion(research, monkeypatch):
+    from oaw_knowledge_base import actions
+    r = research
+    schema = r.call('knowledge_schema_manage', operation='create', name='Native density',
+        definition={'type': 'object', 'properties': {'density': {'type': 'number'}}},
+        system_prompt='Store the density the Agent read from the attached file.')['schema']
+    bundle = r.call('knowledge_experiment_bundle_prepare', name='Native reading', schema_id=schema['id'])['bundle']
+    data = b'sample,density\nA1,3.21\n'
+    attached = r.attach('native.csv', data)
+    monkeypatch.setattr(actions, 'process_sources', lambda *a, **k: pytest.fail('Evidence import must not start another converter'))
+    imported = r.call('knowledge_import_artifact', source=r.keys['conversation'], bundle_id=bundle['id'], **ref(attached))
+    assert imported['state'] == 'imported' and 'job' not in imported
+    kb = open_client(r.keys['knowledge'], r.services.resources.node_storage_path(r.keys['knowledge']))
+    assert kb.sources.read_bytes(imported['source']['id']) == data
+    saved = r.call('knowledge_experiment_save', bundle_id=bundle['id'], records=[{
+        'name': 'A1', 'data': {'density': 3.21}, 'source_ids': [imported['source']['id']]}])['records'][0]
+    assert saved['status'] == 'draft' and saved['data'] == {'density': 3.21}
 
 
 def test_research_agent_imports_pdf_and_projects_original_markdown(research):
@@ -97,7 +116,7 @@ def test_research_agent_imports_pdf_and_projects_original_markdown(research):
         data = document.tobytes()
     attachment = r.attach("sintering.pdf", data)
     assert r.call("inspect_artifacts", collection=r.keys["conversation"], **ref(attachment))["state"] == "binary"
-    imported = r.call("knowledge_import_artifact", source=r.keys["conversation"], **ref(attachment))
+    imported = r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"], **ref(attachment))
     r.wait(imported)
     source_id = imported["source"]["id"]
     document = r.call("knowledge_markdown", source_id=source_id)
@@ -106,7 +125,7 @@ def test_research_agent_imports_pdf_and_projects_original_markdown(research):
     assert r.call("knowledge_overview")["counts"]["entities"] == 0
 
     # The same file can be retried without another source or conversion job.
-    repeated = r.call("knowledge_import_artifact", source=r.keys["conversation"], **ref(attachment))
+    repeated = r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"], **ref(attachment))
     assert repeated["reused"] and repeated["source"]["id"] == source_id and repeated["state"] == "ready"
     assert r.call("knowledge_overview")["counts"]["sources"] == 1
     kb = open_client(r.keys["knowledge"], r.services.resources.node_storage_path(r.keys["knowledge"]))
@@ -144,7 +163,7 @@ def test_research_agent_imports_an_archive_as_stable_projects(research):
         output.writestr("report-a/SI.md", "# Supporting data\nUncertainty: 0.1")
         output.writestr("report-b/results.csv", "sample,value\nB1,4\n")
     attached = r.attach("reports.zip", archive.getvalue())
-    preview = r.call("knowledge_import_artifact", source=r.keys["conversation"], **ref(attached))
+    preview = r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"], **ref(attached))
     assert preview["state"] == "preview" and len(preview["files"]) == 3
     assert {item["relative_path"] for item in preview["files"]} == {
         "reports/report-a/main.md", "reports/report-a/SI.md", "reports/report-b/results.csv"}
@@ -162,7 +181,7 @@ def test_research_agent_prepares_and_reads_experiment_attachments(research):
         system_prompt="Read density for every sample.")["schema"]
     bundle = r.call("knowledge_experiment_bundle_prepare", name="Batch 7", schema_id=schema["id"])["bundle"]
     attachment = r.attach("batch7.csv", b"sample,density\nA1,3.21\n")
-    imported = r.call("knowledge_import_artifact", source=r.keys["conversation"],
+    imported = r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"],
         bundle_id=bundle["id"], **ref(attachment))
     r.wait(imported)
     prompt = r.call("knowledge_experiment_extract_prompt", bundle_id=bundle["id"])
@@ -178,11 +197,11 @@ def test_research_agent_prepares_and_reads_experiment_attachments(research):
     response = r.client.post(f"/api/nodes/{r.keys['knowledge']}/resource/experiment_review",
         json={"arguments": {"operation": "publish", "record_id": record["id"]}, "confirm": True})
     assert response.status_code == 200, response.text
-    assert r.call("knowledge_import_artifact", source=r.keys["conversation"],
+    assert r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"],
         bundle_id=bundle["id"], **ref(attachment))["reused"]
     extra = r.attach("batch7-extra.csv", b"sample,density\nA2,4.2\n")
     with pytest.raises(ResourceValidationError, match="published records"):
-        r.call("knowledge_import_artifact", source=r.keys["conversation"], bundle_id=bundle["id"], **ref(extra))
+        r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"], bundle_id=bundle["id"], **ref(extra))
     assert r.call("knowledge_overview")["counts"]["sources"] == 1
 
 
@@ -226,7 +245,7 @@ def test_read_connection_cannot_import_write_schemas_build_index_or_forge_ingest
 def test_waiting_for_conversion_releases_graph_lock_and_observes_revocation(research, monkeypatch):
     r = research
     attachment = r.attach("note.txt", b"A pending conversion")
-    imported = r.call("knowledge_import_artifact", source=r.keys["conversation"], **ref(attachment))
+    imported = r.call("knowledge_import_artifact", auto_process=True, source=r.keys["conversation"], **ref(attachment))
     r.wait(imported)
     kb = open_client(r.keys["knowledge"], r.services.resources.node_storage_path(r.keys["knowledge"]))
     job = kb.jobs.require(imported["job"]["id"])

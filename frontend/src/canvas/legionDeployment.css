@@ -2,7 +2,7 @@
   position: absolute; z-index: 100; pointer-events: none; transform-origin: center;
   display: flex; align-items: center; gap: 10px; width: 260px; padding: 14px 16px;
   color: var(--ink); background: var(--surface-solid); border: 1px dashed var(--accent);
-  border-radius: 12px; box-shadow: 0 4px 14px var(--shadow); font-size: 12px;
+  border-radius: 12px; box-shadow: 0 4px 14px var(--shadow); font-size: 0.75rem;
   overflow-wrap: anywhere;
 }
 .legion-deployment-spinner {

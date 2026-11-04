@@ -291,28 +291,69 @@ class ArtifactStore:
             record['state'] = 'deleted'
         self.save(record)
 
-    async def upload(self, services, collection_id, session_id, filename, chunks):
-        """Stream a user attachment through the same retained-version journal."""
-        services.conversations.get_session(collection_id, session_id)
-        if not filename or len(filename) > 255 or parts(filename) != [filename] or ':' in filename:
+    async def upload(self, services, collection_id, session_id, filename, chunks, *,
+                     agent_id=None, run_id=None, request_key=None, expected_sha256=None):
+        """Stream user or trusted-runtime bytes through the retained-version journal."""
+        from backend.runs.models import TERMINAL_RUN_STATUSES
+        from backend.sandbox.models import SandboxValidationError
+
+        def authorize():
+            services.conversations.get_session(collection_id, session_id)
+            if agent_id is not None:
+                manager = services._require_run_manager()
+                context = manager.current_context
+                if context is None or (context.agent_id, context.run_id, context.context_id) != (agent_id, run_id, session_id):
+                    raise PermissionDeniedError('Runtime uploads require the current conversation Run')
+                run = manager.get_run(run_id)
+                if run.agent_id != agent_id or run.status in TERMINAL_RUN_STATUSES:
+                    raise PermissionDeniedError('Runtime upload Run is no longer active')
+                self.authorize(services, collection_id, agent_id, 'artifact.publish')
+
+        try:
+            valid_name = isinstance(filename, str) and 0 < len(filename) <= 255 and parts(filename) == [filename]
+        except SandboxValidationError:
+            valid_name = False
+        if not valid_name:
             raise ResourceValidationError('Choose a single safe filename')
+        fingerprint = None
+        if agent_id is not None:
+            if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128 or not expected_sha256:
+                raise ResourceValidationError('Runtime uploads require a request key and content digest')
+            fingerprint = hashlib.sha256(json.dumps({'collection_id': collection_id, 'session_id': session_id,
+                'filename': filename, 'sha256': expected_sha256}, sort_keys=True).encode()).hexdigest()
         version_id = str(uuid4())
         record = dict(version_id=version_id, artifact_id=str(uuid4()), collection_id=collection_id,
             name=filename, state='staging', created_at=now(), size_bytes=0, manifest=[], error=None,
             retention={'owner': 'user', 'reason': 'conversation attachment', 'retained': True},
-            provenance={'agent_id': None, 'run_id': None, 'session_id': session_id,
+            provenance={'agent_id': agent_id, 'run_id': run_id, 'session_id': session_id,
                         'sandbox_id': None, 'inputs': [], 'finalized_inputs': True})
-        with self.database.transaction(immediate=True) as db:
-            db.execute('INSERT INTO artifact_versions VALUES (?,?,?,?,?,?,?)',
-                (version_id, record['artifact_id'], 'user', version_id, version_id, 'staging', json.dumps(record)))
-            db.execute('INSERT INTO artifact_references VALUES (?,?)', (collection_id, version_id))
+        async with self._lock, services._node_mutation(read_only=True):
+            authorize()
+            with self.database.transaction(immediate=True) as db:
+                if agent_id is not None:
+                    previous = db.execute('SELECT request_hash, record_json FROM artifact_versions WHERE request_owner=? AND request_key=?',
+                                          (agent_id, request_key)).fetchone()
+                    if previous:
+                        if previous[0] != fingerprint:
+                            raise ConflictError('Request key was already used with different publication inputs')
+                        existing = json.loads(previous[1])
+                        self.authorize(services, collection_id, agent_id, 'artifact.publish', existing['version_id'])
+                        if existing['state'] != 'ready':
+                            raise ConflictError('Previous attachment publication is not ready; use a new request key')
+                        return existing
+                db.execute('INSERT INTO artifact_versions VALUES (?,?,?,?,?,?,?)',
+                    (version_id, record['artifact_id'], agent_id or 'user', request_key or version_id,
+                     fingerprint or version_id, 'staging', json.dumps(record)))
+                db.execute('INSERT INTO artifact_references VALUES (?,?)', (collection_id, version_id))
+        committed = False
         try:
             staging = self.path(version_id, staging=True)
             await run_file_operation(staging.mkdir)
             digest = hashlib.sha256()
             with (staging / filename).open('xb') as output:
                 async for chunk in chunks:
-                    async with self._lock:
+                    async with self._lock, services._node_mutation(read_only=True):
+                        authorize()
                         size = record['size_bytes'] + len(chunk)
                         if size > min(self.max_version_bytes, 64 * 1024 * 1024):
                             raise ResourceValidationError('Conversation upload exceeds the 64 MiB or configured artifact limit')
@@ -326,20 +367,29 @@ class ArtifactStore:
                     digest.update(chunk)
                 await run_file_operation(output.flush)
                 await run_file_operation(os.fsync, output.fileno())
+            if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
+                raise ResourceValidationError('Runtime attachment differs from its declared content digest')
             record['manifest'] = [{'path': filename, 'directory': False, 'size': record['size_bytes'], 'sha256': digest.hexdigest()}]
             record['content_sha256'] = hashlib.sha256(json.dumps(record['manifest'], sort_keys=True).encode()).hexdigest()
             self.save(record)
             await run_file_operation(staging.rename, self.path(version_id))
             async with services._node_mutation():
-                services.conversations.get_session(collection_id, session_id)
+                authorize()
                 record.update(state='ready', ready_at=now())
                 self.save(record)
+                committed = True
                 self.notify(services, record)
             return record
         except BaseException as error:
+            if committed:
+                raise
             record.update(state='failed', error=str(error)[:4096], cleanup='pending')
             self.save(record)
-            await self.remove_bytes(record)
+            try:
+                await self.remove_bytes(record)
+            except BaseException as cleanup_error:
+                record.update(cleanup='failed', cleanup_error=str(cleanup_error)[:4096])
+                self.save(record)
             raise
 
     async def recover(self, *, interrupted=True):

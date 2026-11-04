@@ -46,7 +46,7 @@ id = "community.greeter"
 name = "Greeter"
 
 [compatibility]
-oaw = ">=0.1.0,<1"
+oaw = ">=0.1.0"
 plugin_api = "1.14"
 
 [plugin]

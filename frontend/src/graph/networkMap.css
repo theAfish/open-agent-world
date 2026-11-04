@@ -1,4 +1,4 @@
-.network-map { container: network-map / inline-size; position:relative; width:100%; height:100%; min-height:220px; overflow:hidden; color:var(--ink,#384541); background:var(--surface-solid,#f7f9f7); border-radius:var(--radius-control, 6px); isolation:isolate; font:var(--font-size-small, 12px)/1.4 var(--font-ui, system-ui,sans-serif); }
+.network-map { container: network-map / inline-size; position:relative; width:100%; height:100%; min-height:220px; overflow:hidden; color:var(--ink,#384541); background:var(--surface-solid,#f7f9f7); border-radius:var(--radius-control, 6px); isolation:isolate; font:var(--font-size-small, 0.75rem)/1.4 var(--font-ui, system-ui,sans-serif); }
 .network-map-stage { position:absolute; inset:0; outline:none; touch-action:none; cursor:grab; }
 .network-map-stage:focus-visible { box-shadow:inset 0 0 0 1px var(--ink-faint,#78918b); }
 .network-map :is(button,input,select) { font:inherit; color:inherit; border:0; border-radius:5px; background:transparent; padding:6px 8px; min-width:0; }
@@ -9,7 +9,7 @@
 .network-map-tools { position:absolute; top:12px; left:12px; right:12px; display:flex; align-items:center; gap:4px; width:fit-content; max-width:calc(100% - 24px); background:var(--surface-raised,#f7f9f7); border-radius:var(--radius-control, 6px); box-shadow:var(--shadow-surface); padding:3px; }
 .network-map-tools input { width:150px; }
 .network-map-tools select { max-width:125px; }
-.network-map small { color:var(--ink-soft,#78847e); font-size:var(--font-size-caption, 11px); }
+.network-map small { color:var(--ink-soft,#78847e); font-size:var(--font-size-caption, 0.6875rem); }
 .network-map-status { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:var(--ink-soft,#78847e); pointer-events:none; }
 .network-map-empty { position:absolute; inset:64px 12px 52px; display:grid; place-items:center; overflow:auto; }
 .network-map-empty > .oaw-empty-state { box-sizing:border-box; width:100%; padding:16px; }
@@ -26,8 +26,8 @@
 .network-map-caption button { pointer-events:auto; }
 .network-map-caption span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .network-map-scale { position:absolute; right:12px; bottom:12px; display:flex; background:var(--surface-raised,#f7f9f7); box-shadow:var(--shadow-surface); border-radius:var(--radius-control, 6px); }
-.network-map-scale button { font-size:16px; width:30px; padding:3px; }
-.network-map-key { position:absolute; bottom:12px; left:12px; max-width:min(260px,calc(100% - 126px)); max-height:min(280px,calc(100% - 110px)); overflow:auto; overscroll-behavior:contain; color:var(--ink-soft,#78847e); background:var(--surface-raised,#f7f9f7); border-radius:var(--radius-control, 6px); box-shadow:var(--shadow-surface); font-size:11px; }
+.network-map-scale button { font-size:1rem; width:30px; padding:3px; }
+.network-map-key { position:absolute; bottom:12px; left:12px; max-width:min(260px,calc(100% - 126px)); max-height:min(280px,calc(100% - 110px)); overflow:auto; overscroll-behavior:contain; color:var(--ink-soft,#78847e); background:var(--surface-raised,#f7f9f7); border-radius:var(--radius-control, 6px); box-shadow:var(--shadow-surface); font-size:0.6875rem; }
 .network-map-key summary { position:sticky; top:0; padding:7px 10px; cursor:pointer; background:var(--surface-raised,#f7f9f7); }
 .network-map-key summary small { margin-left:5px; }
 .network-map-key summary:focus-visible { outline:1px solid var(--ink-faint,#78918b); outline-offset:-2px; }
@@ -48,5 +48,5 @@
   .network-topics, .network-results { top:90px; max-height:calc(100% - 150px); }
   .network-map-details { top:90px; max-height:calc(100% - 150px); width:calc(100% - 24px); }
 }
-.network-preview-toolbar :is(button,select),.network-preview-toolbar input::file-selector-button { font:12px system-ui; color:var(--ink); background:var(--surface-solid); border:1px solid var(--line); border-radius:5px; padding:6px 9px; }
-.network-preview-toolbar label { font:12px system-ui; color:var(--ink-soft); }
+.network-preview-toolbar :is(button,select),.network-preview-toolbar input::file-selector-button { font:0.75rem system-ui; color:var(--ink); background:var(--surface-solid); border:1px solid var(--line); border-radius:5px; padding:6px 9px; }
+.network-preview-toolbar label { font:0.75rem system-ui; color:var(--ink-soft); }

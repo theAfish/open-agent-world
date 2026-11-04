@@ -3,12 +3,16 @@ schema_version = 3
 
 [compatibility]
 plugin_api = "1.35"
-oaw = ">=0.1.0,<1"
+oaw = ">=0.1.0"
 
 [distribution]
 id = "theafish.codex"
 name = "Codex Agent"
 presentation = "src/oaw_codex/pack.json"
+
+[distribution.preview]
+icon = "bot"
+icon_asset = "src/oaw_codex/assets/openai.svg"
 
 [plugin]
 owner = "openai.codex"

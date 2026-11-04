@@ -37,6 +37,7 @@ export class MapEngine {
   private filter = new Set<string>();
   private filtered = false;
   private dark = false;
+  private textScale = 1;
   private level = 1;
   private aggregation = 0;
   private aggregates = new Map<string, Island>();
@@ -99,6 +100,8 @@ export class MapEngine {
   private reducedMotion() { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
   private readTheme = () => {
     this.dark = document.documentElement.dataset.theme === 'dark';
+    this.textScale = parseFloat(getComputedStyle(document.documentElement).fontSize) / 16 || 1;
+    this.sigma.setSetting('labelSize', 12 * this.textScale);
     this.sigma.setSetting('labelColor', { color: this.dark ? '#d8ddd9' : '#404943' });
     this.sigma.scheduleRefresh();
   };
@@ -320,7 +323,7 @@ export class MapEngine {
       ctx.fill('evenodd'); ctx.stroke();
       if (this.level === 1 && island.members.length > 3) {
         const p = this.sigma.graphToViewport(island.labelPosition);
-        ctx.fillStyle = this.dark ? '#a3b4b2' : '#687d7c'; ctx.font = '600 11px system-ui';
+        ctx.fillStyle = this.dark ? '#a3b4b2' : '#687d7c'; ctx.font = `600 ${11 * this.textScale}px system-ui`;
         const text = `${island.label.slice(0, 32)} · ${island.members.length}`, width = ctx.measureText(text).width;
         if (!labels.some(label => Math.abs(label.y - p.y) < 18 && Math.abs(label.x - p.x) < (label.width + width) / 2 + 12)) {
           ctx.textAlign = 'center'; ctx.fillText(text, p.x, p.y - 25); ctx.textAlign = 'start';
@@ -337,7 +340,7 @@ export class MapEngine {
       ctx.beginPath(); ctx.arc(p.x + 7, p.y - 7, 10, .6, Math.PI * 2); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(p.x + 14, p.y - 12); ctx.lineTo(p.x + 17, p.y - 7); ctx.lineTo(p.x + 20, p.y - 12); ctx.stroke();
       if (this.selected.has(edge.source)) {
-        ctx.fillStyle = this.dark ? '#d8ddd9' : '#404943'; ctx.font = '11px system-ui'; ctx.fillText(edge.label ?? '', p.x + 18, p.y - 12);
+        ctx.fillStyle = this.dark ? '#d8ddd9' : '#404943'; ctx.font = `${11 * this.textScale}px system-ui`; ctx.fillText(edge.label ?? '', p.x + 18, p.y - 12);
       }
     }
   };

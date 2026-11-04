@@ -131,7 +131,7 @@ async def prepare_factory_export(services, node_id):
                 if sum(len(value) for value in files.values()) > MAX_EXPANDED_BYTES - 1024 * 1024:
                     raise ValueError("素材总大小超过卡包容量，请拆成多个卡包")
             manifest = PackManifest(schema_version=2, kind="content", id=design.id, name=design.name, version=design.version,
-                compatibility={"oaw": f">={__version__},<1", "plugin_api": PLUGIN_API_VERSION, "frontend_api": 1},
+                compatibility={"oaw": f">={__version__}", "plugin_api": PLUGIN_API_VERSION, "frontend_api": 1},
                 content=Content(cards=tuple(card_paths), legions=tuple(legion_paths)), creator=design.creator,
                 dependencies=Dependencies(packs=tuple(dependencies.values())))
             files["manifest.json"] = _json(manifest.model_dump(mode="json", exclude_none=True))

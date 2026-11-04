@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 _HOST_FIELDS = frozenset({"workspace_path", "workspace_root", "working_directory", "cwd", "project_path",
                           "host_path", "local_path", "folders", "folder_bindings", "plugin_directories"})
 _BLOCKED_PREFIXES = ("/api/desktop", "/api/settings/storage", "/api/diagnostics", "/api/development",
-                     "/api/runtime/python/plugins", "/api/settings/sandbox")
+                     "/api/runtime/python/plugins", "/api/settings/sandbox", "/api/application/restart")
 _PACK_ASSET = re.compile(r"/api/packs/[^/]+/versions/[^/]+/.+")
 _NODE_ACTION = re.compile(r"/api/(?:runtime-app/workspace/)?nodes/[^/]+/(?:actions|resource)/[^/]+")
 # Pack actions carry uploads as base64 JSON (up to 32 MiB decoded). Their

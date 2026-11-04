@@ -36,7 +36,7 @@
 .activity-glow[data-visible="false"] i { animation-play-state: paused; }
 .container-activity {
   position: absolute; right: 24px; bottom: 16px; display: flex; align-items: center; gap: 7px;
-  font-size: 10px; color: var(--ink-soft); pointer-events: none; letter-spacing: 0.04em;
+  font-size: 0.625rem; color: var(--ink-soft); pointer-events: none; letter-spacing: 0.04em;
 }
 .container-activity i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint); }
 .container-activity[data-phase="running"] i { background: #7caa98; box-shadow: 0 0 7px #7caa98; }

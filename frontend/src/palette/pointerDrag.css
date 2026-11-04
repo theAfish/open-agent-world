@@ -31,5 +31,5 @@ body.is-palette-dragging, body.is-palette-dragging * { cursor: grabbing !importa
 .palette-shred-piece > * { pointer-events: none; }
 .deck-trash { position: relative; }
 .deck-trash[data-discard-near] { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); box-shadow: 0 0 0 calc(var(--discard-progress, 0) * 4px) var(--danger-soft); }
-.deck-caption .deck-trash-hint { display: none; position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 3; width: max-content; max-width: 190px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-solid); color: var(--danger); font-size: 10px; line-height: 1.4; pointer-events: none; box-shadow: 0 3px 10px var(--shadow); }
-.deck-caption .deck-trash[data-discard-near] .deck-trash-hint { display: block; color: var(--danger); font-size: 10px; }
+.deck-caption .deck-trash-hint { display: none; position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 3; width: max-content; max-width: 190px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-solid); color: var(--danger); font-size: 0.625rem; line-height: 1.4; pointer-events: none; box-shadow: 0 3px 10px var(--shadow); }
+.deck-caption .deck-trash[data-discard-near] .deck-trash-hint { display: block; color: var(--danger); font-size: 0.625rem; }

@@ -12,7 +12,7 @@ export function PdfImportIndicator({status,progress,onDismiss}: {
         <circle cx="22" cy="22" r="19" fill="none" stroke="#57534b" strokeWidth="3" />
         <circle cx="22" cy="22" r="19" fill="none" stroke="#d39a7d" strokeWidth="3" pathLength="100" strokeDasharray={`${progress.percent} 100`} strokeLinecap="round" transform="rotate(-90 22 22)" />
       </svg>
-      <span style={{position:"absolute",inset:0,display:"grid",placeItems:"center",fontSize:11,fontVariantNumeric:"tabular-nums"}}>{progress.percent}%</span>
+      <span style={{position:"absolute",inset:0,display:"grid",placeItems:"center",fontSize:'0.6875rem',fontVariantNumeric:"tabular-nums"}}>{progress.percent}%</span>
     </div>}
     <div style={{minWidth:0}}><div role="status" style={{overflowWrap:"anywhere"}}>{status}</div>{label&&<small>{label}</small>}</div>
     {!progress&&<button type="button" aria-label={t("关闭导入提示")} onClick={onDismiss}>×</button>}

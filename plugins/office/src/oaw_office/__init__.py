@@ -7,7 +7,7 @@ from open_agent_world.skill_packages import Skill, SkillPackage, register_skill_
 
 from .preset import definition
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 
 def skill_package():

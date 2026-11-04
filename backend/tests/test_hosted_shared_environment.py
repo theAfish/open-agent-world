@@ -18,10 +18,11 @@ from backend.hosting.gateway import create_gateway
 from backend.hosting.shared_environment import SharedEnvironmentSource, environment_cipher
 from backend.hosting.shared_models import service_token
 from backend.hosting.worker import WorkerConfig, create_worker_app, mint_worker_token
+from backend.sandbox.linux import minimal_linux_environment
 from backend.tests.conftest import create_node
 from backend.tests.test_skill_packages import edit as edit_document
 from backend.tests.test_skill_runtime import runtime_client, setup_skill
-from backend.tests.test_tool_projection import tools, invoke
+from backend.tests.test_tool_projection import connect, tools, invoke
 
 ORIGIN = "https://hosted.example"
 KEY = "shared-execution-test-secret"
@@ -104,6 +105,8 @@ def test_admin_scope_encryption_binding_rotation_deletion_and_revision(installat
 @pytest.mark.parametrize("variables", [
     {"PATH": KEY}, {"OAW_ALIYUN_SANDBOX_API_KEY": KEY}, {"PYTHONPATH": KEY},
     {"MODEL": {"path_ref": "folder"}}, {"MODEL": {"file_ref": "file"}},
+    {"PATH": {"secret_ref": "token", "operation": "append"}},
+    {"HOME": {"value": "/workspace", "operation": "append"}},
     {"A": "one", "a": "two"}, {"REGION": "nul\0"}, {"A": "x" * 24000},
 ])
 def test_invalid_settings_do_not_echo_secrets_or_change_saved_config(installation, variables):
@@ -167,6 +170,53 @@ def test_shared_secrets_reach_only_authorized_commands_and_are_redacted(installa
     with pytest.raises(ResourceValidationError, match="unavailable"):
         invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"])
     assert native.last_environment is previous
+
+
+def test_shared_operations_compose_with_project_layers_from_one_snapshot(installation, client, monkeypatch, tmp_path):
+    accounts, admin, _, profiles, gateway = installation
+    sign_in(accounts, gateway, admin)
+    response = gateway.put("/hosting/admin/environment", json={
+        "environment_variables": {
+            "FLAGS": {"value": "shared", "operation": "append", "separator": ","},
+            "API_TOKEN": {"secret_ref": "token", "operation": "append", "separator": ":"},
+            "PATH": {"value": "/shared/bin", "operation": "append"}},
+        "secrets": {"token": KEY}})
+    assert response.status_code == 200, response.text
+    source = connected_source(gateway, profiles[0], tmp_path / "source")
+    reads = []
+    read = source.read
+
+    def snapshot():
+        reads.append(True)
+        return read()
+
+    monkeypatch.setattr(source, "read", snapshot)
+    services = client.app.state.services
+    services.execution_environment_source = source
+    sandbox = create_node(client, "sandbox")
+    profile = create_node(client, "environment")
+    assert client.put("/api/settings/sandbox", json={"environment_variables": {
+        "flags": {"value": "global", "operation": "append", "separator": ","}}}).status_code == 200
+    edit_document(client, profile, "replace", {"variables": {
+        "flags": {"value": "profile", "operation": "prepend", "separator": ","}}})
+    connect(client, profile, sandbox, "environment.default")
+    edit_document(client, sandbox, "replace", {"variables": {
+        "Flags": {"value": "local", "operation": "append", "separator": ","},
+        "api_token": {"value": "tail", "operation": "append", "separator": ":"}}})
+    reads.clear()
+    environment, secrets = resolve_sandbox_configuration(services, sandbox["id"])
+    assert len(reads) == 1
+    resolved = minimal_linux_environment(invocation_env=environment)
+    assert resolved["Flags"] == "profile,shared,global,local"
+    assert resolved["api_token"] == KEY + ":tail" and secrets == (KEY,)
+    assert resolved["PATH"] == minimal_linux_environment()["PATH"] + ":/shared/bin"
+    summary = configuration_summary(services, sandbox["id"])
+    assert len(reads) == 2
+    token = next(value for value in summary["variables"] if value["name"] == "api_token")
+    assert token["secret"] and token["value"] is None and summary["ready"]
+    assert KEY not in json.dumps(summary)
+    edit_document(client, sandbox, "replace", {"variables": {"api_token": "private"}})
+    assert resolve_sandbox_configuration(services, sandbox["id"])[1] == ()
 
 
 def test_existing_and_future_profiles_inherit_enabled_environment(tmp_path):

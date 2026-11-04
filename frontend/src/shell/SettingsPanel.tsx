@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { useMotionPresence } from './useMotionPresence';
 import { reportInteraction } from "../state/interactions";
 import { t, useLocale } from "../i18n";
-import { Box, Cpu, HardDrive, Settings2, X } from "lucide-react";
+import { Box, Cpu, HardDrive, Palette, Settings2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
@@ -19,8 +19,9 @@ import { EnvironmentVariablesEditor, environmentSecretUpdates, environmentFolder
 import { currentHostedSession, isHosted } from '../auth/hostedSession';
 import { ManagedModels } from '../auth/ManagedModels';
 import { sandboxSettingsSource, type SandboxSettingsSnapshot } from './sandboxSettingsSource';
+import { AppearanceSettings } from './AppearanceSettings';
 
-type SettingsSection = "model" | "sandbox" | "storage" | "deepl";
+type SettingsSection = "model" | "sandbox" | "storage" | "deepl" | "appearance";
 
 export function SettingsPanel({ initialSection = "model" }: { initialSection?: SettingsSection }) {
   const { locale, setLocale } = useLocale();
@@ -123,7 +124,7 @@ export function SettingsPanel({ initialSection = "model" }: { initialSection?: S
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (managedModels && section === 'model') return;
-    if (section === "deepl") return;
+    if (section === "deepl" || section === "appearance") return;
     if (busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)) return;
     if (section === 'model' && simpleSetup && !draft.default_model) { setError(t('Choose a model before saving.')); return; }
     setBusy(true);
@@ -180,13 +181,14 @@ export function SettingsPanel({ initialSection = "model" }: { initialSection?: S
         <nav className="settings-sections" aria-label={t("Settings sections")}>
           <label className="field-label"><span>{t('Language')}</span><select aria-label={t('Language')} value={locale} onChange={event => setLocale(event.target.value === 'zh-CN' ? 'zh-CN' : 'en')}><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
           <button type="button" className="secondary-button" data-tutorial="models-tab" aria-pressed={section === "model"} disabled={busy} onClick={() => { setModelRequested(true); setSection("model"); setError(""); }}><Cpu size={16} /> {t("Models")}</button>
+          <button type="button" className="secondary-button" aria-pressed={section === "appearance"} disabled={busy} onClick={() => { setSection("appearance"); setError(""); }}><Palette size={16} /> {t("Appearance")}</button>
           {sandboxSource && <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => { setSection("sandbox"); setError(""); }}><Box size={16} /> {t("Sandbox")}</button>}
           {!hosted && <button type="button" className="secondary-button" aria-pressed={section === "storage"} disabled={busy} onClick={() => { setSection("storage"); setError(""); }}><HardDrive size={16} /> {t("Storage")}</button>}
           <button type="button" className="secondary-button" aria-pressed={section === "deepl"} disabled={busy} onClick={() => { setSection("deepl"); setError(""); }}>{t("DeepL")}</button>
         </nav>
 
         <div className="settings-content">
-        {section === "deepl" ? <DeepLSettings /> : section === "model" ? <div className="settings-form">
+        {section === "appearance" ? <AppearanceSettings /> : section === "deepl" ? <DeepLSettings /> : section === "model" ? <div className="settings-form">
           {!modelLoaded && !modelError && <p role="status">{t("Loading model settings…")}</p>}
           {modelLoaded && (managedModels ? <ManagedModels catalog={liveCatalog} /> : <>
             {draft.revision === 0 && draft.connections.some(connection => connection.id === 'legacy') && <p className="settings-description">{t("Previous models are included in this draft. Save to keep them on the backend.")}</p>}
@@ -250,6 +252,7 @@ export function SettingsPanel({ initialSection = "model" }: { initialSection?: S
               ? '配置可以保存，但部署端尚未启用公共环境下发。'
               : 'Settings can be saved, but shared environment delivery has not been enabled by the deployment operator.'}</p>}
             <EnvironmentVariablesEditor rows={environmentRows} onChange={rows => { setEnvironmentRows(rows); setSandboxSaved(false); }} disabled={!loaded || busy} allowPaths={!sharedEnvironment}
+              existingVariables={Object.fromEntries(Object.keys(sandbox.environment_variables ?? {}).map(name => [name.toUpperCase(), "global"]))}
               secrets={environmentSecrets} bindings={sandbox.secret_bindings ?? {}} onSecretsChange={setEnvironmentSecrets} />
           </section>
         </div>}
@@ -259,8 +262,8 @@ export function SettingsPanel({ initialSection = "model" }: { initialSection?: S
         </div>
         <footer>
           {section === "sandbox" && sandboxSaved && <span className="settings-save-status" role="status">{t("Settings saved")}</span>}
-          <button type="button" className="secondary-button" onClick={setOpen} disabled={busy}>{t(section === "sandbox" && sandboxSaved ? "Close" : "Cancel")}</button>
-          {section !== "deepl" && !(managedModels && section === 'model') && <button data-tutorial={section === "model" ? "model-save" : undefined} type="submit" className="primary-button" disabled={busy || (section === "storage" && (!storage?.editable || !storagePath.trim() || storagePath.trim() === storage.pending_path)) || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? t("Saving…") : t("Save settings")}</button>}
+          <button type="button" className="secondary-button" onClick={setOpen} disabled={busy}>{t(section === "appearance" || (section === "sandbox" && sandboxSaved) ? "Close" : "Cancel")}</button>
+          {section !== "deepl" && section !== "appearance" && !(managedModels && section === 'model') && <button data-tutorial={section === "model" ? "model-save" : undefined} type="submit" className="primary-button" disabled={busy || (section === "storage" && (!storage?.editable || !storagePath.trim() || storagePath.trim() === storage.pending_path)) || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? t("Saving…") : t("Save settings")}</button>}
         </footer>
       </form>
     </div>,

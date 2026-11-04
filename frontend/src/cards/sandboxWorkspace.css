@@ -1,18 +1,18 @@
-.sandbox-workspace { container: sandbox-workspace / size; min-width: 0; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; color: var(--ink); font-size: var(--font-size-small, 12px); }
+.sandbox-workspace { container: sandbox-workspace / size; min-width: 0; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; color: var(--ink); font-size: var(--font-size-small, 0.75rem); }
 .sandbox-compact-navigation { display: none; }
 .sandbox-settings-toggle, .sandbox-publish-button { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 4px 7px; border: 0; border-radius: var(--radius-control, 6px); color: var(--ink-soft); background: transparent; font: inherit; cursor: pointer; }
 .sandbox-settings-toggle:hover, .sandbox-publish-button:hover { background: var(--accent-soft); color: var(--accent-strong); }
 .sandbox-settings-toggle[aria-expanded="true"] { color: var(--accent-strong); }
-.sandbox-publish-button > span { color: var(--ink-faint); font-size: var(--font-size-caption, 11px); }
+.sandbox-publish-button > span { color: var(--ink-faint); font-size: var(--font-size-caption, 0.6875rem); }
 .sandbox-preview-heading { min-height: 48px; align-items: center; }
 .sandbox-preview-location { flex: 1; }
 .sandbox-preview-location > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.sandbox-preview-location small { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); font-size: var(--font-size-caption, 11px); font-weight: 400; line-height: 1.5; }
+.sandbox-preview-location small { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); font-size: var(--font-size-caption, 0.6875rem); font-weight: 400; line-height: 1.5; }
 .sandbox-work-area[data-empty-preview] > .sandbox-preview-section { flex: 0 0 120px; min-height: 0; }
 .sandbox-work-area[data-empty-preview] > .sandbox-terminal-section { flex-grow: 1; }
 .sandbox-preview-empty { min-height: 0; flex: 1; padding: 8px 16px 16px; }
-.sandbox-preview-empty > strong { font-size: var(--font-size-small, 12px); font-weight: 400; color: var(--ink-soft); }
-.artifact-publish-content { min-width: 0; font-size: var(--font-size-small, 12px); }
+.sandbox-preview-empty > strong { font-size: var(--font-size-small, 0.75rem); font-weight: 400; color: var(--ink-soft); }
+.artifact-publish-content { min-width: 0; font-size: var(--font-size-small, 0.75rem); }
 .artifact-publish-content > label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
 .artifact-publish-content > p { overflow-wrap: anywhere; color: var(--ink-soft); line-height: 1.6; }
 .artifact-publish-content > button { margin: 0 8px 8px 0; }
@@ -21,23 +21,23 @@
 .sandbox-workspace [hidden], .sandbox-terminal [hidden] { display: none !important; }
 .sandbox-window-toolbar { flex-shrink: 0; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: transparent; }
 .sandbox-tabs { display: flex; align-self: stretch; align-items: stretch; gap: 16px; }
-.sandbox-tabs > button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; color: var(--ink-faint); background: transparent; font-size: var(--font-size-small, 12px); font-weight: 600; cursor: pointer; }
+.sandbox-tabs > button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; color: var(--ink-faint); background: transparent; font-size: var(--font-size-small, 0.75rem); font-weight: 600; cursor: pointer; }
 .sandbox-tabs > button:hover { color: var(--ink); }
 .sandbox-tabs > button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent-strong); }
 .sandbox-dirty-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .sandbox-window-toolbar .sandbox-status-panel { min-width: 0; display: flex; flex: 1; flex-wrap: wrap; gap: 8px; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .sandbox-window-toolbar .sandbox-status-panel > div { min-width: 0; display: flex; flex: 1; align-items: center; gap: 8px; }
-.sandbox-window-toolbar .sandbox-status-panel span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption, 11px); text-transform: none; letter-spacing: 0; }
-.sandbox-window-toolbar .sandbox-status-panel strong { font-size: var(--font-size-small, 12px); white-space: nowrap; }
-.sandbox-workspace .primary-button, .sandbox-workspace .secondary-button, .sandbox-preview .primary-button, .sandbox-preview .secondary-button { min-height: 28px; font-size: var(--font-size-small, 12px); }
-.sandbox-workspace-error { flex-shrink: 0; margin: 0; padding: 8px 14px; color: var(--danger); background: var(--danger-soft); font-size: var(--font-size-small, 12px); }
+.sandbox-window-toolbar .sandbox-status-panel span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption, 0.6875rem); text-transform: none; letter-spacing: 0; }
+.sandbox-window-toolbar .sandbox-status-panel strong { font-size: var(--font-size-small, 0.75rem); white-space: nowrap; }
+.sandbox-workspace .primary-button, .sandbox-workspace .secondary-button, .sandbox-preview .primary-button, .sandbox-preview .secondary-button { min-height: 28px; font-size: var(--font-size-small, 0.75rem); }
+.sandbox-workspace-error { flex-shrink: 0; margin: 0; padding: 8px 14px; color: var(--danger); background: var(--danger-soft); font-size: var(--font-size-small, 0.75rem); }
 .sandbox-workbench { flex: 1; min-height: 0; display: flex; overflow: hidden; }
 .sandbox-files-section { flex: 0 1 auto; width: var(--sandbox-sidebar-width, 224px); max-width: 42%; }
 .sandbox-files-section.is-only-section { flex: 1; max-width: none; }
-.sandbox-files, .sandbox-preview, .sandbox-terminal { container: sandbox-pane / inline-size; min-width: 0; min-height: 0; flex: 1; color: var(--ink); font-size: var(--font-size-small, 12px); }
+.sandbox-files, .sandbox-preview, .sandbox-terminal { container: sandbox-pane / inline-size; min-width: 0; min-height: 0; flex: 1; color: var(--ink); font-size: var(--font-size-small, 0.75rem); }
 .sandbox-files { display: flex; flex-direction: column; background: color-mix(in srgb, var(--surface-soft) 30%, transparent); }
 .sandbox-pane-heading { min-height: 36px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border-bottom: 0; background: transparent; }
-.sandbox-pane-heading > span { min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); font-size: var(--font-size-small, 12px); font-weight: 600; }
+.sandbox-pane-heading > span { min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); font-size: var(--font-size-small, 0.75rem); font-weight: 600; }
 .sandbox-pane-heading svg { flex-shrink: 0; }
 .sandbox-pane-actions { display: flex; min-width: 0; flex-shrink: 0; align-items: center; gap: 8px; }
 .sandbox-file-toolbar { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; min-height: 36px; padding: 4px 10px; }
@@ -45,14 +45,14 @@
 .sandbox-pane-actions .icon-button[aria-expanded=true] { color: var(--accent-strong); background: var(--accent-soft); }
 .sandbox-tree-scroll { overscroll-behavior: contain; flex: 1; min-height: 0; overflow: auto; padding: 9px 6px; }
 .sandbox-file-root + .sandbox-file-root { margin-top: 12px; }
-.sandbox-tree-entry { width: 100%; min-height: 28px; display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 5px; color: var(--ink); background: transparent; text-align: left; font-size: var(--font-size-small, 12px); cursor: pointer; }
+.sandbox-tree-entry { width: 100%; min-height: 28px; display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 5px; color: var(--ink); background: transparent; text-align: left; font-size: var(--font-size-small, 0.75rem); cursor: pointer; }
 .sandbox-tree-entry:disabled { color: var(--ink-faint); cursor: not-allowed; }
 .sandbox-files[data-drop-active=true] { outline: 1px solid var(--accent); outline-offset: -1px; }
 .sandbox-file-row[data-drop-target=true], .sandbox-root-entry[data-drop-target=true] { background: var(--accent-soft); outline: 1px solid var(--accent); border-radius: 5px; }
 .sandbox-file-row[data-drag-source=true] { opacity: .5; }
 .sandbox-tree-entry > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sandbox-tree-entry > svg { flex-shrink: 0; color: var(--ink-faint); }
-.sandbox-tree-entry > small { flex-shrink: 0; margin-left: auto; font-size: var(--font-size-caption, 11px); color: var(--ink-faint); }
+.sandbox-tree-entry > small { flex-shrink: 0; margin-left: auto; font-size: var(--font-size-caption, 0.6875rem); color: var(--ink-faint); }
 .sandbox-tree-entry:not(:disabled):hover { color: var(--ink); background: var(--surface-soft); }
 .sandbox-file-row { display: flex; align-items: center; gap: 2px; border-radius: 5px; }
 .sandbox-file-row.is-selected { background: var(--accent-soft); }
@@ -67,7 +67,7 @@
 .sandbox-tree-entry[aria-current="true"] > svg, .sandbox-tree-entry[aria-pressed="true"] > svg { color: var(--accent); }
 .sandbox-root-entry { font-weight: 600; }
 .sandbox-files ul { list-style: none; padding: 0 0 0 15px; margin: 1px 0; }
-.sandbox-tree-note { margin: 0; padding: 8px; color: var(--ink-faint); font-size: var(--font-size-small, 12px); line-height: 1.6; overflow-wrap: anywhere; }
+.sandbox-tree-note { margin: 0; padding: 8px; color: var(--ink-faint); font-size: var(--font-size-small, 0.75rem); line-height: 1.6; overflow-wrap: anywhere; }
 .sandbox-upload-error { color: var(--danger); white-space: pre-wrap; max-height: 160px; overflow: auto; }
 .sandbox-file-divider, .sandbox-terminal-divider { flex: 0 0 3px; position: relative; z-index: 1; touch-action: none; background: color-mix(in srgb, var(--line) 55%, transparent); transition: background 120ms ease; }
 .sandbox-file-divider { cursor: col-resize; }
@@ -77,21 +77,21 @@
 .sandbox-preview-section { flex: 1; min-height: 80px; }
 .sandbox-preview { display: flex; flex-direction: column; overflow: hidden; background: transparent; }
 .sandbox-preview-content { overscroll-behavior: contain; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
-.sandbox-preview pre { margin: 0; padding: 15px 18px; tab-size: 4; white-space: pre; font: var(--font-size-small, 12px)/1.75 "Cascadia Code", Consolas, monospace; }
+.sandbox-preview pre { margin: 0; padding: 15px 18px; tab-size: 4; white-space: pre; font: var(--font-size-small, 0.75rem)/1.75 "Cascadia Code", Consolas, monospace; }
 .sandbox-preview img { display: block; max-width: 100%; min-height: 0; max-height: 100%; margin: auto; padding: 16px; object-fit: contain; }
-.sandbox-pane-empty { flex: 1; min-height: 70px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; margin: 0; padding: 20px; color: var(--ink-faint); font-size: var(--font-size-small, 12px); text-align: center; }
+.sandbox-pane-empty { flex: 1; min-height: 70px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; margin: 0; padding: 20px; color: var(--ink-faint); font-size: var(--font-size-small, 0.75rem); text-align: center; }
 .sandbox-pane-empty > svg { opacity: 0.6; }
 .sandbox-terminal-section { flex: 0 0 auto; min-height: 170px; }
 .sandbox-terminal { display: flex; flex-direction: column; overflow: hidden; background: color-mix(in srgb, var(--surface-soft) 20%, transparent); }
 .sandbox-terminal > .sandbox-pane-heading { min-height: 35px; }
 .sandbox-terminal .sandbox-tabs { gap: 14px; }
-.sandbox-terminal .sandbox-tabs > button { font-size: var(--font-size-small, 12px); }
-.sandbox-shell-hint { color: var(--ink-faint); font-size: var(--font-size-caption, 11px); cursor: help; }
+.sandbox-terminal .sandbox-tabs > button { font-size: var(--font-size-small, 0.75rem); }
+.sandbox-shell-hint { color: var(--ink-faint); font-size: var(--font-size-caption, 0.6875rem); cursor: help; }
 
-.sandbox-python-option { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--ink-soft); font-size: 9px; cursor: pointer; }
+.sandbox-python-option { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--ink-soft); font-size: 0.5625rem; cursor: pointer; }
 .sandbox-python-option input { width: 12px; height: 12px; margin: 0; accent-color: var(--accent); }
 .sandbox-console { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.sandbox-terminal-output { overscroll-behavior: contain; flex: 1; min-height: 28px; overflow: auto; padding: 12px 16px; color: var(--ink-soft); font: var(--font-size-small, 12px)/1.7 "Cascadia Code", Consolas, monospace; }
+.sandbox-terminal-output { overscroll-behavior: contain; flex: 1; min-height: 28px; overflow: auto; padding: 12px 16px; color: var(--ink-soft); font: var(--font-size-small, 0.75rem)/1.7 "Cascadia Code", Consolas, monospace; }
 .sandbox-terminal-output pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .sandbox-terminal-output > span { color: var(--ink-faint); }
 .sandbox-command-form { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 0; border: 0; background: transparent; font: inherit; }
@@ -99,26 +99,26 @@
 .sandbox-command-form textarea { flex: 1; width: 100%; min-width: 0; min-height: 0; margin: 0; padding: 0; resize: none; border: 0; border-radius: 0; outline: 0; box-shadow: none; background: transparent; color: var(--ink); font: inherit; }
 .sandbox-history { flex: 1; min-height: 0; overflow: auto; padding: 0 14px; }
 .sandbox-history article { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.sandbox-history article > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--font-size-small, 12px); }
-.sandbox-history small { color: var(--ink-faint); font-size: var(--font-size-caption, 11px); }
-.sandbox-history code, .sandbox-history pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--font-size-small, 12px)/1.6 "Cascadia Code", Consolas, monospace; }
+.sandbox-history article > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--font-size-small, 0.75rem); }
+.sandbox-history small { color: var(--ink-faint); font-size: var(--font-size-caption, 0.6875rem); }
+.sandbox-history code, .sandbox-history pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--font-size-small, 0.75rem)/1.6 "Cascadia Code", Consolas, monospace; }
 .sandbox-history code { color: var(--accent-strong); }
 .sandbox-settings-window { flex: 1; min-height: 0; overflow: auto; background: transparent; }
 .sandbox-settings-content { width: 100%; max-width: 960px; padding: 20px 24px 32px; margin: 0 auto; }
-.sandbox-settings-content .field-label { font-size: var(--font-size-small, 12px); }
-.sandbox-settings-content .field-label :is(input:not([type="checkbox"]), select), .sandbox-settings-content .environment-variable-row :is(input, select) { min-height: 32px; font-size: var(--font-size-small, 12px); }
-.sandbox-settings-content .sandbox-help, .sandbox-settings-content .execution-config .sandbox-help { font-size: var(--font-size-small, 12px); line-height: 1.6; }
-.sandbox-settings-content .sandbox-settings > summary { padding-block: 13px; font-size: var(--font-size-small, 12px); }
+.sandbox-settings-content .field-label { font-size: var(--font-size-small, 0.75rem); }
+.sandbox-settings-content .field-label :is(input:not([type="checkbox"]), select), .sandbox-settings-content .environment-variable-row :is(input, select) { min-height: 32px; font-size: var(--font-size-small, 0.75rem); }
+.sandbox-settings-content .sandbox-help, .sandbox-settings-content .execution-config .sandbox-help { font-size: var(--font-size-small, 0.75rem); line-height: 1.6; }
+.sandbox-settings-content .sandbox-settings > summary { padding-block: 13px; font-size: var(--font-size-small, 0.75rem); }
 .sandbox-settings-content .sandbox-config-form { gap: 12px; padding-block: 12px; }
-.sandbox-settings-content .section-heading { font-size: var(--font-size-small, 12px); }
+.sandbox-settings-content .section-heading { font-size: var(--font-size-small, 0.75rem); }
 .sandbox-settings-content .sandbox-settings-grid { column-gap: 20px; }
-.sandbox-checkbox { display: flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: var(--font-size-small, 12px); }
-.sandbox-diagnostic-output, .sandbox-preset-preview { max-height: 200px; margin: 0; overflow: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--card-soft); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--font-size-small, 12px)/1.65 "Cascadia Code", Consolas, monospace; }
+.sandbox-checkbox { display: flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: var(--font-size-small, 0.75rem); }
+.sandbox-diagnostic-output, .sandbox-preset-preview { max-height: 200px; margin: 0; overflow: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--card-soft); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--font-size-small, 0.75rem)/1.65 "Cascadia Code", Consolas, monospace; }
 
 /* Pane-local queries also apply after a section is detached into another region. */
 .sandbox-workspace .sandbox-settings-content .execution-config :is(p, code, legend, .execution-config-help),
-.sandbox-workspace .sandbox-settings-content .environment-variables-editor small { font-size: var(--font-size-caption, 11px); color: var(--ink-soft); }
-.sandbox-workspace .sandbox-settings-content .execution-config { font-size: var(--font-size-small, 12px); }
+.sandbox-workspace .sandbox-settings-content .environment-variables-editor small { font-size: var(--font-size-caption, 0.6875rem); color: var(--ink-soft); }
+.sandbox-workspace .sandbox-settings-content .execution-config { font-size: var(--font-size-small, 0.75rem); }
 .sandbox-workspace .sandbox-settings-content .execution-config :is(input, select) { border-radius: var(--radius-control, 6px); }
 .sandbox-pane-empty, .sandbox-tree-note, .sandbox-shell-hint { color: var(--ink-soft); }
 

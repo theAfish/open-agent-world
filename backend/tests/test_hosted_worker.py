@@ -119,6 +119,7 @@ def test_hosted_denies_host_management_and_native_execution_config(tmp_path, mon
     with TestClient(create_worker_app(worker)) as client:
         supplied = headers(worker)
         for method, path in (("get", "/api/diagnostics"), ("get", "/api/settings/storage"),
+                             ("post", "/api/application/restart"),
                              ("post", "/api/desktop/inspect-path"), ("post", "/api/packs/install"),
                              ("post", "/api/store/packs/test.greeter/versions/0.1.0/install"),
                              ("put", "/api/settings/sandbox"),

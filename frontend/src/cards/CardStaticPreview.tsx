@@ -4,6 +4,7 @@ import { surfaceDraftKey, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { useWorldStore } from '../state/worldStore';
 import type { NodeTypeCatalogItem, WorldCard } from '../types/world';
 import { staticWorkspaceImage } from './staticWorkspaceImage';
+import { AgentPreview } from './AgentPreview';
 
 const bounded = (value: unknown, fallback = '', limit = 360) => typeof value === 'string' && value.trim()
   ? value.slice(0, limit) : fallback;
@@ -16,17 +17,17 @@ export function CardStaticPreview({ card, definition, workspace, width, height }
   if (workspace && card.type === 'sandbox') return <SandboxStaticPreview card={card} width={width} height={height} />;
   const agent = card.type === 'agent' || definition?.traits.includes('core.agent');
   const text = bounded(card.type === 'text' ? card.config.preview ?? card.config.content
-    : agent ? card.config.system_instruction : card.config.summary ?? card.config.description,
-  t(card.type === 'text' ? 'Empty managed text resource.' : agent ? 'Ready for a scoped instruction.'
+    : card.config.summary ?? card.config.description,
+  t(card.type === 'text' ? 'Empty managed text resource.'
     : card.type === 'conversation' ? 'A shared field for durable conversations.' : definition?.description ?? 'Plugin-defined world object.'));
   const filename = bounded(card.config.filename, card.name);
   const image = card.type === 'image';
-  const content = <>
+  const content = agent ? <AgentPreview card={card} /> : <>
     {image ? <div className="card-static-image">
       {typeof card.config.preview_url === 'string' ? <img src={card.config.preview_url} alt="" draggable={false} decoding="async" loading="lazy" /> : <span data-material-layer="top-print"><ImageIcon size={40} /></span>}
       <span data-material-layer="top-print">{filename}</span>
     </div> : <p data-material-layer="top-print" className={card.type === 'text' ? 'card-static-document' : ''}>{text}</p>}
-    <div className="card-static-metadata" data-material-layer="top-print"><span>{agent ? bounded(card.config.model, t('Default')) : card.type === 'text' ? filename : t(definition?.label ?? card.type)}</span>
+    <div className="card-static-metadata" data-material-layer="top-print"><span>{card.type === 'text' ? filename : t(definition?.label ?? card.type)}</span>
       <span>{card.type === 'text' ? `r${Number(card.config.revision ?? 0)}` : t(card.status)}</span></div>
   </>;
   if (!workspace) return <div className="card-static-preview"><div className="node-preview-body">{content}</div></div>;

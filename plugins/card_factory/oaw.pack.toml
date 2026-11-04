@@ -3,7 +3,7 @@ schema_version = 3
 
 [compatibility]
 plugin_api = "1.35"
-oaw = ">=0.1.0,<1"
+oaw = ">=0.1.0"
 
 [distribution]
 id = "oaw.factory"

@@ -2,13 +2,13 @@ import { ExecutionGraphCard } from './ExecutionGraph';
 import { JobsCard } from './Jobs';
 import { isMissingCard, MissingPlugin } from "./MissingPlugin";
 import { t, useLocale } from "../i18n";
-import { Bot, FileText, Image as ImageIcon, MessagesSquare, ShieldCheck } from "lucide-react";
+import { FileText, Image as ImageIcon, MessagesSquare, ShieldCheck } from "lucide-react";
 import { TaskBoardPreview } from "./TaskBoard";
 import { SkillToolboxPreview } from "./SkillToolbox";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
 import { PluginSurface } from "../plugins/PluginSurface";
-import { modelLabel } from "./modelLabel";
+import { AgentPreview } from './AgentPreview';
 import { MINISTER_ROLE_CARD } from '../state/ministerRole';
 import { MinisterRoleCardPreview } from './MinisterRoleCard';
 
@@ -33,7 +33,6 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
   const sandbox = useWorldStore(s => s.sandboxInfo[card.id]);
   const sandboxError = useWorldStore(s => s.sandboxErrors[card.id]);
   const catalog = useWorldStore((state) => state.catalog);
-  const modelCatalog = useWorldStore((state) => state.modelCatalog);
   if (card.type === "core.execution-graph") return <div data-material-layer="top-print" style={{height: "100%"}}><ExecutionGraphCard card={card} /></div>;
   if (card.type === 'core.jobs') return <div data-material-layer="top-print" style={{ height: '100%' }}><JobsCard card={card} /></div>;
   if (card.type === MINISTER_ROLE_CARD) return <div data-material-layer="top-print"><MinisterRoleCardPreview /></div>;
@@ -45,17 +44,7 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1")) return <div data-material-layer="top-print"><SkillToolboxPreview card={card} single /></div>;
 
 
-  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent")) {
-    const modelName = modelLabel(modelCatalog, card.config.model);
-    return (
-      <div className="node-preview-summary">
-        <p data-material-layer="top-print">{compactText(card.config.system_instruction, t("Ready for a scoped instruction."))}</p>
-        <div className="node-preview-metadata" data-material-layer="top-print">
-          <span title={modelName}><Bot size={12} /> {modelName}</span>
-        </div>
-      </div>
-    );
-  }
+  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent")) return <AgentPreview card={card} />;
 
   if (card.type === "conversation") {
     return (

@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition
 from backend.plugins.registry import CapabilityDefinition, CapabilityGrantDefinition, CapabilitySelector, NodeTypeDefinition, RelationshipDefinition
-from backend.sandbox.environment import validate_command_environment
+from backend.environment_values import EnvironmentOperation, EnvironmentValue
+from backend.sandbox.environment import environment_step, validate_command_environment
 from backend.security.execution_folders import FolderRequirement, FileRequirement, PathRequirement, PATH_REQUIREMENTS, folder_store, GlobalExecutionFolderStore
 from backend.sandbox.models import FolderMount, SandboxValidationError
 
@@ -24,19 +25,27 @@ class EmptyConfig(BaseModel):
     status: Literal["available"] = "available"
 
 
-class SecretRequirement(BaseModel):
+class SecretRequirement(EnvironmentOperation):
     model_config = ConfigDict(extra="forbid")
     secret_ref: StrictStr = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.-]+$")
 
 
 class EnvironmentProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    variables: dict[str, StrictStr | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement] = Field(default_factory=dict)
+    variables: dict[str, StrictStr | EnvironmentValue | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_variables(self):
-        validate_command_environment({key: value if isinstance(value, str) else "" for key, value in self.variables.items()}, allow_target=False)
+        validate_profile_variables(self.variables)
         return self
+
+
+def validate_profile_variables(variables, *, allow_host=False):
+    for name, value in variables.items():
+        if name.upper() == "PATH" and isinstance(value, (SecretRequirement, FileRequirement)):
+            raise SandboxValidationError("PATH extensions require directory values or folder references")
+    validate_command_environment({key: value if isinstance(value, str) else environment_step(value, "bound-path" if not isinstance(value, EnvironmentValue) else value.value)
+                                  for key, value in variables.items()}, allow_target=False, allow_host=allow_host)
 
 
 class ComputeTarget(BaseModel):
@@ -94,12 +103,14 @@ def resolve_execution_configuration(services, environment_id, target_id):
     if environment_id is not None:
         profile = EnvironmentProfile.model_validate(read_document(services, environment_id)["value"])
         for key, value in profile.variables.items():
+            requirement = value
             if isinstance(value, PATH_REQUIREMENTS):
                 raise SandboxValidationError("Folder variables require Sandbox execution")
             if isinstance(value, SecretRequirement):
                 value = resolve_environment_secret(services, environment_id, key, value.secret_ref)
                 secrets.append(value)
-            environment[key] = value
+            text = value if isinstance(value, str) else value.value
+            environment[key] = text if getattr(requirement, "operation", "replace") == "replace" else [environment_step(requirement, text)]
     if target_id is not None:
         target = read_document(services, target_id)["value"]
         environment[TARGET_VARIABLE] = json.dumps(target, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
@@ -125,61 +136,71 @@ def linked_environment(services, sandbox_id):
     return profiles[0] if profiles else None
 
 
-def effective_variables(services, sandbox_id, environment_id=None):
-    return _effective_variables(services, sandbox_id, environment_id, shared_environment(services))
-
-
 def shared_environment(services):
     source = services.execution_environment_source
     return source.read() if source is not None else None
 
 
-def _effective_variables(services, sandbox_id, environment_id, shared):
+def _effective_variable_steps(services, sandbox_id, environment_id, shared):
     from backend.node_documents import read_document
     from backend.sandbox.settings import SandboxSettingsStore
     from backend.sandbox.environment import HOST_ENVIRONMENT_NAMES
     profile_id = environment_id or linked_environment(services, sandbox_id)
-    layers = [(profile_id, "invocation" if environment_id else "linked"), (sandbox_id, "local")]
     defaults = SandboxSettingsStore(services.database, services.settings.data_root).read()
-    effective = {name.upper(): (name, value, "shared", "shared")
-                 for name, value in (shared.variables.items() if shared else ())}
-    effective.update({name.upper(): (name, value, "global", "global")
-                      for name, value in defaults.environment_variables.items()
-                      if name.upper() not in HOST_ENVIRONMENT_NAMES})
-    for node_id, source in layers:
-        if node_id is None:
-            continue
-        profile = EnvironmentProfile.model_validate(read_document(services, node_id)["value"])
-        for name, value in profile.variables.items():
-            # Overrides are portable and case insensitive, like validation.
-            effective[name.upper()] = (name, value, node_id, source)
+    layers = [("shared", "shared", shared.variables if shared else {}),
+              ("global", "global", {name: value for name, value in defaults.environment_variables.items()
+                                    if name.upper() not in HOST_ENVIRONMENT_NAMES})]
+    for node_id, source in ((profile_id, "invocation" if environment_id else "linked"), (sandbox_id, "local")):
+        if node_id is not None:
+            profile = EnvironmentProfile.model_validate(read_document(services, node_id)["value"])
+            layers.append((node_id, source, profile.variables))
+    effective = {}
+    for owner, source, variables in layers:
+        for name, value in variables.items():
+            # Replacement discards lower layers before any private bindings are read.
+            step = (name, value, owner, source)
+            if getattr(value, "operation", "replace") == "replace":
+                effective[name.upper()] = [step]
+            else:
+                effective.setdefault(name.upper(), []).append(step)
     return profile_id, list(effective.values())
+
+
+def effective_variables(services, sandbox_id, environment_id=None):
+    profile_id, chains = _effective_variable_steps(services, sandbox_id, environment_id, shared_environment(services))
+    return profile_id, [chain[-1] for chain in chains]
 
 
 def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, target_id=None, *, folder_mounts=None):
     shared = shared_environment(services)
-    _, variables = _effective_variables(services, sandbox_id, environment_id, shared)
+    _, chains = _effective_variable_steps(services, sandbox_id, environment_id, shared)
     environment, secrets = {}, []
-    for name, value, owner, source in variables:
-        if isinstance(value, PATH_REQUIREMENTS):
-            if folder_mounts is None:
-                raise SandboxValidationError("This caller does not support folder variables")
-            store = GlobalExecutionFolderStore(services.database, services.settings.data_root) if source == "global" else folder_store(services)
-            binding = store.resource(owner, value)
-            folder_mounts.append(FolderMount(name, binding.path, binding.access, binding.kind))
-            # Backends replace this host path with their actual accessible path.
-            environment[name] = binding.path
-            continue
-        if isinstance(value, SecretRequirement):
-            if source == "shared":
-                value = shared.secrets[value.secret_ref]
-            elif source == "global":
-                from backend.security.execution_credentials import GlobalExecutionCredentialStore
-                value = GlobalExecutionCredentialStore(services.database, services.settings.data_root).resolve(None, value.secret_ref)
-            else:
-                value = resolve_environment_secret(services, owner, name, value.secret_ref)
-            secrets.append(value)
-        environment[name] = value
+    for chain in chains:
+        name = chain[-1][0]
+        structured = len(chain) > 1 or getattr(chain[0][1], "operation", "replace") != "replace"
+        steps = []
+        for index, (_, value, owner, source) in enumerate(chain):
+            text = value if isinstance(value, str) else getattr(value, "value", "")
+            if isinstance(value, PATH_REQUIREMENTS):
+                if folder_mounts is None:
+                    raise SandboxValidationError("This caller does not support folder variables")
+                store = GlobalExecutionFolderStore(services.database, services.settings.data_root) if source == "global" else folder_store(services)
+                binding = store.resource(owner, value)
+                if name.upper() == "PATH" and binding.kind != "folder":
+                    raise SandboxValidationError("PATH extensions require a folder")
+                folder_mounts.append(FolderMount(name, binding.path, binding.access, binding.kind, index if structured else None))
+                text = binding.path
+            if isinstance(value, SecretRequirement):
+                if source == "shared":
+                    text = shared.secrets[value.secret_ref]
+                elif source == "global":
+                    from backend.security.execution_credentials import GlobalExecutionCredentialStore
+                    text = GlobalExecutionCredentialStore(services.database, services.settings.data_root).resolve(None, value.secret_ref)
+                else:
+                    text = resolve_environment_secret(services, owner, name, value.secret_ref)
+                secrets.append(text)
+            steps.append(environment_step(value, text))
+        environment[name] = steps if structured else steps[0]["value"]
     if target_id:
         target_env, _ = resolve_execution_configuration(services, None, target_id)
         environment.update(target_env)
@@ -187,9 +208,7 @@ def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, tar
     return environment, tuple(secrets)
 
 
-def configuration_summary(services, sandbox_id):
-    shared = shared_environment(services)
-    profile_id, variables = _effective_variables(services, sandbox_id, None, shared)
+def _configuration_summaries(services, variables, shared):
     from backend.security.execution_credentials import GlobalExecutionCredentialStore
     global_credentials = GlobalExecutionCredentialStore(services.database, services.settings.data_root)
     result = []
@@ -197,7 +216,7 @@ def configuration_summary(services, sandbox_id):
         secret = isinstance(value, SecretRequirement)
         folder = isinstance(value, PATH_REQUIREMENTS)
         configured = True
-        shown = value
+        shown = value.value if isinstance(value, EnvironmentValue) else value
         folder_access = None
         folder_error = None
         available = None
@@ -212,17 +231,39 @@ def configuration_summary(services, sandbox_id):
                 try:
                     if value.kind != "path" and binding.kind != value.kind:
                         raise SandboxValidationError("Path type changed; choose the file or folder again and save")
+                    if name.upper() == "PATH" and binding.kind != "folder":
+                        raise SandboxValidationError("PATH extensions require a folder")
                     SandboxSettingsStore(services.database, services.settings.data_root).validator.validate_environment_path(binding.path, binding.kind)
                     available = True
                 except (ValueError, OSError, SandboxValidationError) as error:
                     available = False
                     folder_error = str(error)
         result.append({"name": name, "source": source, "owner": owner, "secret": secret,
+            "operation": getattr(value, "operation", "replace"), "separator": getattr(value, "separator", None),
             "folder": folder, "kind": binding.kind if folder and binding else None, "value": None if secret else shown,
             **({"access": folder_access, "error": folder_error, "available": available,
                 "status": "unconfigured" if not configured else "path_unavailable" if available is False else "configured",
                 "validation_scope": "host_path"} if folder else {}),
             "configured": (value.secret_ref in shared.secrets if source == "shared" else
                            (global_credentials if source == "global" else services.execution_credentials).configured(owner, value.secret_ref)) if secret else configured})
+    return result
+
+
+def configuration_summary(services, sandbox_id):
+    shared = shared_environment(services)
+    profile_id, chains = _effective_variable_steps(services, sandbox_id, None, shared)
+    summaries = iter(_configuration_summaries(services, [step for chain in chains for step in chain], shared))
+    result = []
+    for chain in chains:
+        steps = [next(summaries) for _ in chain]
+        shown = dict(steps[-1])
+        if len(steps) > 1:
+            shown["steps"] = steps
+            shown["configured"] = all(step["configured"] for step in steps)
+            if any(step.get("available") is False for step in steps):
+                shown["available"] = False
+            if any(step["secret"] for step in steps):
+                shown.update(secret=True, value=None)
+        result.append(shown)
     return {"profile_id": profile_id, "variables": result,
             "ready": all(v["configured"] and v.get("available") is not False for v in result)}

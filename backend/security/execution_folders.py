@@ -8,9 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from backend.errors import ResourceValidationError
 from backend.security.execution_credentials import ExecutionCredentialStore, GlobalExecutionCredentialStore
 from backend.sandbox.models import ResourceAccess
+from backend.environment_values import EnvironmentOperation
 
 
-class FolderRequirement(BaseModel):
+class FolderRequirement(EnvironmentOperation):
     model_config = ConfigDict(extra="forbid")
     folder_ref: StrictStr = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.-]+$")
 
@@ -23,7 +24,7 @@ class FolderRequirement(BaseModel):
         return "folder"
 
 
-class FileRequirement(BaseModel):
+class FileRequirement(EnvironmentOperation):
     model_config = ConfigDict(extra="forbid")
     file_ref: StrictStr = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.-]+$")
 
@@ -36,7 +37,7 @@ class FileRequirement(BaseModel):
         return "file"
 
 
-class PathRequirement(BaseModel):
+class PathRequirement(EnvironmentOperation):
     model_config = ConfigDict(extra="forbid")
     path_ref: StrictStr = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.-]+$")
 
@@ -116,7 +117,10 @@ class ExecutionFolderStore(ExecutionCredentialStore):
             elif not self.configured(node_id, reference):
                 raise ResourceValidationError(f"Choose a {requirement.kind} for {name}, or remove the unused variable")
             else:
-                self.resource(node_id, requirement)
+                binding = self.resource(node_id, requirement)
+                detected = binding.kind
+            if name.upper() == "PATH" and detected != "folder":
+                raise ResourceValidationError("PATH extensions require a folder")
         return prepared
 
     def save_bindings(self, node_id, variables, old_variables, prepared):

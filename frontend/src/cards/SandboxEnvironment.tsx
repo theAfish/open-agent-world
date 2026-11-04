@@ -7,9 +7,19 @@ import { useHydrationLease } from '../canvas/useCardRendering';
 import type { WorldCard } from "../types/world";
 import { EnvironmentVariablesEditor, environmentVariablesFromValue, environmentFolderUpdates, saveEnvironmentRows, type EnvironmentVariableRow } from "./ExecutionConfiguration";
 
-export interface EffectiveEnvironment {
-  profile_id: string | null; ready: boolean;
-  variables: { name: string; value: string | null; secret: boolean; folder?: boolean; kind?: "folder" | "file"; access?: "read_only" | "read_write"; error?: string | null; configured: boolean; source: string; owner: string }[];
+interface EffectiveVariable {
+  name: string; value: string | null; operation?: "replace" | "append" | "prepend"; secret: boolean;
+  folder?: boolean; kind?: "folder" | "file"; access?: "read_only" | "read_write";
+  error?: string | null; configured: boolean; source: string; owner: string; steps?: EffectiveVariable[];
+}
+export interface EffectiveEnvironment { profile_id: string | null; ready: boolean; variables: EffectiveVariable[] }
+
+function EffectiveVariableValue({ variable: v }: { variable: EffectiveVariable }) {
+  return <>{v.operation === "append" ? t("Append") : v.operation === "prepend" ? t("Prepend") : "="} {v.secret
+    ? (v.configured ? "•••• · bound" : t("Unbound secret")) : v.folder
+    ? (v.value ?? t(v.kind === "file" ? "Unbound file" : "Unbound folder")) : v.value}
+    {" "}<small>{v.source}{v.folder && ` / ${t(v.access === "read_write" ? "Read and write" : "Read only")}`}</small>
+    {v.error && <small className="sandbox-error">{v.error}</small>}</>;
 }
 const EMPTY_SECRETS: Record<string, string> = {};
 
@@ -91,6 +101,7 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
       </label>
       <p className="sandbox-help" title={t("A command-specific profile replaces the linked profile. Private Agent equipment is never shared automatically.")}>{t("Shared by executions in this Sandbox. Local values override the profile.")}</p>
       <EnvironmentVariablesEditor rows={rows} onChange={setRows} disabled={busy || revision === undefined}
+        ownerId={card.id} existingVariables={Object.fromEntries((effective?.variables ?? []).map(v => [v.name.toUpperCase(), v.source]))}
         secrets={secrets} onSecretsChange={setSecrets} bindings={bindings} />
       <div className="editor-actions"><button className="primary-button" disabled={busy || revision === undefined} onClick={() => void save()}>{t("Save environment")}</button>
         <button className="secondary-button" disabled={busy} onClick={() => { useNodeSurfaceStore.getState().setDraft(draftKey, ""); void reload(); }}>{t("Reload environment")}</button></div>
@@ -99,7 +110,9 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
       {error && <p className="sandbox-error" role="alert">{error}</p>}
       {Object.keys(bindings).length > 0 && <p className="sandbox-help">{t("Secrets stay on this host and are readable by authorized commands.")}</p>}
       <details className="sandbox-settings"><summary>{t("Effective values ·")} {effective ? (effective.ready ? t("Ready") : t("Needs attention")) : t("Loading…")}</summary>
-        {effective?.variables.map(v => <div key={v.name} className="sandbox-variable"><code>{v.name}</code> = {v.secret ? (v.configured ? "•••• · bound" : t("Unbound secret")) : v.folder ? (v.value ?? t(v.kind === "file" ? "Unbound file" : "Unbound folder")) : v.value} <small>{v.source}{v.folder && ` / ${t(v.access === "read_write" ? "Read and write" : "Read only")}`}</small>{v.error && <small className="sandbox-error">{v.error}</small>}</div>)}
+        {effective?.variables.map(v => <div key={v.name} className="sandbox-variable"><code>{v.name}</code>{" "}
+          {v.steps ? <>{v.steps.map((step, index) => <div key={index}><EffectiveVariableValue variable={step} /></div>)}<small>{t("Composed when each command runs.")}</small></>
+            : <EffectiveVariableValue variable={v} />}</div>)}
         {effective?.variables.length === 0 && <p className="sandbox-help">{t("No variables configured.")}</p>}
       </details>
     </div>

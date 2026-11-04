@@ -18,7 +18,8 @@ TOOL_NAME = "knowledge_import_artifact"
 DESCRIPTION = (
     "Import an authorized conversation attachment or artifact by version_id and path, without exposing bytes or host paths. "
     "A binary preview does not prevent import. Supply project_id to append related files to an existing project; "
-    "otherwise one stable project is created for this attachment. Files start Markdown conversion automatically. "
+    "otherwise one stable project is created for this attachment. By default this retains the original as evidence without conversion or model calls. "
+    "Read files with your Harness native tools; set auto_process=true only when Knowledge Base Markdown conversion is wanted. "
     "Archives return a staged project preview: inspect the proposed boundaries, then call knowledge_project_import_commit. "
     "For experiment files, prepare an upload with knowledge_experiment_bundle_prepare and pass bundle_id. "
     "Retries reuse the source. Follow next_step and knowledge_jobs before reading Markdown or projecting a Space."
@@ -33,6 +34,7 @@ class ArtifactImport(actions.Request):
     project_id: UUID | None = None
     relative_path: str | None = Field(default=None, min_length=1, max_length=1024)
     bundle_id: UUID | None = None
+    auto_process: bool = Field(default=False, description='Run Knowledge Base Markdown conversion. Leave false for originals already read by the Agent and imported as evidence.')
 
 
 class _FileImport(ArtifactImport):
@@ -81,7 +83,7 @@ def store_import(context, arguments):
                 return {**preview["result"], "state": "imported", "next_step": {"tool": "knowledge_projects"}}
             return {**preview, "state": "preview", "next_step": {
                 "tool": "knowledge_project_import_commit", "token": preview["token"],
-                "grouping": preview["grouping"], "depth": preview["depth"],
+                "grouping": preview["grouping"], "depth": preview["depth"], "auto_process": request.auto_process,
                 **({"projects": [{"key": item["key"], "name": item["name"],
                     "project_id": str(request.project_id)} for item in preview["projects"]]} if request.project_id else {})}}
         project_key = uuid5(NAMESPACE_URL,
@@ -131,6 +133,9 @@ def store_import(context, arguments):
               "project_id": str(group_id), "reused": reused, "current": str(current.id) == str(source.id)}
     if bundle_id:
         result["bundle_id"] = bundle_id
+    if not request.auto_process:
+        return actions._bounded({**result, 'state': 'imported', 'next_step':
+            {'tool': 'knowledge_experiment_save', 'bundle_id': bundle_id} if bundle_id else {'tool': 'knowledge_sources'}})
     try:
         conversion = actions.process_sources(context, {"source_ids": [str(source.id)]})["jobs"][0]
     except Exception as error:

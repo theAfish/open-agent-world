@@ -25,6 +25,7 @@ from packaging.version import Version
 
 from backend.packs.archive import inspect_archive, zip_files
 from backend.packs.manifest import PackManifest, safe_path
+from backend.packs.metadata import preview_image_media_type
 from backend.packs.spec import PackSpec, discover_source_packs, read_source_pack
 
 
@@ -258,7 +259,7 @@ def build_project(source: Path, output: Path, *, backend_wheel: Path | None = No
         compatibility["oaw"] = oaw
     if "plugin_api" not in compatibility:
         raise ValueError("Declare compatibility.plugin_api or pass --plugin-api matching the runtime descriptor")
-    compatibility.setdefault("oaw", ">=0.1.0,<1")
+    compatibility.setdefault("oaw", ">=0.1.0")
     compatibility.setdefault("frontend_api", 1)
     if spec.contributions.cards and not spec.entrypoints:
         if backend_wheel is not None:
@@ -326,6 +327,20 @@ def build_project(source: Path, output: Path, *, backend_wheel: Path | None = No
             if executable_artifact["path"] is not None:
                 executable_artifact["path"] = resource(executable_artifact["path"])
         environments[name] = item
+    preview = None
+    if spec.preview:
+        preview = {"icon": spec.preview.icon}
+        for field, relative in (("icon_url", spec.preview.icon_asset), ("artwork_url", spec.preview.artwork_asset)):
+            if relative is None:
+                continue
+            path = source / relative
+            if path.is_symlink() or not path.resolve(strict=True).is_relative_to(source):
+                raise ValueError("Preview image escapes the Pack source")
+            data = path.read_bytes()
+            if hashlib.sha256(data).hexdigest() != spec.source_files.get(relative):
+                raise ValueError("Preview image changed since source discovery")
+            media_type = preview_image_media_type(data)
+            preview[field] = f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
     manifest = PackManifest.model_validate({
         "schema_version": 3, "id": spec.distribution_id, "name": spec.name, "version": spec.version,
         "owner": spec.owner, "packs": spec.packs, "node_types": spec.node_types, "backend_modules": modules,
@@ -336,6 +351,7 @@ def build_project(source: Path, output: Path, *, backend_wheel: Path | None = No
         "prerequisites": {name: value.model_dump() for name, value in spec.prerequisites.items()},
         "adapter": adapter.model_dump(),
         "presentation": spec.presentation,
+        "preview": preview,
     })
     files["manifest.json"] = manifest.model_dump_json(indent=2).encode()
     files["checksums.json"] = json.dumps({name: hashlib.sha256(data).hexdigest() for name, data in files.items()},

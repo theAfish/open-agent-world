@@ -6,6 +6,7 @@ import { type SandboxSettings, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { SettingsPanel } from "./SettingsPanel";
 import * as hostedAuth from '../auth/hostedSession';
+import { useAppearance } from '../state/appearance';
 
 const savedCatalog = () => ({ revision: 1, default_model: null, connections: [{
   id: "work", name: "Work account", adapter: "openai" as const, base_url: "https://example.test/v1",
@@ -24,6 +25,23 @@ describe("Application settings", () => {
     ] });
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it('applies appearance immediately without submitting unrelated model settings', async () => {
+    useAppearance.setState({ textSize: 100, wheelShortcut: true });
+    const save = vi.spyOn(worldApi, 'saveModelConnections');
+    render(<SettingsPanel />);
+    await screen.findByLabelText('Model 1 context window');
+    fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
+    fireEvent.change(screen.getByRole('slider', { name: 'Text size' }), { target: { value: '150' } });
+    expect(useAppearance.getState().textSize).toBe(150);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset text size' }));
+    expect(useAppearance.getState().textSize).toBe(100);
+    expect(screen.queryByRole('button', { name: 'Save settings' })).toBeNull();
+    fireEvent.submit(screen.getByRole('dialog', { name: 'Settings' }));
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /^Close$/ }));
+    expect(useWorldStore.getState().settingsOpen).toBe(false);
+  });
 
   it('keeps personal model settings while hiding host paths and runtime management for hosted users', async () => {
     vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
