@@ -37,6 +37,10 @@ def _redact(value, secret):
 
 
 class MatCreatorRuntime(RuntimeProvider):
+    # The trusted engine orchestrates locally; all computation is exposed only
+    # through scoped OAW tools and the host-selected Sandbox driver.
+    supports_managed_execution = True
+
     def __init__(self, capability_provider):
         self.provider = capability_provider
         self.records = {}
