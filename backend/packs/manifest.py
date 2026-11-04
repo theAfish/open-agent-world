@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from backend import __version__
 from backend.plugins.registry import PackDefinition, _supports_plugin_api
-from backend.packs.metadata import CreatorMetadata, PACK_ID
+from backend.packs.metadata import CreatorMetadata, PACK_ID, PackVisualPreview
 from backend.sandbox.python_runtime import validate_requirements
 
 FRONTEND_API_VERSION = 1
@@ -188,6 +188,7 @@ class PackManifest(Model):
     content: Content | None = None
     creator: CreatorMetadata | None = None
     presentation: PackDefinition | None = None
+    preview: PackVisualPreview | None = None
     # Version 3 separates the immutable distribution from persisted runtime IDs.
     owner: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$", max_length=128)
     packs: tuple[str, ...] = Field(default=(), max_length=100)
@@ -203,6 +204,8 @@ class PackManifest(Model):
         data = handler(self)
         if self.presentation is None:
             data.pop("presentation", None)
+        if self.preview is None:
+            data.pop("preview", None)
         return data
 
     @model_validator(mode="after")

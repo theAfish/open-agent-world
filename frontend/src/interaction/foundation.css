@@ -74,7 +74,7 @@
   padding: max(20px, var(--safe-top)) max(20px, var(--safe-right)) max(20px, var(--safe-bottom)) max(20px, var(--safe-left));
 }
 :root[data-layout="compact"][data-touch-input="true"] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), textarea, select):not(:where(.react-flow__viewport *)) {
-  font-size: max(16px, 1em);
+  font-size: max(16px, 1rem, 1em);
   min-height: var(--touch-target);
 }
 

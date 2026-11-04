@@ -88,6 +88,9 @@ export interface StorePreview {
   packaging: import('./world').PackPackaging;
   accent_color?: string | null;
   count?: number | null;
+  icon?: string | null;
+  icon_url?: string | null;
+  artwork_url?: string | null;
 }
 export interface StorePack extends StoreState {
   preview?: StorePreview | null;

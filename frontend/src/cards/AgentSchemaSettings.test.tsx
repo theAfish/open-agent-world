@@ -18,9 +18,12 @@ it("edits plugin-defined settings and shows detected runtime without exposing co
   } } } as unknown as NodeTypeCatalogItem;
   const update = vi.fn().mockResolvedValue(undefined);
   useWorldStore.setState({ catalog: { packs: [], plugins: [], node_types: [definition], relationships: [] }, updateCard: update });
-  vi.spyOn(worldApi, "getAgentInfo").mockResolvedValue({ session_id: "thread-123", details: { source: "desktop", version: "codex-cli 0.153.4" } });
+  vi.spyOn(worldApi, "getAgentInfo").mockResolvedValue({ session_id: "thread-123", details: { available: true, source: "desktop", version: "codex-cli 0.153.4", executable: "D:\\runtime\\codex.exe" } });
   render(<AgentSchemaSettings card={card} />);
   expect(await screen.findByText("codex-cli 0.153.4")).toBeTruthy();
+  expect(screen.getByText('Ready').closest('[data-available]')?.getAttribute('data-available')).toBe('true');
+  expect(screen.getByText('thread-123').closest('details')?.open).toBe(false);
+  expect(screen.getByText('D:\\runtime\\codex.exe').closest('details')?.open).toBe(false);
   expect(screen.queryByLabelText("Fixed provider")).toBeNull();
   fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "high" } });
   await waitFor(() => expect(update).toHaveBeenCalledWith("custom", { config: { effort: "high" } }));
@@ -28,6 +31,16 @@ it("edits plugin-defined settings and shows detected runtime without exposing co
   fireEvent.change(model, { target: { value: "chosen-model" } });
   fireEvent.blur(model);
   await waitFor(() => expect(update).toHaveBeenCalledWith("custom", { config: { model: "chosen-model" } }));
+});
+
+it('presents an unavailable runtime without suggesting that a detected CLI is ready', async () => {
+  const card: WorldCard = { id: 'unavailable', type: 'agent', name: 'Agent', position: { x: 0, y: 0 },
+    size: { width: 300, height: 190 }, expanded: false, status: 'idle', config: {} };
+  vi.spyOn(worldApi, 'getAgentInfo').mockResolvedValue({ session_id: '', details: { available: false, source: 'cli', error: 'Executable could not start.' } });
+  render(<AgentSchemaSettings card={card} />);
+  expect(await screen.findByText('Unavailable')).toBeTruthy();
+  expect(screen.queryByText('Ready')).toBeNull();
+  expect(screen.getByText('Executable could not start.').closest('details')?.open).toBe(false);
 });
 
 it('pauses runtime discovery for a retained hidden inspector', async () => {

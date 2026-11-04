@@ -181,6 +181,23 @@ def test_offline_profile_add_keeps_resource_identity_while_waiting(tmp_path, mon
     assert not (directory / "instances").exists()
 
 
+def test_offline_profile_add_marks_assignment_files_for_worker_read_access(tmp_path, monkeypatch):
+    directory = tmp_path / "hosting"
+    path = initialize(directory, "https://oaw.example")
+    user = AccountStore(path.parent / "accounts.sqlite3").create_user("alice")
+    monkeypatch.setattr(provisioner, "prepare_resources", lambda *args: {"provider-workspace.json": {"ready": True}})
+    changed = []
+    original_chmod = Path.chmod
+    def record_mode(path, mode, **kwargs):
+        changed.append((path.name, mode))
+        original_chmod(path, mode, **kwargs)
+    monkeypatch.setattr(Path, "chmod", record_mode)
+    result = asyncio.run(provision(directory, user["id"], agent_runtime="core.mock"))
+    assignment = directory / "instances" / result.profile_id / "provider-workspace.json"
+    assert json.loads(assignment.read_text(encoding="utf-8")) == {"ready": True}
+    assert (assignment.name, 0o640) in changed
+
+
 def test_queued_update_uses_existing_profile_and_never_provisions_new_resources(queued, monkeypatch):
     directory, store, job_id = queued
     with store.transaction(immediate=True) as db:

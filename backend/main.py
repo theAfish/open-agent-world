@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack, asynccontextmanager
 import json
 import logging
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,6 +52,7 @@ def create_app(
     *,
     services: ApplicationServices | None = None,
     development=None,
+    restart: Callable[[], None] | None = None,
     frontend_directory=None,
     profile_access=None,
     services_factory=None,
@@ -120,6 +122,16 @@ def create_app(
         openapi_url=None if deployment or profile_access else "/openapi.json",
     )
     application.state.hosted = profile_access is not None
+    application.state.instance_id = uuid4().hex
+    application.state.restart = restart if deployment is None and profile_access is None else None
+    application.state.restarting = False
+    if application.state.restart is not None:
+        @application.middleware("http")
+        async def restart_maintenance(request, call_next):
+            if application.state.restarting and request.method not in {"GET", "HEAD", "OPTIONS"}:
+                return JSONResponse({"detail": "OAW is restarting"}, status_code=503)
+            return await call_next(request)
+
     if deployment is None and profile_access is None:
         application.add_middleware(
             CORSMiddleware,

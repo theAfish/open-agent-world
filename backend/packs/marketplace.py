@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from backend.packs.archive import MAX_ARCHIVE_BYTES
 from backend.packs.spec import EnvironmentSpec, FeatureSpec, PrerequisiteSpec
 from backend.packs.manifest import AdapterDependencies
+from backend.packs.metadata import validate_preview_image_url
 
 PACK_MIME = "application/vnd.oaw.pack"
 PackId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$", max_length=120)]
@@ -37,6 +38,11 @@ class PackPreview(BaseModel):
     packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     count: int | None = Field(default=None, ge=0, le=100, strict=True)
+    icon: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9-]{0,63}$")
+    icon_url: str | None = None
+    artwork_url: str | None = None
+
+    _images = field_validator("icon_url", "artwork_url")(validate_preview_image_url)
 
 
 class Listing(BaseModel):

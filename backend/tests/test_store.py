@@ -1,4 +1,5 @@
 from copy import deepcopy
+import base64
 from dataclasses import replace
 
 from fastapi.testclient import TestClient
@@ -53,7 +54,9 @@ def test_store_search_detail_get_restart_and_already_installed(store):
 
 def test_store_preserves_remote_preview_without_loading_pack_code(store):
     client, fake = store
-    preview = {'packaging': 'paper', 'accent_color': '#aabbcc', 'count': 2}
+    image = 'data:image/svg+xml;base64,' + base64.b64encode(b'<svg xmlns="http://www.w3.org/2000/svg"><path d="M2 2h20v20H2z"/></svg>').decode()
+    preview = {'packaging': 'paper', 'accent_color': '#aabbcc', 'count': 2,
+               'icon': 'bot', 'icon_url': image, 'artwork_url': image}
 
     async def transport(request):
         response = fake(request)
@@ -72,6 +75,28 @@ def test_store_preserves_remote_preview_without_loading_pack_code(store):
     assert client.get('/api/store/packs/test.greeter').json()['preview'] == preview
     assert client.get('/api/store/packs/test.greeter/versions/0.1.0').json()['preview'] == preview
     assert not any(request.url.path.endswith('/download') for request in fake.calls)
+
+
+def test_incompatible_api_is_explained_before_download_and_other_versions_remain_installable(store):
+    from backend.plugins.registry import PLUGIN_API_VERSION
+    client, fake = store
+    original = deepcopy(fake.manifest)
+    major, minor = map(int, PLUGIN_API_VERSION.split('.'))
+    required = f'{major}.{minor + 1}'
+    fake.manifest['compatibility']['plugin_api'] = required
+    fake.data = artifact(fake.manifest)
+    metadata = client.get('/api/store/packs/test.greeter/versions/0.1.0').json()
+    assert metadata['can_install'] is False
+    assert metadata['plan']['blockers'] == [f'Pack requires Plugin API {required}; host provides {PLUGIN_API_VERSION}. Upgrade OAW before installing.']
+    result = client.post(URL, headers=HEADERS)
+    assert result.status_code == 422
+    assert required in result.text and PLUGIN_API_VERSION in result.text
+    assert not any(request.url.path.endswith('/download') for request in fake.calls)
+    assert client.get('/api/packs').json()['versions'] == []
+    fake.manifest = original
+    fake.data = artifact(fake.manifest)
+    assert client.get('/api/store/packs/test.greeter/versions/0.1.0').json()['can_install'] is True
+    assert client.post(URL, headers=HEADERS).status_code == 200
 
 
 def test_unavailable_isolated_from_local_world_and_local_file(store):

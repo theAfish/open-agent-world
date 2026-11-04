@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
 import hashlib
 import io
 import json
@@ -70,6 +71,45 @@ def artifact(manifest=None, *, files=None, source=None):
     files = dict(files if files is not None else pack_files(manifest, source))
     files['checksums.json'] = json.dumps({name: hashlib.sha256(content).hexdigest() for name, content in files.items()}).encode()
     return zipped(files)
+
+
+def test_retry_prepares_the_declared_executable_instead_of_shared_python(tmp_path, monkeypatch):
+    from backend.tests.test_pack_executables import fixture_spec
+    from backend.packs.planning import environment_status
+    _, declaration = fixture_spec(tmp_path)
+    manifest = deepcopy(MANIFEST)
+    environment_data = {**declaration.model_dump(mode='json'), 'prepare': 'manual'}
+    environment_data['artifacts'][0]['path'] = 'runtime/fixture.bin'
+    manifest['environments'] = {'native': environment_data}
+    files = pack_files(manifest)
+    files['runtime/fixture.bin'] = (tmp_path / declaration.artifacts[0].path).read_bytes()
+    data = artifact(files=files)
+    with TestClient(create_app(Settings.for_data_root(tmp_path / 'profile'))) as client:
+        headers = {'X-OAW-Pack-Install': '1'}
+        response = client.post('/api/packs/install', headers={**headers, 'Content-Type': 'application/vnd.oaw.pack'}, content=data)
+        assert response.status_code == 201, response.text
+        services = client.app.state.services
+        manager = services.pack_installations
+        selected = manager.selected()['test.greeter']
+        root = manager.version_path(selected.id, selected.version)
+        environment = selected.environments['native']
+        assert environment_status(selected.owner_id, 'native', environment, root, manager.root.parent)['state'] == 'missing'
+        monkeypatch.setattr(services.plugin_bootstrap, 'enqueue', lambda: pytest.fail('Executable retry must not rerun shared Python bootstrap'))
+        body = {'pack_id': selected.id, 'environment_id': 'native'}
+        assert client.post('/api/packs/environment/retry', json=body).status_code == 403
+        bad = client.post('/api/packs/environment/retry', headers=headers, json={**body, 'environment_id': 'undeclared'})
+        assert bad.status_code == 422
+        result = client.post('/api/packs/environment/retry', headers=headers, json=body)
+        assert result.status_code == 200, result.text
+        assert environment_status(selected.owner_id, 'native', environment, root, manager.root.parent)['state'] == 'ready'
+        from backend.api.packs import EnvironmentRetryRequest, retry
+        async def retry_while_canvas_busy():
+            async with services._node_mutation():
+                return await asyncio.wait_for(retry(EnvironmentRetryRequest(**body), services=services), timeout=3)
+        assert client.portal.call(retry_while_canvas_busy)['versions'][0]['selected']
+        assert client.delete('/api/packs/' + selected.id, headers=headers).status_code == 200
+        denied = client.post('/api/packs/environment/retry', headers=headers, json=body)
+        assert denied.status_code == 422 and 'not enrolled' in denied.text
 
 
 @pytest.fixture(autouse=True)

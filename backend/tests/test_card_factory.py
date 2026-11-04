@@ -6,6 +6,7 @@ import zlib
 
 from fastapi.testclient import TestClient
 import pytest
+from packaging.specifiers import SpecifierSet
 
 from backend.config import Settings
 from backend.main import create_app
@@ -71,6 +72,7 @@ def test_print_export_install_and_run_in_clean_profile(client, tmp_path, pack_id
     assert pack.manifest.id == pack_id
     assert pack.manifest.schema_version == 2
     assert pack.manifest.kind == "content"
+    assert "1.0" in SpecifierSet(pack.manifest.compatibility.oaw)
     assert len(pack.manifest.content.cards) == 2
     assert not pack.manifest.dependencies.packs
     assert pack.backend_entry is None

@@ -24,6 +24,11 @@ from .deployments import DeploymentStore, MAX_TEMPLATE
 from .systemd import _common, _plain_tree, _own, _run, _trusted, deployment_name, linux_path, render_units, service_user
 from .worker import WorkerConfig
 
+RESERVED_RESOURCE_FILES = frozenset({
+    "worker.json", "template.json", "update-template.json", "hosting.json",
+    "deployment.json", "hosted-profile.json", "resource-provisioner.json",
+})
+
 
 def timer_units(directory: str, application: str, name="oaw-hosted"):
     directory, application, name = linux_path(directory), linux_path(application), deployment_name(name)
@@ -93,13 +98,11 @@ def prepare_resources(directory: Path, profile: HostedProfile) -> dict | None:
 
 
 def validate_resource_files(files):
-    reserved = {"worker.json", "template.json", "update-template.json", "hosting.json",
-                "deployment.json", "hosted-profile.json", "resource-provisioner.json"}
     if not isinstance(files, dict) or len(files) > 16:
         raise ValueError("Resource provisioner must return bounded JSON assignments")
     for filename, value in files.items():
         if (not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}\.json", filename)
-                or filename.lower() in reserved or not isinstance(value, dict)):
+                or filename.lower() in RESERVED_RESOURCE_FILES or not isinstance(value, dict)):
             raise ValueError("Resource assignment must use a nonreserved JSON basename")
     if len(json.dumps(files, allow_nan=False).encode()) > 1024 * 1024:
         raise ValueError("Resource assignments exceed 1 MiB")

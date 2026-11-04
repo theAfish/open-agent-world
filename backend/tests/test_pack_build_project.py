@@ -8,11 +8,15 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+from packaging.specifiers import SpecifierSet
 
 from backend.packs.archive import inspect_archive
 from backend.packs.build import build_project, doctor
 from backend.packs.planning import manifest_spec
 from backend.packs.spec import read_source_pack
+
+
+PREVIEW_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M0 0h20v20H0z"/></svg>'
 
 
 def zip_bytes(files):
@@ -110,6 +114,72 @@ def test_source_build_preserves_ids_shared_requirements_and_explicit_resources(t
         assert entries.sections() == ["open_agent_world.plugins"]
         assert entries["open_agent_world.plugins"]["example.runtime"] == "oaw_build_example:create_plugin"
         assert "sha256=" in archive.read(prefix + "/RECORD").decode()
+
+
+def test_build_embeds_source_bound_visual_assets_without_loading_pack_code(tmp_path):
+    import base64
+
+    root, wheel, frontend, _ = project(tmp_path)
+    (root / "assets").mkdir()
+    (root / "assets/logo.svg").write_bytes(PREVIEW_SVG)
+    png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6XChfoAAAAASUVORK5CYII="
+    (root / "assets/background.svg").write_bytes(
+        f'<svg xmlns="http://www.w3.org/2000/svg"><image href="data:image/png;base64,{png}"/></svg>'.encode())
+    with (root / "oaw.pack.toml").open("a", encoding="utf-8") as stream:
+        stream.write('\n[distribution.preview]\nicon="bot"\nicon_asset="assets/logo.svg"\nartwork_asset="assets/background.svg"\n')
+    source = read_source_pack(root)
+    output = build_project(root, tmp_path / "preview.oawpack", backend_wheel=wheel, frontend_dir=frontend)
+    preview = inspect_archive(output.read_bytes()).manifest.preview
+    assert preview is not None and preview.icon == "bot"
+    assert base64.b64decode(preview.icon_url.split(",", 1)[1]) == PREVIEW_SVG
+    assert base64.b64decode(preview.artwork_url.split(",", 1)[1]) == (root / "assets/background.svg").read_bytes()
+    assert source.source_files["assets/logo.svg"] == hashlib.sha256(PREVIEW_SVG).hexdigest()
+
+
+@pytest.mark.parametrize("image_path, content", [
+    ("../outside.svg", PREVIEW_SVG),
+    ("https://example.test/image.svg", PREVIEW_SVG),
+    ("assets/fake.png", b"not an image"),
+    ("assets/large.svg", b" " * (256 * 1024 + 1)),
+    ("assets/active.svg", b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'),
+], ids=["traversal", "external-url", "not-an-image", "oversize", "active-svg"])
+def test_source_preview_rejects_unsafe_paths_and_images(tmp_path, image_path, content):
+    root, _, _, _ = project(tmp_path)
+    (root / "assets").mkdir()
+    if image_path.startswith("assets/"):
+        (root / image_path).write_bytes(content)
+    with (root / "oaw.pack.toml").open("a", encoding="utf-8") as stream:
+        stream.write(f'\n[distribution.preview]\nicon_asset="{image_path}"\n')
+    with pytest.raises(ValueError):
+        read_source_pack(root)
+
+
+def test_build_rejects_preview_image_changed_after_source_discovery(tmp_path, monkeypatch):
+    import backend.packs.build as build_module
+
+    root, wheel, frontend, _ = project(tmp_path)
+    (root / "logo.svg").write_bytes(PREVIEW_SVG)
+    with (root / "oaw.pack.toml").open("a", encoding="utf-8") as stream:
+        stream.write('\n[distribution.preview]\nicon_asset="logo.svg"\n')
+    source = read_source_pack(root)
+    (root / "logo.svg").write_bytes(PREVIEW_SVG.replace(b"20 20", b"30 30"))
+    monkeypatch.setattr(build_module, "read_source_pack", lambda _: source)
+    with pytest.raises(ValueError, match="Preview image changed"):
+        build_project(root, tmp_path / "changed.oawpack", backend_wheel=wheel, frontend_dir=frontend)
+
+
+@pytest.mark.parametrize("declaration", ["implicit", "cli", "explicit"])
+def test_build_keeps_oaw_compatibility_open_unless_author_declares_an_upper_bound(tmp_path, declaration):
+    root, wheel, frontend, _ = project(tmp_path)
+    if declaration == "cli":
+        path = root / "oaw.pack.toml"
+        path.write_text(path.read_text(encoding="utf-8").replace('[compatibility]\nplugin_api="1.23"\n', ''), encoding="utf-8")
+    output = build_project(root, tmp_path / "result.oawpack", backend_wheel=wheel, frontend_dir=frontend,
+        plugin_api="1.23", oaw=">=0.6.0,<2" if declaration == "explicit" else None)
+    compatibility = SpecifierSet(inspect_archive(output.read_bytes()).manifest.compatibility.oaw)
+    assert "0.0.1" not in compatibility
+    assert "1.0" in compatibility
+    assert ("2.0" in compatibility) == (declaration != "explicit")
 
 
 def test_runtime_fingerprint_is_identical_after_archive_path_relocation(tmp_path):

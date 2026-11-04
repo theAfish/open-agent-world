@@ -85,7 +85,7 @@ async function loadLanguage(path: string): Promise<Extension> {
 }
 
 const editorTheme = EditorView.theme({
-  '&': { height: '100%', fontSize: '12px', color: 'var(--ink, #344139)', backgroundColor: 'var(--card-surface, #fff)' },
+  '&': { height: '100%', fontSize: '0.75rem', color: 'var(--ink, #344139)', backgroundColor: 'var(--card-surface, #fff)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': { overflow: 'auto', fontFamily: 'Consolas, "SFMono-Regular", monospace', lineHeight: '1.65' },
   '.cm-content': { padding: '12px 0', caretColor: 'var(--ink, #344139)' },
@@ -95,7 +95,7 @@ const editorTheme = EditorView.theme({
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--accent, #617b72) 7%, transparent)' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'color-mix(in srgb, var(--accent, #617b72) 23%, transparent)' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--ink, #344139)' },
-  '.cm-panels': { backgroundColor: 'var(--surface, #f6f7f4)', color: 'var(--ink, #344139)', fontSize: '12px' },
+  '.cm-panels': { backgroundColor: 'var(--surface, #f6f7f4)', color: 'var(--ink, #344139)', fontSize: '0.75rem' },
   '.cm-search': { padding: '8px 12px' },
   '.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '4px', marginRight: '8px' },
   '.cm-textfield': { background: 'var(--card-surface, #fff)', color: 'inherit', border: '1px solid var(--line, #dfe3da)', borderRadius: '4px' },

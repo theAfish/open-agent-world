@@ -11,7 +11,7 @@ from .card import CodexCardConfig, CodexCardTemplate
 
 class CodexPlugin:
     descriptor = PluginDescriptor(
-        id="openai.codex", version="0.3.1", plugin_api_version="1.35",
+        id="openai.codex", version="0.3.2", plugin_api_version="1.35",
         name="Codex", description="Run Codex in a local project with OAW graph tools.",
     )
 

@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import threading
 import webbrowser
@@ -53,8 +54,12 @@ def configure_logs(settings: Settings):
     return log_path
 
 
+RESTART_EXIT_CODE = 75
+
+
 async def serve(settings, listener, *, frontend=None, desktop=False, open_browser=False):
     parent_closed = threading.Event()
+    restart = threading.Event()
     if desktop:
         def watch_parent():
             # EOF also handles a crashed desktop parent, without a detached backend.
@@ -69,7 +74,7 @@ async def serve(settings, listener, *, frontend=None, desktop=False, open_browse
         if settings.application_mode == "development":
             from backend.development import DevelopmentControl
             development = DevelopmentControl(settings)
-        app = create_app(settings, development=development, frontend_directory=frontend)
+        app = create_app(settings, development=development, frontend_directory=frontend, restart=restart.set)
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", log_config=None,
                                                proxy_headers=False, timeout_graceful_shutdown=30))
         async def monitor():
@@ -82,7 +87,7 @@ async def serve(settings, listener, *, frontend=None, desktop=False, open_browse
                     if open_browser and not opened:
                         webbrowser.open(url)
                         opened = True
-                if parent_closed.is_set() or development and development.pending:
+                if parent_closed.is_set() or restart.is_set() or development and development.pending:
                     server.should_exit = True
                     return
                 await asyncio.sleep(.2)
@@ -99,7 +104,7 @@ async def serve(settings, listener, *, frontend=None, desktop=False, open_browse
                 raise RuntimeError("Backend startup failed. See launcher.log.")
             if desktop and not getattr(app.state, 'clean_shutdown', False):
                 raise RuntimeError("Backend did not shut down cleanly. See launcher.log.")
-            return
+            return restart.is_set() and not parent_closed.is_set()
         if not app.state.clean_shutdown:
             raise RuntimeError("Backend shutdown failed; the development profile was not reset. See launcher.log.")
         from backend.development import reset_profile
@@ -108,6 +113,60 @@ async def serve(settings, listener, *, frontend=None, desktop=False, open_browse
         # Windows IOCP cannot safely re-register a duplicated, previously closed
         # listener. Rebind a new socket after the old server has fully drained.
         listener = bind_local_port(port, 1)
+
+
+def supervise(*, desktop: bool, open_browser: bool) -> int:
+    """Keep the owner and address stable while restarting the Python interpreter."""
+    stopped = threading.Event()
+    if desktop:
+        def watch_parent():
+            sys.stdin.readline()
+            stopped.set()
+        threading.Thread(target=watch_parent, daemon=True).start()
+    port = None
+    opened = False
+    while not stopped.is_set():
+        # Preserve -I/-B and the installed launch.py entry point as well as -m.
+        command = [sys.executable, *sys.orig_argv[1:], "--server-worker", "--desktop"]
+        if port is not None:
+            command += ["--port", str(port), "--strict-port"]
+        options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                              encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"}, **options) as child:
+            def forward_output():
+                nonlocal port, opened
+                for line in child.stdout:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        event = {}
+                    if isinstance(event, dict) and event.get("event") == "ready":
+                        from urllib.parse import urlsplit
+                        port = urlsplit(event["url"]).port
+                        if open_browser and not opened:
+                            webbrowser.open(event["url"])
+                            opened = True
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            output = threading.Thread(target=forward_output)
+            output.start()
+            try:
+                while child.poll() is None and not stopped.wait(.2):
+                    pass
+            except KeyboardInterrupt:
+                stopped.set()
+            finally:
+                if child.poll() is None:
+                    try:
+                        child.stdin.write("shutdown\n")
+                        child.stdin.flush()
+                    except OSError:
+                        pass
+                child.wait()
+                output.join()
+            if child.returncode != RESTART_EXIT_CODE or stopped.is_set():
+                return child.returncode
+    return 0
 
 
 def main():
@@ -120,9 +179,12 @@ def main():
     parser.add_argument("--desktop", action="store_true")
     parser.add_argument("--open", action="store_true")
     parser.add_argument("--no-sandbox", action="store_true", help="Disable execution environments for UI-only acceptance tests")
+    parser.add_argument("--server-worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("Port must be between 1 and 65535")
+    if not args.server_worker:
+        raise SystemExit(supervise(desktop=args.desktop, open_browser=args.open))
     settings = replace(Settings.from_environment(), application_mode=args.mode)
     if args.no_sandbox:
         settings = replace(settings, sandbox_runtime=None)
@@ -141,9 +203,11 @@ def main():
     print(json.dumps({"event": "starting", "log": str(log_path), "mode": args.mode}), flush=True)
     listener = bind_local_port(args.port, 1 if args.strict_port else 100)
     try:
-        asyncio.run(serve(settings, listener, frontend=args.frontend, desktop=args.desktop, open_browser=args.open))
+        restarting = asyncio.run(serve(settings, listener, frontend=args.frontend, desktop=args.desktop))
     finally:
         listener.close()
+    if restarting:
+        raise SystemExit(RESTART_EXIT_CODE)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .base import SandboxBackend, SandboxEventSink
+from .resource_validation import validate_resource_source
 from .materialization import RuntimeMount, materialize_bundle, cleanup_materializations
 from .darwin_network_proxy import SeatbeltProxySession
 from .models import (
@@ -226,7 +227,7 @@ def minimal_darwin_environment(
     home: Path, tmpdir: Path,
     extra: Mapping[str, str] | None = None, *,
     resources: Path | None = None,
-    invocation_env: Mapping[str, str] | None = None,
+    invocation_env: Mapping[str, object] | None = None,
 ) -> dict[str, str]:
     from .environment import validate_command_environment, apply_invocation_environment
     environment = {
@@ -241,7 +242,7 @@ def minimal_darwin_environment(
         if not isinstance(extra, Mapping):
             raise SandboxValidationError("env must be an object")
         for key, value in extra.items():
-            if key not in {"LANG", "LC_ALL", "TZ", "TERM"}:
+            if key not in {"LANG", "LC_ALL", "TZ", "TERM"} or not isinstance(value, str):
                 raise SandboxValidationError(f"environment key is outside the allowlist: {key}")
             validate_command_environment({key: value})
             environment[key] = value
@@ -596,7 +597,7 @@ class DarwinSeatbeltBackend(SandboxBackend):
     async def _execute_record(
         self, owner: _Record, execution: _Execution, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
-        invocation_env: Mapping[str, str] | None = None,
+        invocation_env: Mapping[str, object] | None = None,
         runtime_mount: RuntimeMount | None = None,
         execution_policy: Mapping[str, Any] | None = None,
         managed_python: bool = True,
@@ -932,18 +933,7 @@ class DarwinSeatbeltBackend(SandboxBackend):
         return str(resolved)
 
     def _validate_source(self, source: Path, *, must_exist: bool = True) -> Path:
-        if source.is_symlink():
-            raise SandboxValidationError("resource symlinks are not allowed")
-        try:
-            resolved = source.resolve(strict=must_exist)
-        except OSError as exc:
-            raise SandboxValidationError("managed resource does not exist") from exc
-        self._assert_within(resolved, self._managed_root)
-        if (any(resolved.is_relative_to(self._managed_root / name)
-                for name in ("sandbox-runtimes", "sandboxes", "sandbox-bindings", "runtime"))
-                or (must_exist and not resolved.is_file())):
-            raise SandboxValidationError("only regular managed resource files can be attached")
-        return resolved
+        return validate_resource_source(source, self._managed_root, must_exist=must_exist)
 
     def _validate_record_paths(self, record: _Record) -> None:
         self._assert_within(record.root.resolve(), self._root)

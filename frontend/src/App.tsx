@@ -21,11 +21,13 @@ import { useLocale } from "./i18n";
 import './shell/motion.css';
 import { isHosted } from './auth/hostedSession';
 import { useSharedModels } from './auth/useSharedModels';
+import { useApplicationAppearance } from './shell/useAppearance';
 
 const DevelopmentPanel = import.meta.env.DEV ? lazy(() => import("./debug/DevelopmentPanel")) : null;
 
 export function App() {
   useSharedModels();
+  useApplicationAppearance();
   const locale = useLocale(state => state.locale);
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const initialize = useWorldStore((state) => state.initialize);

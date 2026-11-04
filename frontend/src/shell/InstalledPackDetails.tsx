@@ -6,7 +6,7 @@ import { useCardLibrary, type LibrarySnapshot } from '../state/cardLibrary';
 import type { PackInstallations, PackInventoryItem, PackUninstallPlan } from '../types/packs';
 import { PackGuide } from './PackCreator';
 import { installedPackStatus, packIssue, packNotice, type InstalledPack } from './installedPacks';
-import { PackRuntimeDetails } from './PackDependencies';
+import { packBlockerMessage, PackRuntimeDetails } from './PackDependencies';
 import { CatalogIcon } from '../components/CatalogIcon';
 import { PackSurface } from './PackSurface';
 import './packPresentation.css';
@@ -31,9 +31,14 @@ export function InstalledPackDetails({ pack, versions, inventory, registered, fa
   const source = !selected && inventory && inventory.source !== 'installed' ? inventory : undefined;
   const removableId = selected?.id ?? (source?.enrolled !== false ? source?.id : undefined);
   const canDismiss = registered && !plugin?.installed && !removableId && !inventory && !versions.length;
-  const environmentErrors = [...new Set([...failures.map(failure => failure.error),
+  const bootstrapErrors = [...new Set([...failures.map(failure => failure.error),
     ...versions.flatMap(row => row.environment?.state === 'environment_failed' ? [row.environment.error || 'Environment failed'] : []),
-    ...(inventory?.environments.flatMap(environment => environment.state === 'failed' ? [environment.error || 'Environment failed'] : []) ?? [])])];
+    ...(inventory?.environments.flatMap(environment => environment.state === 'failed' && environment.management === 'legacy-shared' ? [environment.error || 'Environment failed'] : []) ?? [])])];
+  const managedEnvironments = inventory?.environments.filter(environment => environment.target === 'host-worker'
+    && environment.management === 'managed' && ['python', 'executable'].includes(environment.provider)) ?? [];
+  const setupEnvironments = managedEnvironments.filter(environment => ['failed', 'missing'].includes(environment.state));
+  const environmentErrors = [...new Set([...bootstrapErrors,
+    ...(inventory?.environments.flatMap(environment => environment.state === 'failed' ? [`${environment.id}: ${environment.error || t('Runtime is not ready.')}`] : []) ?? [])])];
   const issue = environmentErrors.length ? { kind: 'error' as const, label: 'Environment failed' } : packIssue(pack, snapshot, versions);
   const status = source?.enrolled === false ? source.loaded ? 'Uninstall pending restart' : 'Pack uninstalled' : issue?.label ?? (versions.length ? installedPackStatus(versions)
     : inventory ? !inventory.enabled ? 'Pack disabled' : inventory.loaded ? 'Loaded' : 'Not loaded' : 'Installed');
@@ -87,22 +92,29 @@ export function InstalledPackDetails({ pack, versions, inventory, registered, fa
           {busy && !removalPlan && <p role="status">{t('Loading...')}</p>}
           {removalPlan?.restart_required && <p>{t('Restart OAW to finish removing unused dependencies.')}</p>}
           {removalPlan?.source !== 'installed' && removalPlan && <p>{t('Source files stay in your checkout. You can restore this Pack later.')}</p>}
-          {!!removalPlan?.blockers.length && <ul role="alert">{removalPlan.blockers.map(message => <li key={message}>{message}</li>)}</ul>}
           {!!removalPlan?.resources.length && <ul className="pack-removal-resources">{removalPlan.resources.map(resource => <li key={`${resource.kind}:${resource.id}`}>
             <strong>{t(resource.action === 'remove' ? 'Remove' : resource.action === 'retain' ? 'Retain' : 'After restart')}</strong>{' '}{resource.id}<small>{resource.reason}</small>
           </li>)}</ul>}
-          <div className="pack-detail-actions"><button className="secondary-button" disabled={busy || !removalPlan?.can_uninstall || !!removalPlan.blockers.length} onClick={() => void mutate(encodeURIComponent(removableId), 'DELETE')}>{t('Confirm uninstall')}</button>
+          {!!removalPlan?.blockers.length && <ul id="pack-uninstall-blockers" className="pack-action-error" role="alert">{removalPlan.blockers.map(message => <li key={message}>{packBlockerMessage(message)}</li>)}</ul>}
+          <div className="pack-detail-actions"><button className="secondary-button" aria-describedby={removalPlan?.blockers.length ? 'pack-uninstall-blockers' : undefined} disabled={busy || !removalPlan?.can_uninstall || !!removalPlan.blockers.length} onClick={() => void mutate(encodeURIComponent(removableId), 'DELETE')}>{t('Confirm uninstall')}</button>
             <button className="library-text-button" disabled={busy} onClick={() => setConfirmRemoval(false)}>{t('Cancel')}</button></div>
         </div>}
         {error && <p className="pack-action-error" role="alert">{error}</p>}
       </aside>
       <div className="pack-detail-body">
         {description && <section className="pack-detail-section"><h4>{t('About this Pack')}</h4><p className="pack-detail-description">{description}</p></section>}
-        {environmentErrors.length > 0 && <div className="pack-problem pack-detail-section">
-          {environmentErrors.map(message => <p key={message} role="alert" className="pack-action-error">{message}</p>)}
+        {bootstrapErrors.length > 0 && <div className="pack-problem pack-detail-section">
+          {bootstrapErrors.map(message => <p key={message} role="alert" className="pack-action-error">{message}</p>)}
           <button className="secondary-button" disabled={busy} onClick={() => void mutate(source ? `${encodeURIComponent(source.id)}/restore` : 'environment/retry', 'POST')}>{t('Retry environment preparation')}</button>
           <p>{t('Repair or reinstall this Pack, then restart OAW to retry. Saved cards and connections are retained.')}</p>
         </div>}
+        {setupEnvironments.map(environment => <div key={environment.id} className="pack-detail-section">
+          {environment.state === 'failed' && <p role="alert" className="pack-action-error">{environment.id}: {environment.error || t('Runtime is not ready.')}</p>}
+          <button className="secondary-button" disabled={busy} onClick={() => void mutate('environment/retry', 'POST', { pack_id: inventory!.id, environment_id: environment.id })}>
+            {t(environment.state === 'failed' ? 'Retry {name} runtime' : 'Prepare {name} runtime', { name: environment.id })}
+          </button>
+        </div>)}
+        {managedEnvironments.filter(environment => environment.state === 'preparing').map(environment => <p key={environment.id} role="status">{t('Preparing {name} runtime…', { name: environment.id })}</p>)}
         {inventory && <details className="pack-detail-section"><summary>{t('Pack dependencies')}</summary><PackRuntimeDetails inventory={inventory} /></details>}
         {item?.creator && <details className="pack-detail-section"><summary>{t('Pack guide')}</summary><PackGuide creator={item.creator} /></details>}
         {versions.some(row => !row.selected) && <details className="pack-detail-section"><summary>{t('Other versions')}</summary>

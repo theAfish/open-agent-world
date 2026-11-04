@@ -1,5 +1,6 @@
 """A standalone Pack using only the public Python plugin API."""
 from pydantic import BaseModel, ConfigDict, Field
+from importlib.resources import files
 from open_agent_world.plugin_api import NodeTypeDefinition, PackDefinition, PluginDefinition, PluginDescriptor
 from open_agent_world.plugin_api import TutorialDefinition, TutorialStep
 
@@ -26,11 +27,8 @@ def register(registration):
             document="## Greeter\n\nThe **Name** field is saved when you click **Greet**. You can change it at any time.",
         ),),
     ))
-    registration.register_pack(PackDefinition(id="example.greeter", name="Greeter",
-        description="Say hello from your own Pack.", cards=("example.greeter.card",),
-        tutorials=(TutorialDefinition(id="reference", title="About the Greeter Pack", summary="A standalone example Pack.",
-            trigger="manual", document="This Pack adds a **Greeter** card. Add it to a deck, then place it on your canvas."),)))
+    registration.register_pack(PackDefinition.model_validate_json(files(__package__).joinpath("pack.json").read_bytes()))
 
 
 def create_plugin():
-    return PluginDefinition(PluginDescriptor(id="example.greeter", version="0.2.0", plugin_api_version="1.26", name="Greeter"), register)
+    return PluginDefinition(PluginDescriptor(id="example.greeter", version="0.2.1", plugin_api_version="1.26", name="Greeter"), register)

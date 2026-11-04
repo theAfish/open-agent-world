@@ -19,6 +19,7 @@ import { installedPackStatus, packInventory } from "./installedPacks";
 import { usePackInstallations } from "../state/packInstallations";
 import type { PackInstallations } from "../types/packs";
 import { PackStore } from "./PackStore";
+import { PackRestartPrompt } from './PackRestartPrompt';
 import { PackCreator } from "./PackCreator";
 import { PackOperations } from './PackOperations';
 import { LibraryCard as PhysicalLibraryCard, LibraryCardSurface } from "./LibraryCard";
@@ -62,6 +63,7 @@ export function CardLibrary() {
   const [installAction, setInstallAction] = useState<HTMLDivElement | null>(null);
   const [inspectedPack, setInspectedPack] = useState<string | null>(null);
   const [packNotice, setPackNotice] = useState('');
+  const [restartPrompt, setRestartPrompt] = useState(false);
   const [showPackIDE, setShowPackIDE] = useState(false);
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectDirty, setProjectDirty] = useState(false);
@@ -189,7 +191,7 @@ export function CardLibrary() {
     {!snapshot ? <div className="library-empty">{library.error ? t("Your collection could not be loaded.") : t("Loading your collection…")}</div> :
       <div className={`library-body${tab === "cards" ? " library-body--cards" : ""}`}>
         {tab === "packs" ? <>
-          {library.open && !hosted ? <PackInstaller actionTarget={installAction} installations={installations.state} onInstalled={value => { acceptInstallations(value); setInspectedPack(null); setQuery(''); }} /> : null}
+          {library.open && !hosted ? <PackInstaller actionTarget={installAction} installations={installations.state} onInstalled={value => { acceptInstallations(value); setInspectedPack(null); setQuery(''); setRestartPrompt(value.restart_required); }} /> : null}
           <PackOperations operations={installations.state?.operations?.filter(operation => (!packDetail && operation.state !== 'failed') || operation.pack_id === packDetail?.inventory?.id || packDetail?.versions.some(item => item.id === operation.pack_id))} />
           {installations.error && <p className="pack-action-error" role="alert">{installations.error}</p>}
           {packNotice && <p className="pack-restart-note" role="status">{t(packNotice)}</p>}
@@ -275,12 +277,12 @@ export function CardLibrary() {
             </footer>}
           </> : <div className="library-detail-empty"><span className="library-detail-formation"><Layers3 size={30} aria-hidden="true" /></span><h3>{t("Explore a card")}</h3><p>{t("Select a card to inspect its purpose and origin.")}</p><p>{t("Removing a card from a deck keeps it in your collection.")}</p></div>}</aside></OverlayScrollbarsComponent></div>
         </> : null}
-        {tab === "store" && library.open ? <PackStore installations={installations.state} readOnly={hosted} /> : null}
+        {tab === "store" && library.open ? <PackStore installations={installations.state} readOnly={hosted} onInstalled={value => setRestartPrompt(value.restart_required)} /> : null}
       </div>}
     {!hosted && <details className="library-developer-tools"><summary>{t('Developer tools')}</summary>
       <button className="library-text-button" onClick={() => setShowPackIDE(true)}>Pack IDE <span className="pack-ide-experimental" title={t('Visual authoring is still in development.')}>{t('Experimental')}</span></button>
     </details>}
-  </dialog>{showPackIDE && <Modal title="Pack IDE" className="pack-ide-modal" portalHost={document.body} busy={projectBusy} onClose={() => {
+  </dialog>{restartPrompt && library.open && !hosted && <PackRestartPrompt portalHost={modal.current ?? undefined} onClose={() => setRestartPrompt(false)} />}{showPackIDE && <Modal title="Pack IDE" className="pack-ide-modal" portalHost={document.body} busy={projectBusy} onClose={() => {
     if (!projectDirty || window.confirm('Discard your unsaved project edits?')) setShowPackIDE(false);
   }}><PackIDE onDirtyChange={setProjectDirty} onBusyChange={setProjectBusy} onClose={() => {
     if (!projectDirty || window.confirm('Discard your unsaved project edits?')) setShowPackIDE(false);

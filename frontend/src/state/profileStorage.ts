@@ -7,6 +7,8 @@ export interface ApplicationProfile {
   profile_id: string;
   generation: string;
   version: string;
+  instance_id?: string;
+  restart_supported?: boolean;
   values: Record<string, string>;
 }
 const API = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "/api";

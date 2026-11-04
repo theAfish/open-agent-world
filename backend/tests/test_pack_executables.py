@@ -51,6 +51,32 @@ def test_context_binds_portable_executable_without_reparsing_or_redeclaring_arti
         environment.read()
 
 
+@pytest.mark.parametrize('entrypoint', ['context', 'planning'])
+def test_executable_read_verifies_payload_once(tmp_path, monkeypatch, entrypoint):
+    from backend.packs import executables
+    from backend.packs.planning import prepare_declared
+    from open_agent_world.plugin_api import PluginEnvironment
+
+    spec, declaration = fixture_spec(tmp_path)
+    profile = tmp_path / 'profile'
+    manager = ExecutableEnvironmentManager(profile)
+    handle = manager.prepare(spec)
+    digest = executables._digest
+    verified = []
+
+    def record_digest(path):
+        verified.append(path)
+        return digest(path)
+
+    monkeypatch.setattr(executables, '_digest', record_digest)
+    if entrypoint == 'context':
+        actual = PluginEnvironment(manager, spec).read()
+    else:
+        actual = prepare_declared('fixture', 'native', declaration, tmp_path, profile, prepare=False)
+    assert actual == handle
+    assert verified == [Path(handle.executable)]
+
+
 @pytest.mark.parametrize('archive', ['raw', 'zip'])
 def test_real_portable_fixture_install_verify_and_tamper(tmp_path, archive):
     spec, _ = fixture_spec(tmp_path, archive=archive)
@@ -63,8 +89,23 @@ def test_real_portable_fixture_install_verify_and_tamper(tmp_path, archive):
     assert b'fixture-ready' in result.stdout
     Path(handle.executable).write_bytes(b'changed')
     assert manager.status(spec)['status'] == 'failed'
+    assert manager.status(spec)['error'] == 'Verified executable payload is missing or changed'
     repaired = manager.prepare(spec)
     assert repaired.operation_id == handle.operation_id
+    assert manager.status(spec)['status'] == 'ready'
+
+
+def test_collected_executable_payload_is_unprepared_and_can_be_prepared_again(tmp_path):
+    spec, _ = fixture_spec(tmp_path)
+    manager = ExecutableEnvironmentManager(tmp_path / 'profile')
+    handle = manager.prepare(spec)
+    collected = tmp_path / 'collected'
+    assert handle.root.resolve().is_relative_to(tmp_path.resolve())
+    assert collected.resolve().is_relative_to(tmp_path.resolve())
+    handle.root.rename(collected)
+    status = manager.status(spec)
+    assert status['status'] == 'missing' and status['error'] is None
+    assert manager.prepare(spec).operation_id == handle.operation_id
     assert manager.status(spec)['status'] == 'ready'
 
 
@@ -94,12 +135,19 @@ def test_external_adoption_is_explicit_owned_and_readonly_status(tmp_path, monke
     manager = ExecutableEnvironmentManager(tmp_path / 'profile')
     assert manager.status(spec)['status'] == 'missing'
     assert not manager.root.exists()
+    from open_agent_world.plugin_api import PluginEnvironment
+    environment = PluginEnvironment(manager, spec)
+    with pytest.raises(RuntimeError, match='valid readiness receipt'):
+        environment.read()
     handle = manager.prepare(spec)
     assert handle.management == 'external'
     assert not (manager.root / 'environments').exists()
     monkeypatch.setattr(manager, '_probe', lambda *args: pytest.fail('status ran the program'))
     assert manager.status(spec)['status'] == 'ready'
     assert manager.read_external(spec) == handle
+    assert environment.read() == handle
+    from backend.packs.planning import prepare_declared
+    assert prepare_declared('fixture', 'native', declaration, tmp_path, tmp_path / 'profile', prepare=False) == handle
 
 
 def test_source_archive_and_cross_owner_share_content_identity(tmp_path):

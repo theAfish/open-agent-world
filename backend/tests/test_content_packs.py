@@ -3,6 +3,7 @@ import json
 
 from fastapi.testclient import TestClient
 import pytest
+from packaging.specifiers import SpecifierSet
 
 from backend.config import Settings
 from backend.legions.presets import preset_record
@@ -110,6 +111,7 @@ def test_api_export_install_in_clean_profile_and_upgrade_preserves_instances(cli
     empty_export = client.post("/api/packs/creator/export", json=request, headers=CREATOR_HEADERS)
     assert empty_export.status_code == 200, empty_export.text
     empty = inspect_archive(empty_export.content)
+    assert "1.0" in SpecifierSet(empty.manifest.compatibility.oaw)
     assert b"deliberate example" not in empty.files["content/legion.json"]
     assert b"DO-NOT-SHARE" not in empty.files["content/legion.json"]
     assert b"author-private-profile" not in empty.files["content/legion.json"]

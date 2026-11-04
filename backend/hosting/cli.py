@@ -77,7 +77,10 @@ async def provision(directory: Path, user_id: str, *, application_id="default", 
         # A failed provision is left unregistered for inspection; it can never
         # receive user traffic or replace an existing runtime.
         for filename, resource in resources.items():
-            write_private_json(config.data_root.parent / filename, resource)
+            target = config.data_root.parent / filename
+            write_private_json(target, resource)
+            # Mark the assignment for worker read access during systemd install.
+            target.chmod(0o640)
         prepare_hosted_binding(config.data_root, profile_id=profile_id, user_id=user_id, application_id=application_id)
         if mode == "runtime":
             await initialize_runtime(config, Path(template))

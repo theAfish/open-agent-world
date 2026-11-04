@@ -4,8 +4,10 @@ from contextlib import AsyncExitStack
 import os
 from pathlib import Path
 import socket
+import stat
 import sys
 import tempfile
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -66,6 +68,51 @@ def test_ownership_walk_rejects_hardlinks_before_mutation(tmp_path):
     with pytest.raises(ValueError, match="hard links"):
         _plain_tree(tmp_path)
     assert target.read_text() == "private"
+
+
+def test_systemd_preserves_only_explicit_resource_assignment_read_access(tmp_path, monkeypatch):
+    from backend.hosting import systemd
+    documents = {"agenticfs.json": (0o640, '{"volume_id":"retained-volume"}'),
+                 "operator-secret.json": (0o600, '{"private":"operator-only"}'),
+                 "worker.json": (0o640, '{}'), "template.json": (0o640, '{}')}
+    for name, (_, content) in documents.items():
+        (tmp_path / name).write_text(content, encoding="utf-8")
+    original_stat = Path.stat
+    monkeypatch.setattr(Path, "stat", lambda path, *args, **kwargs:
+        SimpleNamespace(st_mode=stat.S_IFREG | documents[path.name][0])
+        if path.parent == tmp_path and path.name in documents else original_stat(path, *args, **kwargs))
+    trusted = []
+    monkeypatch.setattr(systemd, "_trusted", trusted.append)
+    resources = systemd._worker_resource_files(tmp_path)
+    assert resources == ("agenticfs.json",)
+    assert trusted == [tmp_path / "agenticfs.json"]
+
+
+@pytest.mark.parametrize("name,content", [("invalid.assignment.json", '{}'), ("assignment.json", '[]')])
+def test_systemd_rejects_invalid_group_readable_assignments_before_permissions_change(tmp_path, monkeypatch, name, content):
+    from backend.hosting import systemd
+    path = tmp_path / name
+    path.write_text(content, encoding="utf-8")
+    original_stat = Path.stat
+    monkeypatch.setattr(Path, "stat", lambda candidate, *args, **kwargs:
+        SimpleNamespace(st_mode=stat.S_IFREG | 0o640) if candidate == path else original_stat(candidate, *args, **kwargs))
+    monkeypatch.setattr(systemd, "_trusted", lambda _: None)
+    with pytest.raises(ValueError, match="Resource assignment"):
+        systemd._worker_resource_files(tmp_path)
+
+
+def test_systemd_rejects_untrusted_group_readable_resource_assignment(tmp_path, monkeypatch):
+    from backend.hosting import systemd
+    path = tmp_path / "assignment.json"
+    path.write_text('{}', encoding="utf-8")
+    original_stat = Path.stat
+    monkeypatch.setattr(Path, "stat", lambda candidate, *args, **kwargs:
+        SimpleNamespace(st_mode=stat.S_IFREG | 0o640) if candidate == path else original_stat(candidate, *args, **kwargs))
+    def untrusted(_):
+        raise ValueError("Assignment must be root-owned")
+    monkeypatch.setattr(systemd, "_trusted", untrusted)
+    with pytest.raises(ValueError, match="root-owned"):
+        systemd._worker_resource_files(tmp_path)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux service descriptors and symlink permissions")

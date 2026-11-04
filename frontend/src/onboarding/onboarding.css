@@ -11,27 +11,27 @@
 .onboarding-welcome { position: absolute; left: 50%; top: calc(38% + 65px); width: min(430px, calc(100% - 40px)); transform: translateX(-50%); text-align: center; pointer-events: auto; }
 body:has(.onboarding-layer.is-welcome:not(.is-leaving):not([hidden])) :is(.component-palette, .world-controls, .world-minimap, .map-tools, .top-bar) { visibility: hidden; opacity: 0; translate: var(--entry-x, 0px) var(--entry-y, 24px); pointer-events: none; }
 .blueprint-chooser { margin: 16px 0; }
-.blueprint-chooser h2 { color: var(--ink-soft); font-size: 14px; font-weight: 500; margin: 0 0 14px; }
-.blueprint-chooser > p { color: var(--ink-soft); font-size: 12px; margin: 0 0 14px; }
+.blueprint-chooser h2 { color: var(--ink-soft); font-size: 0.875rem; font-weight: 500; margin: 0 0 14px; }
+.blueprint-chooser > p { color: var(--ink-soft); font-size: 0.75rem; margin: 0 0 14px; }
 .blueprint-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .blueprint-option { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 9px; border: 1px solid var(--line-strong); border-radius: 14px; padding: 16px; color: var(--ink); background: var(--surface-raised); cursor: pointer; transition: background .15s, border-color .15s; }
 .blueprint-option > svg { color: var(--accent-strong); }
-.blueprint-option strong { font-size: 13px; }
-.blueprint-option span { font-size: 11px; line-height: 1.6; color: var(--ink-soft); }
+.blueprint-option strong { font-size: 0.8125rem; }
+.blueprint-option span { font-size: 0.6875rem; line-height: 1.6; color: var(--ink-soft); }
 .blueprint-option:hover, .blueprint-option:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
 .blueprint-option:disabled { opacity: .5; cursor: default; }
 .blueprint-option[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .blueprint-form { display: grid; gap: 16px; text-align: left; }
 .blueprint-start { justify-self: center; min-width: 180px; padding: 10px 20px; }
-.blueprint-saved { margin: 12px 0; text-align: left; font-size: 12px; }
+.blueprint-saved { margin: 12px 0; text-align: left; font-size: 0.75rem; }
 .blueprint-saved summary { cursor: pointer; color: var(--ink-soft); }
 .blueprint-saved > button { margin: 10px 8px 0 0; }
 @media (max-width: 560px) { .blueprint-grid { grid-template-columns: 1fr; } .blueprint-option { display: grid; grid-template-columns: 24px 1fr; gap: 4px 9px; padding: 10px; } .blueprint-option > svg { grid-row: span 2; align-self: center; } .blueprint-option span { grid-column: 2; } }
-.onboarding-eyebrow { color: var(--ink-faint); font-size: 10px; letter-spacing: .17em; text-transform: uppercase; }
-.onboarding-welcome h1 { margin: 9px 0 10px; font-size: clamp(26px, 3.2vw, 38px); letter-spacing: -.045em; font-weight: 560; }
-.onboarding-welcome > p { margin: 14px 0 0; line-height: 1.6; font-size: 14px; color: var(--ink-soft); }
+.onboarding-eyebrow { color: var(--ink-faint); font-size: 0.625rem; letter-spacing: .17em; text-transform: uppercase; }
+.onboarding-welcome h1 { margin: 9px 0 10px; font-size: clamp(1.625rem, 3.2vw, 2.375rem); letter-spacing: -.045em; font-weight: 560; }
+.onboarding-welcome > p { margin: 14px 0 0; line-height: 1.6; font-size: 0.875rem; color: var(--ink-soft); }
 .onboarding-actions { display: flex; justify-content: center; align-items: center; gap: 24px; }
-.onboarding-text-button { background: none; border: 0; font-size: 11px; color: var(--ink-soft); padding: 6px 3px; cursor: pointer; }
+.onboarding-text-button { background: none; border: 0; font-size: 0.6875rem; color: var(--ink-soft); padding: 6px 3px; cursor: pointer; }
 .onboarding-text-button:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .tutorial-guide { position: absolute; z-index: 3; top: 0; left: 0; width: 256px; transform: translate(var(--guide-x), var(--guide-y)); will-change: transform; }
 .tutorial-guide.is-logo { width: 160px; transition: none; }
@@ -47,18 +47,18 @@ body:has(.onboarding-layer.is-welcome:not(.is-leaving):not([hidden])) :is(.compo
 .tutorial-bubble { position: absolute; width: 256px; max-width: calc(100vw - 32px); bottom: calc(100% + 9px); left: 0; border: 1px solid var(--line-strong); border-radius: 16px 16px 16px 5px; background: var(--surface-raised); box-shadow: var(--panel-shadow); padding: 12px 14px 10px; pointer-events: auto; }
 .tutorial-bubble::after { content: ''; position: absolute; bottom: -8px; left: 44px; width: 13px; height: 13px; background: var(--surface-raised); border-right: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); transform: skewY(25deg) rotate(25deg); }
 .tutorial-bubble header { display: flex; align-items: center; gap: 3px; margin-bottom: 7px; }
-.tutorial-bubble header > span { font-size: 9px; letter-spacing: .025em; color: var(--ink-faint); flex: 1; }
+.tutorial-bubble header > span { font-size: 0.5625rem; letter-spacing: .025em; color: var(--ink-faint); flex: 1; }
 .onboarding-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 23px; height: 23px; padding: 2px; border: 0; background: transparent; color: var(--ink-soft); border-radius: 6px; cursor: pointer; }
 .onboarding-icon-button:hover { background: var(--accent-soft); color: var(--accent); }
-.tutorial-bubble p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink); }
-.tutorial-bubble small { display: block; margin-top: 8px; color: var(--ink-faint); font-size: 10px; line-height: 1.5; }
+.tutorial-bubble p { margin: 0; font-size: 0.8125rem; line-height: 1.5; color: var(--ink); }
+.tutorial-bubble small { display: block; margin-top: 8px; color: var(--ink-faint); font-size: 0.625rem; line-height: 1.5; }
 .tutorial-bubble footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
-.tutorial-next { display: inline-flex; align-items: center; gap: 10px; border: 0; border-radius: 7px; padding: 7px 9px; font-size: 11px; font-weight: 550; background: var(--accent-soft); color: var(--accent-strong); cursor: pointer; }
+.tutorial-next { display: inline-flex; align-items: center; gap: 10px; border: 0; border-radius: 7px; padding: 7px 9px; font-size: 0.6875rem; font-weight: 550; background: var(--accent-soft); color: var(--accent-strong); cursor: pointer; }
 .tutorial-next:hover { background: var(--accent); color: var(--surface-raised); }
-.tutorial-optional { margin-top: 6px; font-size: 10px; }
-.tutorial-waiting { display: flex; align-items: center; gap: 7px; font-size: 10px; color: var(--ink-soft); }
+.tutorial-optional { margin-top: 6px; font-size: 0.625rem; }
+.tutorial-waiting { display: flex; align-items: center; gap: 7px; font-size: 0.625rem; color: var(--ink-soft); }
 .tutorial-waiting i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
-.tutorial-bubble .onboarding-error, .onboarding-welcome .onboarding-error { margin-top: 9px; font-size: 11px; color: var(--danger); }
+.tutorial-bubble .onboarding-error, .onboarding-welcome .onboarding-error { margin-top: 9px; font-size: 0.6875rem; color: var(--danger); }
 .is-compact .tutorial-bubble { padding: 6px 10px; }
 .is-compact .tutorial-bubble header { margin: 0; }
 /* A transparent opening keeps the real target bright without changing its selection style. */
@@ -82,7 +82,7 @@ body:has(.onboarding-layer.is-welcome:not(.is-leaving):not([hidden])) :is(.compo
 }
 .tutorial-connection-trace { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .tutorial-connection-trace path { fill: none; stroke: var(--accent); stroke-width: 3; stroke-dasharray: 1; stroke-linecap: round; }
-@media (max-height: 650px) { .onboarding-welcome > p { margin-bottom: 16px; } .tutorial-bubble p { font-size: 12px; } }
+@media (max-height: 650px) { .onboarding-welcome > p { margin-bottom: 16px; } .tutorial-bubble p { font-size: 0.75rem; } }
 @media (max-height: 700px), (max-width: 560px) {
   .onboarding-logo-ring { top: 16px; left: calc(50% - 48px); width: 96px; height: 96px; }
   .tutorial-guide.is-logo, .is-logo .tutorial-mascot { width: 96px; height: 96px; }
@@ -121,8 +121,8 @@ body:has(.onboarding-layer.is-interaction-guide) .dialog-backdrop:has(> .connect
 @media (prefers-reduced-motion: reduce) { .tutorial-guide .tutorial-bubble { transition: none; } .tutorial-portal { display: none; } }
 
 .quick-start-guide { position: fixed; bottom: 28px; right: 28px; z-index: 35; width: min(380px, calc(100vw - 56px)); padding: 18px; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--surface-solid); box-shadow: var(--panel-shadow); }
-.quick-start-guide strong { font-size: 14px; }
-.quick-start-guide p { font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
+.quick-start-guide strong { font-size: 0.875rem; }
+.quick-start-guide p { font-size: 0.75rem; line-height: 1.6; color: var(--ink-soft); }
 .quick-start-guide .action-row { flex-wrap: wrap; }
 
 /* Welcome and selection share a stage; only the active layer accepts input. */
@@ -130,9 +130,9 @@ body:has(.onboarding-layer.is-interaction-guide) .dialog-backdrop:has(> .connect
 .onboarding-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; margin: 38px auto 0; }
 .welcome-action { display: flex; align-items: center; justify-content: center; gap: 12px; min-width: 0; min-height: 58px; padding: 16px 20px; border: 1px solid transparent; border-radius: 12px; font: inherit; cursor: pointer; transition: background .18s, border-color .18s, box-shadow .18s; }
 .welcome-action > svg { flex-shrink: 0; }
-.welcome-action-label { text-align: left; font-size: 14px; line-height: 1.5; font-weight: 500; }
+.welcome-action-label { text-align: left; font-size: 0.875rem; line-height: 1.5; font-weight: 500; }
 .welcome-action--primary { grid-column: 1 / -1; min-height: 84px; padding: 24px 28px; margin-bottom: 4px; background: var(--accent-strong); color: var(--surface-solid); box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 15%, transparent); }
-.welcome-action--primary .welcome-action-label { flex: 1; font-size: 17px; font-weight: 600; }
+.welcome-action--primary .welcome-action-label { flex: 1; font-size: 1.0625rem; font-weight: 600; }
 .welcome-action--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-strong) 90%, var(--ink)); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
 .welcome-action--secondary { background: color-mix(in srgb, var(--surface-raised) 65%, transparent); color: var(--ink-soft); border-color: var(--line); }
 .welcome-action--secondary:hover:not(:disabled) { background: var(--surface-raised); border-color: var(--line-strong); color: var(--ink); }
@@ -146,5 +146,5 @@ body:has(.onboarding-layer.is-interaction-guide) .dialog-backdrop:has(> .connect
 .blueprint-saved button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 @keyframes workspace-reveal { from { opacity: 0; transform: translateY(55px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-height: 700px), (max-width: 560px) { .onboarding-welcome { top: 112px; } }
-@media (max-width: 560px) { .onboarding-actions { gap: 10px; margin-top: 28px; } .welcome-action { padding: 14px 12px; gap: 8px; } .welcome-action-label { font-size: 12px; } .welcome-action--primary { min-height: 76px; padding: 20px; } .onboarding-workspaces { top: 16px; } }
+@media (max-width: 560px) { .onboarding-actions { gap: 10px; margin-top: 28px; } .welcome-action { padding: 14px 12px; gap: 8px; } .welcome-action-label { font-size: 0.75rem; } .welcome-action--primary { min-height: 76px; padding: 20px; } .onboarding-workspaces { top: 16px; } }
 @media (prefers-reduced-motion: reduce) { .onboarding-welcome, .onboarding-logo-ring, .tutorial-guide.is-logo .tutorial-mascot { transition: none; } .onboarding-workspaces { animation: none; } }

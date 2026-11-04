@@ -4,3 +4,5 @@
 .store-pack { min-width: 0; }
 .store-installation { display: flex; flex-wrap: wrap; gap: 6px; }
 .pack-detail-panel .store-installation { margin-top: 16px; }
+
+.pack-store .pack-detail-panel select { height: auto; min-height: 40px; }

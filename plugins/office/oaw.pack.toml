@@ -5,9 +5,12 @@ id = "theafish.office"
 name = "Office Skills"
 presentation = "src/oaw_office/pack.json"
 
+[distribution.preview]
+icon = "boxes"
+
 [compatibility]
 plugin_api = "1.35"
-oaw = ">=0.6.0,<1"
+oaw = ">=0.6.0"
 
 [plugin]
 owner = "oaw.office"

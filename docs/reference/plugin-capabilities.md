@@ -145,6 +145,53 @@ must not query world storage directly. Credentials and SDK sessions remain insid
 the provider instance and are never persisted in node configuration or events. See
 [Runs and runtime providers](../runs.md) for execution semantics.
 
+### Runtime Conversation files (Plugin API 1.43)
+
+Trusted runtime providers can transfer Conversation files without reading host
+storage or exposing file bytes in events:
+
+```python
+files = await capabilities.conversation_attachments(agent_id, run_id)
+data = await capabilities.read_conversation_attachment(
+    agent_id, run_id, files[-1]["version_id"], files[-1]["path"],
+)
+output = await capabilities.publish_conversation_attachment(
+    agent_id, run_id, "result.png", generated_bytes, request_key=f"{run_id}:result",
+)
+```
+
+Listing returns `version_id`, `path`, `name`, `size_bytes`, `media_type`,
+`message_id`, `sequence`, `conversation_id` and `session_id`. It includes sent
+attachments through the admitting Run's accepted history boundary, including
+earlier messages for retries, and excludes unsent uploads and later queued input.
+Repeated version/path pairs use their latest visible message reference. Outside a
+Conversation, listing returns `[]`; reads and publications require an active
+Conversation Run. Delegated Runs inherit their admitting Conversation's boundary.
+
+Reads verify the complete immutable manifest and checksum before returning bytes.
+`max_bytes` defaults to 32 MiB and may be lowered; it cannot exceed 32 MiB.
+Publication accepts `bytes` up to 32 MiB and a safe single filename, including empty
+files, and returns the attachment metadata plus `conversation_id` and `session_id`.
+The host accepts no local source path. The runtime owns reading its selected
+workspace and forwards only the desired output bytes. Repeating a `request_key`
+(1–128 characters) with the same session, filename and contents reuses the retained
+version; changing those inputs conflicts. Publications carry Agent, Run and session
+provenance and use existing artifact storage limits and recovery.
+
+Publication does not send a message. Find the currently advertised
+`send_conversation_message` tool using `list_tools`, then invoke its capability ID
+with `conversation=output["conversation_id"]` and
+`attachments=[{"version_id": output["version_id"], "path": output["path"]}]`.
+Existing Conversation UI previews and downloads handle the result.
+
+All three methods require the current `InvocationContext` to match the Agent and
+Run, current session participation and the live Conversation connection. Reads
+require `artifact.read`, publication requires `artifact.publish`, and delivery
+uses the ordinary authorized message tool. Access is rechecked across asynchronous
+reads and upload finalization. Revocation prevents further transfer; it does not
+erase bytes a trusted runtime has already received. Neither file bodies nor local
+paths belong in `AgentEvent` or runtime inspection metadata.
+
 ## State schemas
 
 Register durable, frequently changing runtime state as a schema rather than node

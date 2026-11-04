@@ -260,7 +260,13 @@ class ExecutableEnvironmentManager:
                     return {**operation, "status": "failed", "error": "Executable preparation was interrupted"}
             if operation['status'] not in {'ready', 'failed', 'preparing'}:
                 return {**operation, 'status': 'failed', 'error': 'Invalid executable operation receipt'}
-            return {**operation, "status": "failed"} if operation["status"] == "ready" else operation
+            if operation['status'] == 'ready':
+                if not (self.root / 'environments' / spec.fingerprint).exists():
+                    return {**operation, 'status': 'missing', 'error': None}
+                return {**operation, 'status': 'failed', 'error': 'Verified executable payload is missing or changed'}
+            if operation['status'] == 'failed' and not operation.get('error'):
+                return {**operation, 'error': 'Executable preparation failed; retry this runtime'}
+            return operation
         except (OSError, ValueError, KeyError):
             return {"status": "missing", "management": "managed", "operation_id": None}
 

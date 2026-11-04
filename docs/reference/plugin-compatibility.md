@@ -24,6 +24,12 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.43 provides `AgentCapabilityProvider.conversation_attachments`,
+`read_conversation_attachment` and `publish_conversation_attachment` for trusted
+runtime providers. They list sent files, read verified bytes and retain generated
+bytes in the current Run's Conversation session, with live session and graph
+authorization. See [runtime file transfer](plugin-capabilities.md#runtime-conversation-files-plugin-api-143).
+
 Plugin API 1.42 adds `NodePresentation.content_controls="side" | "bottom"` for
 `ui.content-surface.v1`, named host-worker environments through
 [`PluginContext.environment(name)`](plugin-lifecycle.md#declared-host-worker-environments),

@@ -51,13 +51,13 @@
 }
 .component-palette.is-touch .deck-editor { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; align-content: start; }
 .component-palette.is-touch .deck-editor-heading { grid-column: auto; grid-row: auto; align-items: center; padding-right: 0; border-right: 0; }
-.component-palette.is-touch .deck-editor-heading strong { font-size: 13px; }
+.component-palette.is-touch .deck-editor-heading strong { font-size: 0.8125rem; }
 .component-palette.is-touch .deck-editor-heading > button { width: 44px; height: 44px; flex-basis: 44px; }
 .component-palette.is-touch .deck-name-field { grid-column: auto; grid-row: auto; grid-template-columns: 68px minmax(0, 1fr); }
-.component-palette.is-touch .deck-name-field > span { font-size: 11px; }
+.component-palette.is-touch .deck-name-field > span { font-size: 0.6875rem; }
 .component-palette.is-touch .deck-quick-create { grid-column: auto; grid-row: auto; }
-.component-palette.is-touch .deck-create-button { flex: 0 0 110px; height: 44px; font-size: 12px; }
-.component-palette.is-touch .deck-editor > .deck-delete-button { grid-column: auto; min-height: 44px; font-size: 12px; }
+.component-palette.is-touch .deck-create-button { flex: 0 0 110px; height: 44px; font-size: 0.75rem; }
+.component-palette.is-touch .deck-editor > .deck-delete-button { grid-column: auto; min-height: 44px; font-size: 0.75rem; }
 @media (max-width: 620px) {
   .component-palette.is-touch.is-touch-expanded .deck-stage { padding-inline: 9px; }
 }
@@ -90,7 +90,7 @@
   padding: 0 10px;
   border: 0;
   border-radius: 9px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   box-shadow: none;
   background: transparent;
@@ -116,7 +116,7 @@
   height: 18px;
   padding-inline: 3px;
   background: transparent;
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 :root[data-layout="compact"] .component-palette .deck-stage { border-radius: 10px; background: var(--surface-soft); box-shadow: none; }
 :root[data-layout="compact"] .component-palette .deck-stage::after { display: none; }

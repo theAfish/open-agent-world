@@ -133,14 +133,14 @@ def plan(manager, manifest, *, source='archive', source_root=None):
                     for name, environment in spec.environments.items()]
     blockers = [f"Pack dependency {row['id']} is {row['state']}" for row in dependencies if row['state'] != 'satisfied']
     from backend.packs.manifest import Compatibility
-    from backend.plugins.registry import _supports_plugin_api
+    from backend.plugins.registry import _supports_plugin_api, PLUGIN_API_VERSION
     from backend import __version__
     try:
         compatibility = Compatibility.model_validate(manifest.compatibility.model_dump())
         if Version(__version__) not in SpecifierSet(compatibility.oaw):
             blockers.append(f'Pack requires OAW {compatibility.oaw}; host is {__version__}')
         if not _supports_plugin_api(compatibility.plugin_api):
-            blockers.append(f'Unsupported Plugin API: {compatibility.plugin_api}')
+            blockers.append(f'Pack requires Plugin API {compatibility.plugin_api}; host provides {PLUGIN_API_VERSION}. Upgrade OAW before installing.')
     except ValueError:
         blockers.append('Unsupported compatibility declaration')
     for row in environments:
@@ -169,9 +169,12 @@ def prepare_declared(owner, name, declaration, source_root, data_root, *, prepar
     if declaration.provider == 'executable':
         if prepare:
             return manager.prepare(spec)
-        if manager.status(spec)['management'] == 'external':
+        try:
+            return manager.read(spec)
+        except RuntimeError:
+            if not spec.accept_external:
+                raise
             return manager.read_external(spec)
-        return manager.read(spec)
     return manager.prepare_python(spec) if prepare else manager.read_python(spec)
 
 

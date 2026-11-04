@@ -72,9 +72,11 @@ export function conversationTranscript(messages: ConversationMessage[], runs: Co
       const folded: ConversationMessage[] = [];
       let previous = result.at(-1);
       // Fold in place after sorting. Other messages, actors, and execution
-      // groups stay boundaries; the resulting Work log is never re-sorted.
+      // groups stay boundaries; delivered files also remain visible inline.
+      // The resulting Work log is never re-sorted.
       while (completed.status === 'succeeded' && previous?.kind === 'message'
-        && previous.message.sender_kind === 'agent' && previous.message.run_id === completed.run_id) {
+        && previous.message.sender_kind === 'agent' && previous.message.run_id === completed.run_id
+        && !previous.message.attachments?.length) {
         folded.unshift(previous.message);
         result.pop();
         previous = result.at(-1);

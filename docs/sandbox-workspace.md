@@ -16,6 +16,16 @@ Discovery reports missing prerequisites. Use **Refresh** after fixing them. Miss
 
 Application **Settings → Sandbox → Global environment variables** saves plain-text defaults on this backend for every existing and new Sandbox. Changes and deletions apply to the next command without restarting the Sandbox; running processes keep their captured environment. Precedence is global defaults, then the selected or linked Environment Profile, then Sandbox-local variables (highest priority), with names compared case-insensitively. Global values survive backend restarts and are not copied into card documents or templates. Use Sandbox Secret variables for credentials. The same portable-name, reserved-runtime-name and 24 KB environment limits apply to global values. Saving variables with an unchanged workspace location does not migrate workspaces.
 
+Environment editors show existing variable names and their sources and offer
+**Replace**, **Append**, and **Prepend**. Replacement uses the highest-priority
+value; append/prepend combines with the lower configuration layers and runtime
+base at execution time. Ordinary values can specify a separator. `PATH` defaults
+to append, preserves base runtime paths, and chooses the runtime's separator
+automatically. Enter Sandbox directories one per line or select **Path** to
+authorize and map a host folder. These settings change only command environments,
+never the computer's system/user environment. See [execution configuration](execution-configuration.md)
+for the portable operation format and validation rules.
+
 The compact card and inspector report runtime, readiness, folder, access and network policy, with controls for stopping active work, retrying failed prerequisites and shortcuts to the window's Workspace and Settings tabs. The inspector's collapsed Configuration section provides the same runtime/workspace, resource-limit and environment editors as Window settings. Unsaved settings and environment drafts follow the Sandbox between these surfaces; they are transient and are not saved to browser storage. Save commits through the same authoritative API, while Reset or Reload discards the corresponding draft. Workspace shows Files on the left, a file preview at upper right and the terminal at lower right. Both dividers support pointer dragging and arrow keys. History stays inside the terminal; presets, Skill resources, diagnostics and recovery remain in Window settings. Opening, closing or reopening a window never submits a command or changes runtime lifecycle.
 
 New, copied and summoned Sandboxes are ready on demand: commands, managed Python installation and authorized background checks prepare the runtime automatically, without a separate Start action. Opening a card remains read-only. The selected runtime stays pinned after first use. Runtime, workspace, network and resource-limit changes use Stop to edit settings followed by Save; the next execution prepares the environment again. Ordinary environment changes apply to the next command without a restart.

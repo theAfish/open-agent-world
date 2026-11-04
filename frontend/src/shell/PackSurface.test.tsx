@@ -2,6 +2,7 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PackSurface } from './PackSurface';
+import { StorePackPreview } from './StorePackPreview';
 import type { PackRenderOptions } from './pack3d/types';
 
 vi.mock('./pack3d/artwork', () => ({ paintPackCover: vi.fn() }));
@@ -76,6 +77,21 @@ it('uses the accessible fallback when GPU initialization fails even with a cache
   expect(view.container.querySelector('.pack-cover')).toBeTruthy();
   expect(view.container.querySelector('.pack-fallback, .pack-object')).toBeNull();
   warning.mockRestore();
+});
+
+it('updates store icons and artwork with a version instead of reusing its previous preview', async () => {
+  const image = (fill: string) => 'data:image/svg+xml;base64,' + btoa(`<svg xmlns="http://www.w3.org/2000/svg"><rect width="20" height="20" fill="${fill}"/></svg>`);
+  const pack = { id: 'example.tools', name: 'Tools', summary: '', latest_version: '1.0',
+    preview: { packaging: 'paper' as const, icon: 'bot', artwork_url: image('red') } };
+  const view = render(<StorePackPreview pack={pack} onClick={() => {}} />);
+  expect(view.container.querySelector('.pack-icon-source .lucide-bot')).toBeTruthy();
+  view.rerender(<StorePackPreview pack={{ ...pack, latest_version: '2.0', preview: { ...pack.preview, icon_url: image('blue'), artwork_url: image('green') } }} onClick={() => {}} />);
+  expect(new Set(mocks.restore.mock.calls.map(([key]) => key)).size).toBe(2);
+  await visible(true);
+  expect(mocks.attach.mock.calls[0][1]).toMatchObject({ version: '2.0', icon: image('blue'), artwork: image('green') });
+  const handle = mocks.attach.mock.results[0].value;
+  view.rerender(<StorePackPreview pack={{ ...pack, latest_version: '3.0' }} onClick={() => {}} />);
+  expect(handle.update).toHaveBeenLastCalledWith(expect.objectContaining({ version: '3.0', icon: expect.stringContaining('data:image/svg+xml,'), artwork: image('red') }));
 });
 
 it('keeps the same catalog card and material when a WebGL reveal loses its context', async () => {

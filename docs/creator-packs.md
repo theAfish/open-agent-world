@@ -111,7 +111,7 @@ Version 1 code Packs keep their existing contract. An example content manifest i
   "id": "local.research",
   "name": "Research assistant",
   "version": "0.1.0",
-  "compatibility": {"oaw": ">=0.1.0,<1", "plugin_api": "1.23", "frontend_api": 1},
+  "compatibility": {"oaw": ">=0.1.0", "plugin_api": "1.23", "frontend_api": 1},
   "dependencies": {"packs": [{"id": "open-agent-world.core.default", "version": "==0.1.0"}]},
   "content": {"legions": ["content/legion.json"]},
   "creator": {"description": "A research formation", "author": "Example author"}

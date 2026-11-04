@@ -9,6 +9,16 @@ const states: Record<PackEnvironmentStatus['state'], string> = {
 const sources = { archive: 'Local file', store: 'Store', bundled: 'Bundled', development: 'Development source', installed: 'Installed' };
 const dependencyStates = { satisfied: 'Installed', missing: 'Missing', incompatible: 'Incompatible', disabled: 'Disabled' };
 
+export function packBlockerMessage(message: string): string {
+  const api = /^Pack requires Plugin API (.+); host provides (.+)\. Upgrade OAW before installing\.$/.exec(message);
+  if (api) return t('Requires Plugin API {required}; this OAW provides {current}. Upgrade OAW first.', { required: api[1], current: api[2] });
+  const host = /^Pack requires OAW (.+); host is (.+)$/.exec(message);
+  if (host) return t('Requires OAW {required}; current version is {current}. Upgrade OAW first.', { required: host[1], current: host[2] });
+  const card = /^In use by card (.+)$/.exec(message);
+  if (card) return t('Remove the card "{name}" before uninstalling this Pack.', { name: card[1] });
+  return message;
+}
+
 function ApplicationDependencies({ libraries = [], backend = [], frontend = [] }: {
   libraries?: PackBackendLibrary[]; backend?: string[]; frontend?: string[];
 }) {
@@ -43,7 +53,7 @@ export function PackEnvironments({ environments }: { environments: PackEnvironme
   </div>;
 }
 
-export function PackPlanDetails({ plan }: { plan: PackInstallationPlan }) {
+export function PackPlanDetails({ plan, showBlockers = true }: { plan: PackInstallationPlan; showBlockers?: boolean }) {
   return <section className="pack-dependencies" aria-label={t('Installation plan')}>
     <h4>{t('Installation plan')}</h4>
     <p>{t(sources[plan.source])} · {plan.version} · {t(plan.restart_required ? 'Restart required' : 'Available after installation')}</p>
@@ -54,7 +64,7 @@ export function PackPlanDetails({ plan }: { plan: PackInstallationPlan }) {
     <PackEnvironments environments={plan.environments} />
     <ApplicationDependencies libraries={plan.backend_libraries} />
     {plan.warnings.map((warning, index) => <p key={`warning:${index}`}>{warning}</p>)}
-    {plan.blockers.map((blocker, index) => <p key={`blocker:${index}`} className="pack-action-error" role="alert">{blocker}</p>)}
+    {showBlockers && plan.blockers.map((blocker, index) => <p key={`blocker:${index}`} className="pack-action-error" role="alert">{packBlockerMessage(blocker)}</p>)}
   </section>;
 }
 

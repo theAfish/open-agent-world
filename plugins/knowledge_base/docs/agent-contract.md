@@ -47,6 +47,11 @@ project_id/bundle_id. The host verifies session/source access, bounds and hashes
 then rechecks destination access before the private transfer. No model-provided bytes,
 host filesystem paths or forged source receipts are accepted.
 
+The default import retains the original as evidence without starting conversion or
+calling a model. An Agent can read the file with its Harness tools and save records
+that cite this original immediately. Set `auto_process=true` when Knowledge Base
+Markdown conversion is wanted; then follow the returned job before reading Markdown.
+
 An ordinary attachment creates/reuses a stable project unless a project is supplied.
 An archive returns a staged project preview; the Agent inspects grouping then calls
 `knowledge_project_import_commit`. Preview tokens belong to the card and actor;

@@ -2,7 +2,7 @@
 .barracks-body { color: var(--ink); }
 .barracks-form { display: grid; gap: var(--space-3); margin: var(--space-4) 0; padding: var(--space-3); border-radius: var(--radius-control); background: var(--surface-soft); }
 .barracks-form h4 { margin: 0; }
-.barracks-form label { display: grid; gap: 6px; font-size: 12px; }
+.barracks-form label { display: grid; gap: 6px; font-size: 0.75rem; }
 .barracks-form input, .barracks-form textarea, .barracks-form select { width: 100%; padding: 8px; border: 1px solid #78967b66; border-radius: 6px; background: var(--surface-solid); color: inherit; font: inherit; }
 .barracks-form textarea { min-height: 78px; resize: vertical; }
 .barracks-form fieldset { min-width: 0; border: 0; padding: 12px 0; }

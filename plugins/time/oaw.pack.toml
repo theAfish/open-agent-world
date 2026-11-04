@@ -6,7 +6,7 @@ name = "Time & Count"
 
 [compatibility]
 plugin_api = "1.41"
-oaw = ">=0.1.0,<1"
+oaw = ">=0.1.0"
 
 [plugin]
 owner = "tools.time"

@@ -14,51 +14,51 @@
 .minister-bubble-content[data-scrolled="true"] { mask-image: linear-gradient(to bottom, transparent, #000 22px); }
 .minister-presence .minister-message .conversation-markdown { padding: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; color: inherit; font-size: inherit; }
 .minister-presence .minister-message.is-user { margin-left: 28px; border-radius: 18px 18px 4px 18px; background: var(--surface-solid); border-color: #72998288; }
-.minister-greeting { font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
+.minister-greeting { font-size: 0.75rem; line-height: 1.5; margin-bottom: 8px; }
 .minister-presence .minister-composer { margin: 10px 0 0; padding: 7px 9px 7px 15px; border: 1px solid #72998288; border-radius: 26px; background: var(--surface-solid); box-shadow: 0 5px 20px #203a2920; align-items: center; }
 .minister-presence .minister-composer textarea { min-height: 22px; max-height: 100px; height: 22px; padding-block: 2px; resize: none; transition: height .18s ease; }
 .minister-presence .minister-composer:focus-within textarea { height: 48px; }
-.minister-presence-history { float: right; border: 0; background: var(--surface-solid); color: var(--ink-soft); border-radius: 10px; margin-top: 5px; padding: 3px 8px; font-size: 10px; cursor: pointer; }
-.minister-presence-loading { background: var(--surface-solid); padding: 12px; border-radius: 24px; font-size: 12px; }
+.minister-presence-history { float: right; border: 0; background: var(--surface-solid); color: var(--ink-soft); border-radius: 10px; margin-top: 5px; padding: 3px 8px; font-size: 0.625rem; cursor: pointer; }
+.minister-presence-loading { background: var(--surface-solid); padding: 12px; border-radius: 24px; font-size: 0.75rem; }
 @keyframes minister-bubble-in { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .minister-presence * { animation: none !important; transition: none !important; } }
 .minister-radius { pointer-events: none; position: absolute; z-index: -1; width: calc(var(--minister-radius) * 2); height: calc(var(--minister-radius) * 2); left: calc(var(--minister-cx) - var(--minister-radius)); top: calc(var(--minister-cy) - var(--minister-radius)); border: 1.5px dashed #72998288; border-radius: 50%; background: #75967a05; }
 .minister-radius-handle { position: absolute; left: calc(var(--minister-cx) + var(--minister-radius) - 7px); top: calc(var(--minister-cy) - 7px); width: 14px; height: 14px; border-radius: 50%; padding: 0; border: 2px solid #61876e; background: #f3f5ed; cursor: ew-resize; touch-action: none; }
-.minister-radius-handle span { position: absolute; left: 20px; top: -3px; color: var(--minister-accent); font-size: 11px; pointer-events: none; }
+.minister-radius-handle span { position: absolute; left: 20px; top: -3px; color: var(--minister-accent); font-size: 0.6875rem; pointer-events: none; }
 .minister-conversation, .minister-nearby { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .minister-messages { flex: 1; min-height: 0; overflow: auto; padding: 15px 17px; overscroll-behavior: contain; }
-.minister-welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 22px 6px; color: var(--minister-accent); font-size: 12px; }
-.minister-welcome strong { font-size: 16px; font-weight: 550; }
+.minister-welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 22px 6px; color: var(--minister-accent); font-size: 0.75rem; }
+.minister-welcome strong { font-size: 1rem; font-weight: 550; }
 .minister-welcome p { margin: 0; line-height: 1.6; color: var(--ink-soft); }
 .minister-welcome button { margin-top: 4px; border: 1px solid #a2ac9360; border-radius: 7px; padding: 7px 10px; background: transparent; color: var(--minister-accent); }
-.minister-message { font-size: 12px; margin: 0 0 15px; overflow-wrap: anywhere; }
-.minister-message small { display: block; color: var(--ink-soft); font-size: 10px; margin-bottom: 5px; }
+.minister-message { font-size: 0.75rem; margin: 0 0 15px; overflow-wrap: anywhere; }
+.minister-message small { display: block; color: var(--ink-soft); font-size: 0.625rem; margin-bottom: 5px; }
 .minister-message.is-user { background: #8b956a12; padding: 9px 11px; border-radius: 9px; }
 .minister-message .conversation-markdown > :first-child { margin-top: 0; }
 .minister-message .conversation-markdown > :last-child { margin-bottom: 0; }
-.minister-tool { color: var(--ink-soft); font-size: 10px; }
+.minister-tool { color: var(--ink-soft); font-size: 0.625rem; }
 .minister-tool summary { cursor: pointer; }
 .minister-tool pre { white-space: pre-wrap; max-height: 140px; overflow: auto; }
-.minister-thinking, .minister-loading { padding: 10px 16px; font-size: 11px; color: var(--ink-soft); }
-.minister-error { margin: 5px 16px; font-size: 11px; color: var(--danger); overflow-wrap: anywhere; }
+.minister-thinking, .minister-loading { padding: 10px 16px; font-size: 0.6875rem; color: var(--ink-soft); }
+.minister-error { margin: 5px 16px; font-size: 0.6875rem; color: var(--danger); overflow-wrap: anywhere; }
 .minister-composer { display: flex; align-items: flex-end; gap: 8px; margin: 10px 12px 12px; border: 1px solid #9aa18a55; border-radius: 10px; padding: 8px; background: #9c9c7710; }
-.minister-composer textarea { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; resize: none; color: inherit; font: inherit; font-size: 12px; line-height: 1.5; padding: 3px; }
+.minister-composer textarea { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; resize: none; color: inherit; font: inherit; font-size: 0.75rem; line-height: 1.5; padding: 3px; }
 .minister-composer button { display: flex; align-items: center; justify-content: center; flex: none; padding: 0; border: 0; background: #557e69; color: #fff; border-radius: 7px; width: 30px; height: 30px; }
 .minister-composer button svg { display: block; flex: none; }
 .minister-search { display: flex; align-items: center; gap: 8px; margin: 14px 16px 8px; padding: 7px 9px; border: 1px solid #9aa18a55; border-radius: 7px; color: var(--ink-soft); }
-.minister-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; outline: 0; font-size: 12px; }
-.minister-search-summary { margin: 2px 16px 8px; font-size: 10px; color: var(--ink-soft); }
+.minister-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; outline: 0; font-size: 0.75rem; }
+.minister-search-summary { margin: 2px 16px 8px; font-size: 0.625rem; color: var(--ink-soft); }
 .minister-results { overflow: auto; flex: 1; min-height: 0; padding: 0 10px; }
 .minister-results > button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 0; border-radius: 8px; padding: 10px; background: transparent; color: inherit; text-align: left; }
 .minister-results > button:hover { background: #8b956a18; }
 .minister-results strong, .minister-results small { display: block; overflow-wrap: anywhere; }
-.minister-results strong { font-size: 12px; font-weight: 550; }
-.minister-results small { font-size: 10px; color: var(--ink-soft); margin-top: 4px; }
-.minister-results p { font-size: 12px; padding: 10px; color: var(--ink-soft); }
+.minister-results strong { font-size: 0.75rem; font-weight: 550; }
+.minister-results small { font-size: 0.625rem; color: var(--ink-soft); margin-top: 4px; }
+.minister-results p { font-size: 0.75rem; padding: 10px; color: var(--ink-soft); }
 .minister-pager { padding: 10px 16px; display: flex; justify-content: space-between; }
-.minister-pager button, .minister-text-button { font-size: 11px; border: 0; background: transparent; color: var(--minister-accent); padding: 5px; }
+.minister-pager button, .minister-text-button { font-size: 0.6875rem; border: 0; background: transparent; color: var(--minister-accent); padding: 5px; }
 
-.minister-reviews { max-height: 260px; overflow: auto; padding: 0 12px; font-size: 12px; }
+.minister-reviews { max-height: 260px; overflow: auto; padding: 0 12px; font-size: 0.75rem; }
 .minister-review { border: 1px solid var(--border-color, #aaa8); border-radius: 8px; padding: 10px; margin: 8px 0; }
 .minister-review p { margin: 6px 0; overflow-wrap: anywhere; }
 .minister-review ul { padding-left: 18px; }
@@ -75,7 +75,7 @@
 /* The emblem belongs to the existing Agent surface. */
 .minister-avatar-zone { position: absolute; top: -25px; right: 14px; display: flex; gap: 4px; z-index: 15; color: var(--ink); }
 .minister-badge { display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--minister-accent); background: var(--surface-solid); color: var(--minister-accent); cursor: pointer; box-shadow: 0 3px 10px #203a2920; }
-.minister-badge { border-radius: 10px 10px 6px 6px; padding: 6px 10px; font-family: inherit; font-size: 11px; font-weight: 600; }
+.minister-badge { border-radius: 10px 10px 6px 6px; padding: 6px 10px; font-family: inherit; font-size: 0.6875rem; font-weight: 600; }
 .minister-avatar-zone[data-compact] { top: -15px; left: calc(50% - 14px); right: auto; width: 28px; height: 28px; }
 .minister-avatar-zone[data-compact] .minister-badge { width: 28px; height: 28px; padding: 3px; border: 0; border-radius: 50%; background: var(--surface-solid); box-shadow: none; }
 .minister-avatar-zone[data-compact] .minister-badge svg { width: 20px; height: 20px; flex: none; }
@@ -94,26 +94,26 @@
 .world-card[data-card-type="core.minister-role"] { border-color: #739580; background: radial-gradient(ellipse at 50% 5%, #72998228, transparent 75%), var(--card-surface); }
 .world-card[data-card-type="core.minister-role"] .node-preview-hint { display: none; }
 .minister-role-card-copy { display: grid; gap: 10px; }
-.minister-role-card-copy > span { justify-self: start; padding: 3px 8px; border: 1px solid #72998270; border-radius: 20px; font-size: 9px; color: var(--ink-soft); }
-.minister-role-card-copy > strong { font-size: 13px; color: var(--ink); }
-.minister-role-card-copy p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.65; }
-.agent-minister-role p { color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
+.minister-role-card-copy > span { justify-self: start; padding: 3px 8px; border: 1px solid #72998270; border-radius: 20px; font-size: 0.5625rem; color: var(--ink-soft); }
+.minister-role-card-copy > strong { font-size: 0.8125rem; color: var(--ink); }
+.minister-role-card-copy p { margin: 0; color: var(--ink-soft); font-size: 0.6875rem; line-height: 1.65; }
+.agent-minister-role p { color: var(--ink-soft); font-size: 0.6875rem; line-height: 1.6; }
 .agent-minister-role { display: grid; gap: 10px; padding: 8px 4px; }
 .agent-minister-role > p, .agent-minister-role p { margin: 4px 0 0; }
 .minister-role-heading { display: flex; align-items: flex-start; gap: 10px; }
 .minister-role-heading > svg { color: var(--minister-accent); flex: none; margin-top: 2px; }
-.minister-permission-switch { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; cursor: pointer; }
+.minister-permission-switch { display: flex; align-items: flex-start; gap: 10px; font-size: 0.8125rem; cursor: pointer; }
 .minister-permission-switch input { width: 18px; height: 18px; accent-color: var(--minister-accent); }
-.minister-permission-switch small { display: block; margin-top: 5px; color: var(--ink-soft); font-size: 11px; }
-.minister-nearby-details summary { font-size: 12px; cursor: pointer; }
+.minister-permission-switch small { display: block; margin-top: 5px; color: var(--ink-soft); font-size: 0.6875rem; }
+.minister-nearby-details summary { font-size: 0.75rem; cursor: pointer; }
 .minister-nearby-details .minister-nearby { min-height: 180px; max-height: 300px; }
 .minister-remove-section { border-top: 1px solid var(--line); padding-top: 10px; }
-.minister-remove-section > strong { font-size: 13px; }
-.minister-remove-button { display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; min-height: 42px; padding: 10px 14px; margin-top: 12px; border: 1px solid var(--danger); border-radius: 9px; color: var(--danger); background: transparent; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.minister-remove-section > strong { font-size: 0.8125rem; }
+.minister-remove-button { display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; min-height: 42px; padding: 10px 14px; margin-top: 12px; border: 1px solid var(--danger); border-radius: 9px; color: var(--danger); background: transparent; font: inherit; font-size: 0.8125rem; font-weight: 600; cursor: pointer; }
 .minister-remove-button:hover { background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .minister-remove-button:disabled { opacity: .5; cursor: wait; }
-.minister-presence-history { min-height: 32px; padding: 7px 12px; font-size: 12px; }
-.minister-promotion-equation { display: flex; justify-content: center; gap: 9px; align-items: center; margin: 12px 0; color: var(--ink-soft); font-size: 11px; }
+.minister-presence-history { min-height: 32px; padding: 7px 12px; font-size: 0.75rem; }
+.minister-promotion-equation { display: flex; justify-content: center; gap: 9px; align-items: center; margin: 12px 0; color: var(--ink-soft); font-size: 0.6875rem; }
 .minister-promotion-sweep { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 7; background: linear-gradient(115deg, transparent 20%, #dfefd1aa 48%, transparent 72%); background-size: 300% 100%; animation: minister-sweep 1400ms ease-out both; }
 .world-card[data-promotion] { animation: minister-appoint 1400ms cubic-bezier(.2,.7,.2,1) both; }
 .react-flow__node:has([data-promotion]) > .minister-avatar-zone { animation: minister-emblem 1400ms cubic-bezier(.2,.7,.2,1) both; }

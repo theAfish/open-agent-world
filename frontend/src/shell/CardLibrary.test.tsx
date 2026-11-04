@@ -67,11 +67,30 @@ it('adds an installed file to the inventory immediately and closes its installat
   expect(within(pack).getByText('Restart required')).toBeTruthy();
   expect(container.querySelector('.pack-install-popover')).toBeNull();
   expect(container.querySelector('.pack-installer')).toBeNull();
+  expect(screen.getByRole('dialog', { name: 'Restart OAW now?' })).toBeTruthy();
+  const restart = vi.spyOn(worldApi, 'restartApplication');
+  fireEvent.click(screen.getByRole('button', { name: 'Restart later' }));
+  expect(screen.queryByRole('dialog', { name: 'Restart OAW now?' })).toBeNull();
+  expect(restart).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Install Pack from File...' }).hasAttribute('disabled')).toBe(false);
   expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
   fireEvent.click(within(pack).getByRole('button', { name: /^(Tear open|View pack)/ }));
   expect(screen.getByRole('button', { name: 'Uninstall Pack' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Open pack' })).toBeNull();
+});
+
+it('does not ask to restart after a Pack becomes available immediately', async () => {
+  useCardLibrary.setState({ snapshot: snapshot(), open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  vi.spyOn(worldApi, 'inspectPack').mockResolvedValue({ manifest: installedContentPack, sha256: 'digest' });
+  vi.spyOn(worldApi, 'installPack').mockResolvedValue({ restart_required: false, versions: [{ ...installedContentPack, loaded: true }] });
+  render(<CardLibrary />);
+  const file = new File(['zip'], 'research.oawpack');
+  vi.spyOn(file, 'slice').mockReturnValue({ arrayBuffer: async () => new Uint8Array([0x50, 0x4b, 3, 4]).buffer } as Blob);
+  await act(async () => fireEvent.change(screen.getByLabelText('Pack file'), { target: { files: [file] } }));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Install Pack' })));
+  expect(screen.getByRole('article', { name: 'Research kit' })).toBeTruthy();
+  expect(screen.queryByRole('dialog', { name: 'Restart OAW now?' })).toBeNull();
 });
 
 it('opens installed packs and browses their cards before entering secondary management', async () => {
@@ -157,18 +176,22 @@ it('shows a local installation plan and prevents installing with unresolved bloc
   expect(install).not.toHaveBeenCalled();
 });
 
-it('shows uninstall resource ownership and blocks removal until dependencies permit it', async () => {
+it.each([
+  ['Another Pack requires this renderer', 'Another Pack requires this renderer'],
+  ['In use by card Harness', 'Remove the card "Harness" before uninstalling this Pack.'],
+])('explains an uninstall blocker next to confirmation: %s', async (blocker, explanation) => {
   const state = packSnapshot();
   const id = state.packs.alpha.definition.plugin_id;
   vi.mocked(worldApi.getInstalledPacks).mockResolvedValue({ restart_required: false, versions: [{ ...installedContentPack, id, loaded: true }] });
-  vi.mocked(worldApi.getPackUninstallPlan).mockResolvedValue({ id, owner: id, can_uninstall: false, blockers: ['Another Pack requires this renderer'],
+  vi.mocked(worldApi.getPackUninstallPlan).mockResolvedValue({ id, owner: id, can_uninstall: false, blockers: [blocker],
     source: 'installed', restart_required: true, resources: [{ id: 'shared-science', kind: 'python', action: 'retain', reason: 'Used by XRD' }] });
   const remove = vi.spyOn(worldApi, 'managePack');
   useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
   await act(async () => { render(<CardLibrary />); });
   fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Uninstall Pack' })));
-  expect(screen.getByRole('alert').textContent).toContain('Another Pack requires this renderer');
+  expect(screen.getByRole('alert').textContent).toContain(explanation);
+  expect(screen.getByRole('button', { name: 'Confirm uninstall' }).getAttribute('aria-describedby')).toBe('pack-uninstall-blockers');
   expect(screen.getByText('Used by XRD')).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Confirm uninstall' }) as HTMLButtonElement).disabled).toBe(true);
   expect(remove).not.toHaveBeenCalled();
@@ -302,6 +325,28 @@ it('retries a selected archive environment when the same owner also has source i
   fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Retry environment preparation' })));
   expect(retry).toHaveBeenCalledWith('environment/retry', 'POST', undefined);
+});
+
+it.each(['failed', 'missing'] as const)('targets the declared executable runtime when it is %s', async environmentState => {
+  const state = packSnapshot();
+  const owner = state.packs.alpha.definition.plugin_id;
+  const version = { ...installedContentPack, id: 'distribution.alpha', owner, kind: 'plugin' as const,
+    environment: { state: 'environment_ready', error: null } };
+  const runtime = { id: version.id, owner, name: 'Alpha pack', version: version.version,
+    source: 'installed' as const, enabled: true, loaded: true, backend_requirements: [], frontend_dependencies: [], warnings: [],
+    environments: [{ id: 'native', target: 'host-worker' as const, provider: 'executable' as const, management: 'managed' as const,
+      state: environmentState, python: [], node: [], error: environmentState === 'failed' ? 'Executable preparation was interrupted' : null }] };
+  const installed = { restart_required: false, versions: [version], inventory: [runtime] };
+  vi.mocked(worldApi.getInstalledPacks).mockResolvedValue(installed);
+  const retry = vi.spyOn(worldApi, 'managePack').mockResolvedValue({ ...installed, inventory: [{ ...runtime,
+    environments: [{ ...runtime.environments[0], state: 'ready', error: null }] }] });
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  await act(async () => { render(<CardLibrary />); });
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  const action = screen.getByRole('button', { name: environmentState === 'failed' ? 'Retry native runtime' : 'Prepare native runtime' });
+  if (environmentState === 'failed') expect(within(action.parentElement!).getByRole('alert').textContent).toBe('native: Executable preparation was interrupted');
+  await act(async () => fireEvent.click(action));
+  expect(retry).toHaveBeenCalledWith('environment/retry', 'POST', { pack_id: version.id, environment_id: 'native' });
 });
 
 afterEach(() => {

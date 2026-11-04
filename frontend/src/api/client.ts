@@ -307,6 +307,9 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  restartApplication(): Promise<{ instance_id: string }> {
+    return request('/application/restart', { method: 'POST', headers: { 'X-OAW-Restart': '1' } });
+  },
   listPackProjects(): Promise<import('../factory/projectTypes').ProjectList> {
     return request('/packs/projects', { headers: { 'X-OAW-Pack-Install': '1' } });
   },
@@ -437,6 +440,10 @@ export const worldApi = {
   },
   getSandboxSettings(): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox");
+  },
+
+  getEnvironmentContext(id: string): Promise<Record<string, string>> {
+    return request(`/nodes/${encodeURIComponent(id)}/environment-context`);
   },
 
   saveSandboxSettings(settings: SandboxSettings & { secrets?: Record<string, string>; folders?: Record<string, EnvironmentFolderBinding> }): Promise<SandboxSettings> {
@@ -1082,7 +1089,7 @@ export interface EnvironmentFolderBinding { path: string; access: "read_only" | 
 export interface SandboxSettings {
   workspace_root: string | null;
   runtime: string;
-  environment_variables?: Record<string, string | { secret_ref: string } | { folder_ref: string } | { file_ref: string } | { path_ref: string }>;
+  environment_variables?: Record<string, string | (({ value: string } | { secret_ref: string } | { folder_ref: string } | { file_ref: string } | { path_ref: string }) & { operation?: "replace" | "append" | "prepend"; separator?: string })>;
   secret_bindings?: Record<string, boolean>;
   folder_bindings?: Record<string, EnvironmentFolderBinding>;
   backup_paths?: string[];

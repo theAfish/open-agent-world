@@ -571,6 +571,28 @@ describe("ConversationWorkspace snapshots", () => {
     expect(disclosure.compareDocumentPosition(finalArticle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('restores an Agent-delivered file outside the collapsed work log', async () => {
+    const delivered: ConversationMessage = { ...historicalMessage, id: 'delivered', sequence: 2,
+      sender_kind: 'agent', sender_name: 'Atlas', run_id: 'run-files', content: '',
+      attachments: [{ version_id: 'report-v1', path: 'report.csv', name: 'report.csv', size_bytes: 42, media_type: 'text/csv' }] };
+    const narration: ConversationMessage = { ...delivered, id: 'checking', sequence: 3, attachments: [], content: 'Checking the report' };
+    const final: ConversationMessage = { ...narration, id: 'final-files', sequence: 4, content: 'Report is ready', is_final: true };
+    vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({
+      items: [historicalMessage, delivered, narration, final], has_before: false, has_after: false,
+      run_summaries: { 'run-files': { run_id: 'run-files', agent_id: 'atlas', status: 'succeeded',
+        final_message_id: final.id, tool_count: 1, tool_trace: [] } },
+    });
+    const archive = vi.spyOn(worldApi, 'getRunActivity');
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(final.content);
+    const download = screen.getByRole('link', { name: 'Download report.csv' });
+    expect(download.closest('details')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open report.csv' })).toBeTruthy();
+    expect(screen.getByText('Work log').closest('details')?.open).toBe(false);
+    expect(screen.queryByText(narration.content)).toBeNull();
+    expect(archive).not.toHaveBeenCalled();
+  });
+
   it('shows a failed Run notice once after its replies without blaming model settings', async () => {
     const replies: ConversationMessage[] = [
       { ...historicalMessage, id: 'progress-1', sequence: 2, run_id: 'failed-run', sender_kind: 'agent', content: 'Reading materials' },

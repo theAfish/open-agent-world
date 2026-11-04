@@ -1,0 +1,13 @@
+{
+  "id": "example.greeter",
+  "name": "Greeter",
+  "description": "Say hello from your own Pack.",
+  "cards": ["example.greeter.card"],
+  "tutorials": [{
+    "id": "reference",
+    "title": "About the Greeter Pack",
+    "summary": "A standalone example Pack.",
+    "trigger": "manual",
+    "document": "This Pack adds a **Greeter** card. Add it to a deck, then place it on your canvas."
+  }]
+}
