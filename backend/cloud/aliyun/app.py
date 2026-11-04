@@ -39,8 +39,8 @@ class CloudSurfaceMiddleware:
         await self.app(scope, receive, send)
 
 
-def approved_plugins(data_root: Path | None = None):
-    """Use the normal Pack lifecycle for operator-installed source code only."""
+def approved_plugins(data_root: Path | None = None, *, pack_settings=None):
+    """Load bundled sources and explicitly approved per-profile Pack versions."""
     from pydantic import Field
     from backend.world.models import SandboxConfig
 
@@ -51,6 +51,9 @@ def approved_plugins(data_root: Path | None = None):
     registry = load_plugin_registry(data_root=data_root, load_installed=False,
         load_entry_points=False, load_unenrolled_sources=True,
         sandbox_config_model=CloudSandboxConfig)
+    if pack_settings is not None:
+        from backend.hosting.packs import load_approved
+        load_approved(registry, pack_settings)
     if registry.has_plugin("openai.codex"):
         registry.mark_unavailable("openai.codex", "hosting_policy",
             ValueError("Local Codex execution is not available in hosted workspaces"), source="hosting_policy")

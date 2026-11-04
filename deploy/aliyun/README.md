@@ -202,6 +202,29 @@ MatCreator 原生/工作区回归及上传协议。阿里适配部分使用测�
 AgentCore 公网路由及网关配置，也未进行桌面安装包或日常 GUI 验收；
 后续真实服务检查的范围见本节开头。
 
+## 托管 CLI Harness 与管理员 Pack
+
+托管 worker 通过通用 SDK 执行接口接入阿里 Sandbox；连接包不包含阿里 API。
+每个 Agent 节点使用用户专属 Volume 下独立的 project/home，CLI 和会话文件在 VM
+重建后保留。每轮执行创建独立 VM，结束或取消后确认销毁；默认上限 900 秒，运营方
+可用 `OAW_ALIYUN_RUNTIME_LIFETIME` 设置 60–3600 秒。该接口不会延长或重放执行。
+回调通过已有鉴权连接转发至宿主 loopback，不开放 ECS 或 Sandbox 公网监听端口。
+命令仅注入批准的工具变量，不继承 ECS 进程环境或云管理凭据。
+
+DeepSeek Harness 连接包需使用接入 Plugin API 1.44 的版本。首次执行时在 Sandbox
+中准备固定版本的 Node/CLI，后续复用持久 home；ECS 不安装 CLI。未声明支持托管执行
+的旧 Agent 连接包拒绝启动，个人本地模式沿用原来的执行行为。
+
+管理员安装复用现有 Store 和文件安装界面。需运营方在 gateway profile 与 worker 配置中
+同时启用 `pack_management`；仅登录管理员的 builder 可获得短期安装授权，普通用户只读。
+安装、依赖准备和 Pack 导入均由非 root worker 执行。发布模板固定 Pack 版本和摘要，
+root provisioner 只复制已验证的原始归档，目标 worker 安装后才加载。Pack 的 Python
+后端仍是管理员批准的受信代码；此接口不把任意恶意插件变成安全的沙盒插件。
+更换已发布应用的 Pack 版本需创建新 Workspace，避免隐式迁移旧用户数据。
+
+这些功能需要应用版本与独立封存的 provisioner 版本协调升级；不要绕过现有发布阻断。
+旧配置默认不启用安装权限，已有 Volume、模型配置与用户数据无需重建。
+
 ## 官方依据（实现时核对）
 
 - [AgentCore 高代码部署](https://help.aliyun.com/zh/agentcore/high-code-agent-deployment-guide)

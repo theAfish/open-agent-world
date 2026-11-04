@@ -49,7 +49,7 @@ def create_hosted_services(settings):
     )
     settings = replace(settings, sandbox_runtime="aliyun.agent-sandbox",
                        plugin_directories=(), storage_config_path=None, inherit_runtime_environment=False)
-    services = create_services(settings, plugins=approved_plugins(settings.data_root),
+    services = create_services(settings, plugins=approved_plugins(settings.data_root, pack_settings=settings),
                                sandbox_registry_factory=registry_factory(remote),
                                runtime_execution_provider=AliyunRuntimeExecutionProvider(settings.data_root/'runtime-executions',remote,
                                    lifetime_seconds=int(os.environ.get('OAW_ALIYUN_RUNTIME_LIFETIME','900'))))
