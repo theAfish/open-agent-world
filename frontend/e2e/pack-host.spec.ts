@@ -30,6 +30,9 @@ test('install local Pack into the production host without a frontend rebuild', a
   const pendingPack = library.locator('[data-pack-id="installed:example.greeter"]');
   await expect(pendingPack.getByText('Restart required', { exact: true })).toBeVisible();
   await expect(library.getByRole('region', { name: 'Install Pack', exact: true })).toHaveCount(0);
+  const restart = page.getByRole('dialog', { name: 'Restart OAW now?', exact: true });
+  await restart.getByRole('button', { name: 'Restart later', exact: true }).click();
+  await expect(restart).toBeHidden();
   await pendingPack.getByRole('button', { name: 'View pack Greeter', exact: true }).click();
   await expect(library.getByRole('button', { name: 'Uninstall Pack', exact: true })).toBeVisible();
   await library.getByRole('button', { name: 'Back to packs', exact: true }).click();
@@ -67,6 +70,9 @@ test('install remote Pack through Store and the existing installer', async ({ pa
   await detail.getByRole('button', { name: 'Get', exact: true }).click();
   await expect(detail.getByText('Installed · Restart required', { exact: true })).toBeVisible({ timeout: 120000 });
   await expect(detail.getByRole('button', { name: 'Installed', exact: true })).toBeDisabled();
+  const restart = page.getByRole('dialog', { name: 'Restart OAW now?', exact: true });
+  await restart.getByRole('button', { name: 'Restart later', exact: true }).click();
+  await expect(restart).toBeHidden();
   const installed = await (await request.get('/api/packs')).json();
   expect(installed.versions[0]).toMatchObject({ id: 'example.greeter', version: process.env.OAW_PACK_VERSION, selected: true, loaded: false, digest: process.env.OAW_PACK_EXPECTED_SHA });
   expect((await (await request.get('/api/catalog')).json()).frontend_modules['example.greeter']).toBeUndefined();
@@ -92,8 +98,10 @@ test('restart activates backend, runtime frontend, Library, Deck and a usable Ca
   if (process.env.OAW_PACK_SOURCE !== 'local') {
     await library.getByRole('button', { name: 'Store', exact: true }).click();
     const remote = library.locator('[data-store-pack-id="example.greeter"]');
-    await expect(remote.getByRole('button', { name: 'Installed', exact: true })).toBeDisabled();
-    await expect(remote.getByText('Installed · Restart required', { exact: true })).toHaveCount(0);
+    await remote.getByRole('button', { name: 'View Greeter details', exact: true }).click();
+    const detail = library.getByRole('article', { name: 'Pack details', exact: true });
+    await expect(detail.getByRole('button', { name: 'Installed', exact: true })).toBeDisabled();
+    await expect(detail.getByText('Installed · Restart required', { exact: true })).toHaveCount(0);
   }
   await library.getByRole('button', { name: /^Packs/ }).click();
   await expect(library.locator('[data-pack-id="installed:example.greeter"]')).toHaveCount(0);

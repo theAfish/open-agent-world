@@ -87,6 +87,21 @@ describe('conversation arrival order', () => {
     expect(entries[2]).toMatchObject({ messages: [messages[2]] });
   });
 
+  it('keeps delivered files inline when the same Run finishes and folds only following narration', () => {
+    const delivered: ConversationMessage = { ...message('files', 2, 1), sender_kind: 'agent', run_id: run.run_id,
+      content: '', attachments: [{ version_id: 'report-v1', path: 'report.csv', name: 'report.csv',
+        media_type: 'text/csv', size_bytes: 42 }] };
+    const narration: ConversationMessage = { ...message('checking', 3, 2), sender_kind: 'agent', run_id: run.run_id, attachments: [] };
+    const final: ConversationMessage = { ...message('final', 4, 3), sender_kind: 'agent', run_id: run.run_id, is_final: true };
+    const messages = [delivered, narration, final];
+    expect(conversationTranscript(messages, [run], new Map()).map(entry => entry.id)).toEqual(['files', 'checking', 'final']);
+    const completed = { ...run, status: 'succeeded', final_message_id: final.id, finished_at: time(5) };
+    const entries = conversationTranscript(messages, [completed], new Map());
+    expect(entries.map(entry => entry.id)).toEqual(['files', 'archive:run', 'final']);
+    expect(entries[0]).toMatchObject({ kind: 'message', message: delivered });
+    expect(entries[1]).toMatchObject({ kind: 'archive', messages: [narration] });
+  });
+
   it('retains visible process when the recorded final reply is on another page or belongs to another Run', () => {
     const activity = mergeRunActivity(undefined, run, [event('tool', 'tool_completed', 3, { name: 'read', call_id: 'read' })]);
     const narration = { ...message('narration', 2, 2), sender_kind: 'agent' as const, run_id: run.run_id };

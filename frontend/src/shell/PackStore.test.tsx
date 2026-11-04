@@ -214,7 +214,7 @@ it('distinguishes acquisition from preparation and clears a stale pending hint a
   vi.spyOn(worldApi, 'installStorePack').mockImplementation(() => new Promise(resolve => { complete = resolve; }));
   const view = render(<PackStore />);
   fireEvent.click(await screen.findByRole('button', { name: 'View Greeter details' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Get', exact: true }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Get' }));
   expect((screen.getByRole('button', { name: 'Getting Pack' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText('Getting the Pack (0.0 MB)…')).toBeTruthy();
   view.rerender(<PackStore installations={{ restart_required: false, versions: [], operations: [{ id: 'operation', digest: '0'.repeat(64),
