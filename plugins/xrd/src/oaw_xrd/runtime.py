@@ -12,6 +12,10 @@ from pathlib import Path
 from open_agent_world.plugin_api import RuntimeProvider, AgentInfo, AgentStatus, AgentEvent, AgentEventType, AgentNotFoundError
 
 class XRDRuntime(RuntimeProvider):
+    # Runs the Pack's fixed pipeline in its declared, host-managed environment;
+    # it does not launch model-selected shell commands or user-supplied code.
+    supports_managed_execution = True
+
     def __init__(self, capability_provider):
         self.capability_provider = capability_provider
         self.records = {}
