@@ -44,6 +44,9 @@ def test_generic_hosted_worker_selects_minimal_environment_without_cloud_adapter
     def factory(settings):
         services = create_worker_services(settings)
         seen.append(WorldAgentCapabilityProvider(services).subprocess_environment())
+        assert services.runtime_execution.configuration('any.harness') == {
+            'mode': 'unavailable', 'configured': False}
+        assert services.runtime_execution.provider is None
         return services
 
     with TestClient(create_worker_app(config(tmp_path), services_factory=factory)) as client:

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from backend.skill_runtime import RunSkillScript
     from backend.canvas_control import CanvasControl, CanvasScope
     from backend.security.environment_source import ExecutionEnvironmentSource
+    from backend.agents.execution import RuntimeExecutionProvider, RuntimeExecutionBroker
 
 from backend.agents import (
     AgentNotFoundError,
@@ -61,7 +62,7 @@ from backend.events.hub import EventHub
 from backend.events.models import EventType, RuntimeEvent
 from backend.persistence.database import Database
 from backend.idempotency import IdempotencyStore
-from backend.request_context import RequestContext
+from backend.request_context import LOCAL_TENANT, RequestContext
 from backend.legions import (
     LegionBlueprint,
     LegionBounds,
@@ -568,6 +569,7 @@ class ApplicationServices:
     card_state: object = None
     node_execution: NodeExecutionService | None = None
     sandbox_operations: Any = None
+    runtime_execution: RuntimeExecutionBroker | None = field(default=None, repr=False)
     background_jobs: Any = None
     summoning: SummoningService | None = None
     sandbox_backend: SandboxBackend | None = None
@@ -874,6 +876,8 @@ class ApplicationServices:
                 timeout_seconds=self._lifecycle_cleanup_timeout_seconds))
         self._restored_lifecycles.clear()
         await drain(self._require_run_manager().shutdown())
+        if self.runtime_execution is not None:
+            await drain(self.runtime_execution.shutdown())
         if self.node_execution.continuation_outputs:
             await asyncio.gather(*tuple(self.node_execution.continuation_outputs), return_exceptions=True)
         if failures:
@@ -3840,6 +3844,35 @@ class ApplicationServices:
         if default:
             manager.default_runtime_provider_id = provider_id
 
+    def open_runtime_execution(self, node_id, operation_id, *, workspace, home):
+        from backend.agents.execution import RuntimeExecutionRequest
+        from backend.agents.environment import subprocess_environment
+        from backend.execution_config import runtime_environment_defaults
+        node = self.world.get_card(node_id)
+        if self.runtime_execution is None:
+            raise RuntimeUnavailableError("Runtime execution is unavailable")
+        variables, _ = runtime_environment_defaults(self)
+        environment = subprocess_environment(inherit=self.settings.inherit_runtime_environment)
+        runtime_id = node.config.get("runtime_provider_id") or self._require_run_manager().default_runtime_provider_id
+        return self.runtime_execution.open(RuntimeExecutionRequest(
+            node_id, operation_id, Path(workspace), Path(home), environment, variables, runtime_id))
+
+    def runtime_execution_configuration(self, node_id):
+        node = self.world.get_card(node_id)
+        runtime_id = node.config.get("runtime_provider_id") or self._require_run_manager().default_runtime_provider_id
+        if self.runtime_execution is None:
+            return {"mode": "unavailable", "configured": False}
+        return self.runtime_execution.configuration(runtime_id)
+
+    async def _cleanup_run_execution(self, run_id):
+        operations = [self.sandbox_operations.cancel_run(run_id)]
+        if self.runtime_execution is not None:
+            operations.append(self.runtime_execution.close_operation(run_id))
+        results = await asyncio.gather(*operations, return_exceptions=True)
+        failures = [result for result in results if isinstance(result, BaseException)]
+        if failures:
+            raise BaseExceptionGroup("Run execution cleanup failed", failures)
+
     def close(self) -> None:
         self.database.close()
 
@@ -3852,6 +3885,7 @@ def create_services(
     sandbox_backend: SandboxBackend | None = None,
     plugins: PluginRegistry | None = None,
     sandbox_registry_factory=None,
+    runtime_execution_provider: RuntimeExecutionProvider | None = None,
 ) -> ApplicationServices:
     settings.data_root.mkdir(parents=True, exist_ok=True)
     for directory in ("projects", "assets", "sandboxes", "database", "logs"):
@@ -3942,6 +3976,11 @@ def create_services(
     from backend.card_state import ScopedStateStore
     services.card_state = ScopedStateStore(services)
     provider = WorldAgentCapabilityProvider(services)
+    from backend.agents.execution import RuntimeExecutionBroker, NativeRuntimeExecutionProvider
+    execution_provider = runtime_execution_provider
+    if execution_provider is None and settings.tenant_scope == LOCAL_TENANT:
+        execution_provider = NativeRuntimeExecutionProvider()
+    services.runtime_execution = RuntimeExecutionBroker(execution_provider)
     services.node_execution = NodeExecutionService(services)
     from backend.sandbox.operations import SandboxOperations
     services.sandbox_operations = SandboxOperations(services)
@@ -3957,7 +3996,7 @@ def create_services(
         plugins=plugin_registry,
         capability_provider=provider,
         state=state,
-        cleanup_execution=services.sandbox_operations.cancel_run,
+        cleanup_execution=services._cleanup_run_execution,
         execution_settled=services.node_execution.signal_continuations,
         conversation_event=services._persist_conversation_event,
         default_runtime_provider_id=(

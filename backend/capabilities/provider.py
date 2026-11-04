@@ -525,6 +525,23 @@ class WorldAgentCapabilityProvider:
         from backend.agents.environment import subprocess_environment
         return subprocess_environment(inherit=self.services.settings.inherit_runtime_environment)
 
+    def runtime_execution(self, agent_id, run_id, *, workspace, home):
+        from contextlib import asynccontextmanager
+        from backend.runs.models import TERMINAL_RUN_STATUSES
+        @asynccontextmanager
+        async def open_execution():
+            manager = self.services._require_run_manager()
+            context = manager.current_context
+            if (context is None or (context.agent_id, context.run_id) != (agent_id, run_id)
+                    or manager.get_run(run_id).status in TERMINAL_RUN_STATUSES):
+                raise ResourceValidationError("Runtime execution requires the current active agent run")
+            async with self.services.open_runtime_execution(agent_id, run_id, workspace=workspace, home=home) as execution:
+                yield execution
+        return open_execution()
+
+    def runtime_execution_configuration(self, agent_id):
+        return self.services.runtime_execution_configuration(agent_id)
+
     def __init__(self, services: ApplicationServices) -> None:
         self.services = services
 
