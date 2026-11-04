@@ -46,8 +46,8 @@ def unsafe_host_configuration(value) -> bool:
 class HostedPolicyMiddleware:
     """Deny host management even when an authenticated user constructs requests."""
 
-    def __init__(self, app, *, managed_models=False):
-        self.app, self.managed_models = app, managed_models
+    def __init__(self, app, *, managed_models=False, pack_config=None):
+        self.app, self.managed_models, self.pack_config = app, managed_models, pack_config
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in {"http", "websocket"}:
@@ -65,6 +65,10 @@ class HostedPolicyMiddleware:
         send = secure_send
         path = scope["path"].rstrip("/")
         method = scope.get("method", "GET")
+        from .packs import authorized
+        pack_admin = self.pack_config is not None and authorized(scope,self.pack_config)
+        if pack_admin:
+            scope['oaw.pack_management'] = True
         blocked = any(path == prefix or path.startswith(prefix + "/") for prefix in _BLOCKED_PREFIXES)
         # Catalog metadata is safe to browse; installing remote code remains an
         # operator action, including when a caller constructs the request itself.
@@ -76,7 +80,7 @@ class HostedPolicyMiddleware:
         blocked |= path == "/ws/visual"  # Desktop observation is an operator feature.
         blocked |= (self.managed_models and method not in {"GET", "HEAD", "OPTIONS"}
                     and (path == "/api/settings/llm" or path == "/api/settings/models" or path.startswith("/api/settings/models/")))
-        if blocked:
+        if blocked and not pack_admin:
             return await self._deny(scope, receive, send)
         # Inspect only configuration-bearing routes. Binary attachments and user
         # conversation text stream to their ordinary bounded upload handlers.

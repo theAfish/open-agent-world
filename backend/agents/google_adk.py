@@ -67,6 +67,8 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
     time, so a capability snapshot is never an authorization token.
     """
 
+    supports_managed_execution = True
+
     def __init__(
         self,
         capability_provider: AgentCapabilityProvider,

@@ -35,11 +35,13 @@ def validate_template(template) -> tuple[dict, LegionBlueprint]:
     """Validate the complete import before creating any user database or files."""
     from backend.security.model_connections import CatalogEdit, ModelCatalog
     fields = {"version", "name", "source_release_id", "root_key", "created_at",
-              "root_keys", "allow_terminal", "blueprint", "model_connections", "source_nodes", "source_identity"}
-    required = fields - {"model_connections", "allow_terminal", "root_keys", "source_nodes", "source_identity"}
+              "root_keys", "allow_terminal", "blueprint", "model_connections", "source_nodes", "source_identity", "packs"}
+    required = fields - {"model_connections", "allow_terminal", "root_keys", "source_nodes", "source_identity", "packs"}
     if (not isinstance(template, dict) or set(template) - fields or not required <= set(template)
             or type(template.get("version")) is not int or template["version"] != 1):
         raise ValueError("Unsupported or incomplete hosted template")
+    from .packs import pack_locks
+    pack_locks(template.get('packs',[]))
     if (not isinstance(template["name"], str) or not template["name"].strip() or len(template["name"]) > 120
             or type(template.get("allow_terminal", False)) is not bool
             or not isinstance(template["root_key"], str)):
@@ -160,6 +162,8 @@ async def capture_template(services, release_id: str) -> dict:
                 "workspace_id": tenant.workspace_id if tenant else None,
                 "world_id": tenant.world_id if tenant else None,
             }
+            from .packs import selected_locks
+            value['packs'] = selected_locks(services)
             validate_template(value)
             return value
 
@@ -176,7 +180,12 @@ async def initialize_runtime(config: WorkerConfig, template_path: Path, *, servi
         prepare_hosted_binding(root, profile_id=config.profile_id, user_id=config.user_id, application_id=config.application_id)
         settings = replace(Settings.for_data_root(root), agent_runtime=config.agent_runtime, sandbox_runtime=None,
                            tenant_scope=hosted_scope(config.user_id, config.application_id, config.profile_id),
-                           inherit_runtime_environment=False)
+                           inherit_runtime_environment=False, hosted_pack_versions=config.approved_packs)
+        if template.get('packs'):
+            from .packs import install_staged
+            from backend.plugins.loader import load_plugin_registry
+            registry = load_plugin_registry(data_root=root,load_installed=False,load_entry_points=False,load_unenrolled_sources=True)
+            await install_staged(config,template['packs'],registry)
         services = (services_factory or create_worker_services)(settings)
         try:
             now = datetime.now(UTC)

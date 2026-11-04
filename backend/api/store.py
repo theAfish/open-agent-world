@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from packaging.version import InvalidVersion, Version
 
 from backend.api.dependencies import get_services
-from backend.api.packs import checked, mutation_request, prepare_and_install
+from backend.api.packs import archive_body, checked, mutation_request, prepare_and_install
 from backend.packs.marketplace import Identity, MarketplaceError, PackId
 
 router = APIRouter(prefix="/store/packs", tags=["store"])
@@ -125,8 +125,16 @@ async def version(target=Depends(identity), services=Depends(get_services)):
 async def install(request: Request, target=Depends(identity), services=Depends(get_services)):
     # Always fetch authoritative metadata for the explicit version, not catalog
     # state. Keep network waiting outside the world's mutation transaction.
+    # A trusted acquisition proxy may have already downloaded the archive. Read
+    # its bounded body before the disconnect watcher, then verify it against the
+    # same authoritative version metadata used by ordinary Store acquisition.
+    supplied = (await archive_body(request) if request.headers.get('content-type','').split(';')[0]=='application/vnd.oaw.pack' else None)
     with remote_errors():
         metadata = await while_connected(request, services.marketplace.get_version(target.pack_id, target.version))
+    if supplied is not None:
+        import hashlib
+        if hashlib.sha256(supplied).hexdigest()!=metadata.sha256:
+            raise HTTPException(422,'Acquired archive differs from the authoritative Store version')
     blockers = installation_plan(services, metadata)['blockers']
     if blockers:
         from backend.errors import ResourceValidationError
@@ -151,7 +159,7 @@ async def install(request: Request, target=Depends(identity), services=Depends(g
                 await finish_thread(services.pack_installations.interrupt_activation, target.pack_id, target.version)
         return local_state(services, target.pack_id, target.version)
     with remote_errors():
-        data = await while_connected(request, services.marketplace.download(metadata))
+        data = supplied if supplied is not None else await while_connected(request, services.marketplace.download(metadata))
     await prepare_and_install(services, data, expected_id=target.pack_id,
                               expected_version=target.version, expected_sha256=metadata.sha256)
     return local_state(services, target.pack_id, target.version)

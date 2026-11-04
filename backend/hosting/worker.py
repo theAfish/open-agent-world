@@ -146,12 +146,18 @@ class WorkerConfig:
     sandbox_runtime: str | None = None
     shared_models_origin: str | None = None
     shared_environment_origin: str | None = None
+    pack_management: bool = False
+    approved_packs: tuple[dict, ...] = ()
 
     def __post_init__(self):
         hosted_scope(self.user_id, self.application_id, self.profile_id)
         _key(self.secret)
         if self.mode not in {"builder", "runtime"}:
             raise ValueError("Worker mode must be builder or runtime")
+        if type(self.pack_management) is not bool or self.pack_management and self.mode != 'builder':
+            raise ValueError("Pack management requires an operator-enabled builder")
+        from .packs import pack_locks
+        object.__setattr__(self,'approved_packs',tuple(pack_locks(self.approved_packs)))
         origin = urlsplit(self.public_origin)
         if origin.scheme != "https" and not (origin.scheme == "http" and origin.hostname in {"localhost", "127.0.0.1", "::1"}):
             raise ValueError("Hosted workers require HTTPS, except on loopback development origins")
@@ -169,17 +175,19 @@ class WorkerConfig:
 
 
 def create_worker_services(settings):
-    """Load only operator-installed code from the shared application installation.
+    """Load operator code and explicitly approved immutable Pack selections.
 
-    Discovery excludes profile-installed wheels and ignores user enrollment
-    metadata. PluginContext still points to this worker's own data directory.
-    Pack management is also denied at HTTP ingress.
+    Ordinary profiles ignore their installed selection metadata. A release can
+    bind exact Pack versions, while an operator-enabled builder manages its own
+    selection through live administrator grants. PluginContext remains private.
     """
     from backend.plugins.loader import load_plugin_registry
     from backend.services import create_services
     from backend.hosting.policy import unsafe_host_configuration
     registry = load_plugin_registry(data_root=settings.data_root, plugin_directories=(),
                                     load_installed=False, load_entry_points=False, load_unenrolled_sources=True)
+    from .packs import load_approved
+    load_approved(registry,settings)
     if any(plugin.id == "openai.codex" for plugin in registry.plugins()):
         registry.mark_unavailable("openai.codex", "hosting_policy",
             ValueError("Local Codex execution is not available in hosted workspaces"), source="hosting_policy")
@@ -193,7 +201,7 @@ def create_worker_services(settings):
     return services
 
 
-def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None, services_factory=None):
+def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None, services_factory=None, restart=None):
     from backend.main import create_app
     from backend.hosting.policy import HostedPolicyMiddleware
     config = config if isinstance(config, WorkerConfig) else WorkerConfig(**config)
@@ -217,7 +225,8 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
     tenant = hosted_scope(config.user_id, config.application_id, config.profile_id)
     settings = replace(Settings.for_data_root(config.data_root), tenant_scope=tenant,
                        agent_runtime=config.agent_runtime, sandbox_runtime=None,
-                       inherit_runtime_environment=False)
+                       inherit_runtime_environment=False, hosted_pack_management=config.pack_management,
+                       hosted_pack_versions=config.approved_packs)
     access = HostedProfileAccess(
         WorkerIdentityProvider(config.secret, config.profile_id, config.user_id),
         VerifiedIdentity(ISSUER, config.user_id), tenant, config.public_origin,
@@ -234,7 +243,7 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
         return services
 
     app = create_app(settings, profile_access=access, frontend_directory=None,
-                     services_factory=composed_services)
+                     services_factory=composed_services, restart=restart if config.pack_management else None)
     if config.mode == "builder":
         from fastapi import Depends, HTTPException
         from backend.api.dependencies import get_services
@@ -252,5 +261,6 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
     if frontend_directory is not None:
         from starlette.staticfiles import StaticFiles
         app.mount("/", StaticFiles(directory=frontend_directory, html=True), name="frontend")
-    app.add_middleware(HostedPolicyMiddleware, managed_models=config.shared_models_origin is not None)
+    app.add_middleware(HostedPolicyMiddleware, managed_models=config.shared_models_origin is not None,
+                      pack_config=config)
     return app

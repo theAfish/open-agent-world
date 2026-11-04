@@ -52,6 +52,19 @@ def test_store_search_detail_get_restart_and_already_installed(store):
     assert len([r for r in fake.calls if r.url.path.endswith('/download')]) == 1
 
 
+def test_store_accepts_a_preacquired_archive_only_if_authoritative_hash_matches(store):
+    client,fake=store
+    data=artifact()
+    supplied={**HEADERS,'Content-Type':'application/vnd.oaw.pack'}
+    rejected=client.post(URL,headers=supplied,content=data+b'altered')
+    assert rejected.status_code==422
+    assert not client.get('/api/packs').json()['versions']
+    response=client.post(URL,headers=supplied,content=fake.data)
+    assert response.status_code==200,response.text
+    assert response.json()['installed_version']=='0.1.0'
+    assert not any(r.url.path.endswith('/download') for r in fake.calls)
+
+
 def test_store_preserves_remote_preview_without_loading_pack_code(store):
     client, fake = store
     image = 'data:image/svg+xml;base64,' + base64.b64encode(b'<svg xmlns="http://www.w3.org/2000/svg"><path d="M2 2h20v20H2z"/></svg>').decode()

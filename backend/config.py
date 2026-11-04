@@ -45,6 +45,8 @@ class Settings:
     tenant_scope: TenantScope = LOCAL_TENANT
     # Operator-selected process policy; never sourced from a card or model.
     inherit_runtime_environment: bool = True
+    hosted_pack_management: bool = False
+    hosted_pack_versions: tuple[dict, ...] = ()
 
     @classmethod
     def from_environment(cls) -> "Settings":

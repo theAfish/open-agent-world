@@ -110,6 +110,9 @@ class ModelConnectionResolver(Protocol):
 
 class RuntimeProvider(ABC):
     """Provider-neutral runtime boundary; provider SDK objects never cross it."""
+    # Compatibility declaration by trusted adapters. All agent-generated command
+    # execution must use the host-selected SDK or authorized Sandbox tools.
+    supports_managed_execution: bool = False
 
     async def notify_input(self, run_id: str) -> None:
         """Wake an active provider after durable input arrives; no receipt implied.

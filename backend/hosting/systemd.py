@@ -315,6 +315,8 @@ def install(directory: Path, *, name="oaw-hosted") -> None:
         if any(worker.get(key) != getattr(profile, key) for key in
                ("profile_id", "user_id", "application_id", "mode", "secret")) or worker.get("data_root") != "data":
             raise ValueError("Worker configuration differs from its gateway identity or private data directory")
+        if worker.get('pack_management',False) != profile.pack_management:
+            raise ValueError('Worker Pack authority differs from its gateway configuration')
         if worker.get("public_origin") != settings.public_origin or not (instance / "worker.env").is_file():
             raise ValueError("Incomplete or inconsistent worker configuration")
         resource_files[profile.profile_id] = _worker_resource_files(instance)

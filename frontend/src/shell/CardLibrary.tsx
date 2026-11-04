@@ -26,7 +26,7 @@ import { LibraryCard as PhysicalLibraryCard, LibraryCardSurface } from "./Librar
 import { LibraryCardGroups } from './LibraryCardGroups';
 import "./cardLibrary.css";
 import { startPalettePointerDrag } from "../palette/pointerDrag";
-import { isHosted } from '../auth/hostedSession';
+import { isHosted, canManageHostedPacks } from '../auth/hostedSession';
 import { Modal } from '../components/Modal';
 import { PackIDE } from '../factory/PackIDE';
 
@@ -41,6 +41,7 @@ export function CardLibrary() {
   const { locale } = useLocale();
   const library = useCardLibrary();
   const hosted = isHosted();
+  const managePacks = !hosted || canManageHostedPacks();
   const presence = useMotionPresence(library.open);
   const legions = useWorldStore(state => state.legions);
   const deleteLegion = useWorldStore(state => state.deleteLegion);
@@ -67,7 +68,7 @@ export function CardLibrary() {
   const [showPackIDE, setShowPackIDE] = useState(false);
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectDirty, setProjectDirty] = useState(false);
-  const installations = usePackInstallations(library.open && !hosted);
+  const installations = usePackInstallations(library.open && managePacks);
   const acceptInstallations = (value: PackInstallations) => {
     const removed = installations.state?.versions.some(previous => previous.selected
       && !value.versions.some(item => item.id === previous.id && item.selected))
@@ -191,7 +192,7 @@ export function CardLibrary() {
     {!snapshot ? <div className="library-empty">{library.error ? t("Your collection could not be loaded.") : t("Loading your collection…")}</div> :
       <div className={`library-body${tab === "cards" ? " library-body--cards" : ""}`}>
         {tab === "packs" ? <>
-          {library.open && !hosted ? <PackInstaller actionTarget={installAction} installations={installations.state} onInstalled={value => { acceptInstallations(value); setInspectedPack(null); setQuery(''); setRestartPrompt(value.restart_required); }} /> : null}
+          {library.open && managePacks ? <PackInstaller actionTarget={installAction} installations={installations.state} onInstalled={value => { acceptInstallations(value); setInspectedPack(null); setQuery(''); setRestartPrompt(value.restart_required); }} /> : null}
           <PackOperations operations={installations.state?.operations?.filter(operation => (!packDetail && operation.state !== 'failed') || operation.pack_id === packDetail?.inventory?.id || packDetail?.versions.some(item => item.id === operation.pack_id))} />
           {installations.error && <p className="pack-action-error" role="alert">{installations.error}</p>}
           {packNotice && <p className="pack-restart-note" role="status">{t(packNotice)}</p>}
@@ -277,12 +278,12 @@ export function CardLibrary() {
             </footer>}
           </> : <div className="library-detail-empty"><span className="library-detail-formation"><Layers3 size={30} aria-hidden="true" /></span><h3>{t("Explore a card")}</h3><p>{t("Select a card to inspect its purpose and origin.")}</p><p>{t("Removing a card from a deck keeps it in your collection.")}</p></div>}</aside></OverlayScrollbarsComponent></div>
         </> : null}
-        {tab === "store" && library.open ? <PackStore installations={installations.state} readOnly={hosted} onInstalled={value => setRestartPrompt(value.restart_required)} /> : null}
+        {tab === "store" && library.open ? <PackStore readOnly={!managePacks} installations={installations.state} onInstalled={value => setRestartPrompt(value.restart_required)} /> : null}
       </div>}
     {!hosted && <details className="library-developer-tools"><summary>{t('Developer tools')}</summary>
       <button className="library-text-button" onClick={() => setShowPackIDE(true)}>Pack IDE <span className="pack-ide-experimental" title={t('Visual authoring is still in development.')}>{t('Experimental')}</span></button>
     </details>}
-  </dialog>{restartPrompt && library.open && !hosted && <PackRestartPrompt portalHost={modal.current ?? undefined} onClose={() => setRestartPrompt(false)} />}{showPackIDE && <Modal title="Pack IDE" className="pack-ide-modal" portalHost={document.body} busy={projectBusy} onClose={() => {
+  </dialog>{restartPrompt && library.open && managePacks && <PackRestartPrompt portalHost={modal.current ?? undefined} onClose={() => setRestartPrompt(false)} />}{showPackIDE && <Modal title="Pack IDE" className="pack-ide-modal" portalHost={document.body} busy={projectBusy} onClose={() => {
     if (!projectDirty || window.confirm('Discard your unsaved project edits?')) setShowPackIDE(false);
   }}><PackIDE onDirtyChange={setProjectDirty} onBusyChange={setProjectBusy} onClose={() => {
     if (!projectDirty || window.confirm('Discard your unsaved project edits?')) setShowPackIDE(false);

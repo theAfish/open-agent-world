@@ -3996,6 +3996,7 @@ def create_services(
         plugins=plugin_registry,
         capability_provider=provider,
         state=state,
+        require_managed_execution=settings.tenant_scope != LOCAL_TENANT,
         cleanup_execution=services._cleanup_run_execution,
         execution_settled=services.node_execution.signal_continuations,
         conversation_event=services._persist_conversation_event,

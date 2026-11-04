@@ -8115,5 +8115,6 @@
   "Prepare {name} runtime": ["Prepare {name} runtime", "准备 {name} 运行时"],
   "Preparing {name} runtime…": ["Preparing {name} runtime…", "正在准备 {name} 运行时…"],
   "Getting Pack": ["Getting Pack", "正在获取卡包"],
-  "Getting the Pack ({size} MB)…": ["Getting the Pack ({size} MB)…", "正在获取卡包（{size} MB）…"]
+  "Getting the Pack ({size} MB)…": ["Getting the Pack ({size} MB)…", "正在获取卡包（{size} MB）…"],
+  "Pack installation is managed by your hosting administrator.": ["Pack installation is managed by your hosting administrator.", "卡包安装由托管管理员统一管理。"]
 }

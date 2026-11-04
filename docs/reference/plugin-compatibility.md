@@ -52,6 +52,12 @@ receipts, and confirmed teardown. The stdlib relay supports private process,
 file, and tool traffic over a provider-owned duplex transport without public
 callbacks. It does not provision a cloud environment by itself.
 
+Hosted runtimes declare `RuntimeProvider.supports_managed_execution = True` after
+adopting these execution APIs (or using authorized remote Sandbox tools). The host
+rejects legacy adapters before Agent creation or execution; personal installations
+remain compatible. This declaration is a compatibility check for trusted code,
+not an OS boundary or a substitute for reviewing an installed backend Pack.
+
 Plugin API 1.43 provides `AgentCapabilityProvider.conversation_attachments`,
 `read_conversation_attachment` and `publish_conversation_attachment` for trusted
 runtime providers. They list sent files, read verified bytes and retain generated

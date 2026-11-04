@@ -123,7 +123,8 @@ def create_app(
     )
     application.state.hosted = profile_access is not None
     application.state.instance_id = uuid4().hex
-    application.state.restart = restart if deployment is None and profile_access is None else None
+    application.state.restart = restart if deployment is None and (
+        profile_access is None or selected_settings.hosted_pack_management) else None
     application.state.restarting = False
     if application.state.restart is not None:
         @application.middleware("http")

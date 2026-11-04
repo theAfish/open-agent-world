@@ -20,6 +20,18 @@ const version: StoreVersion = { ...state, pack_id: pack.id, version: '0.10.0', s
 } };
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+it('keeps hosted catalog details readable without offering installation', async () => {
+  vi.spyOn(worldApi,'getStorePacks').mockResolvedValue({items:[pack],next_cursor:null});
+  vi.spyOn(worldApi,'getStorePack').mockResolvedValue(detail);
+  vi.spyOn(worldApi,'getStoreVersion').mockResolvedValue(version);
+  const install=vi.spyOn(worldApi,'installStorePack');
+  render(<PackStore readOnly/>);
+  fireEvent.click(await screen.findByRole('button',{name:'View Greeter details'}));
+  expect(await screen.findByText('Pack installation is managed by your hosting administrator.')).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Get'})).toBeNull();
+  expect(install).not.toHaveBeenCalled();
+});
+
 it('uses authored packaging and artwork in the catalog and the reviewed version preview in details', async () => {
   const preview = { packaging: 'premium' as const, accent_color: '#aa3366', count: 3, icon: 'bot', icon_url: iconUrl, artwork_url: artworkUrl };
   vi.spyOn(worldApi, 'getStorePacks').mockResolvedValue({ items: [{ ...pack, preview }], next_cursor: null });

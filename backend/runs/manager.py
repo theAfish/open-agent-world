@@ -109,6 +109,7 @@ class RunManager:
     execution_settled: Callable[[], None] | None = None
     conversation_event: Callable[[AgentEvent, RunRecord], Awaitable[str | None]] | None = None
     shutting_down: bool = False
+    require_managed_execution: bool = False
 
     def __post_init__(self):
         import math
@@ -234,6 +235,7 @@ class RunManager:
 
         if not isinstance(provider, RuntimeProvider):
             raise TypeError("provider must implement RuntimeProvider")
+        self._check_execution_support(provider)
         if hasattr(provider, "reasoning_store"):
             provider.reasoning_store = self.state
         self._providers[provider_id] = provider
@@ -1063,6 +1065,7 @@ class RunManager:
         self.plugins.assert_runtime_provider_enabled(provider_id)
         existing = self._providers.get(provider_id)
         if existing is not None:
+            self._check_execution_support(existing)
             return existing
         options = dict(self.provider_options.get(provider_id, {}))
         provider = self.plugins.create_runtime_provider(
@@ -1071,10 +1074,15 @@ class RunManager:
             managed_context_store=self.context_store,
             **options,
         )
+        self._check_execution_support(provider)
         if hasattr(provider, "reasoning_store"):
             provider.reasoning_store = self.state
         self._providers[provider_id] = provider
         return provider
+
+    def _check_execution_support(self,provider):
+        if self.require_managed_execution and provider.supports_managed_execution is not True:
+            raise RuntimeUnavailableError('This runtime has not adopted managed execution for hosted profiles. Install an updated connector using the host-selected execution SDK.')
 
     def _task_finished(self, run_id: str) -> None:
         self._runtime_tasks.pop(run_id, None)
