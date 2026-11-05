@@ -8,13 +8,17 @@ from __future__ import annotations
 import asyncio
 import base64
 from contextlib import suppress
+import hashlib
 import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 from uuid import uuid4
 from urllib.parse import urlsplit
 
 from backend.agents.execution import FILE_LIMIT, NativeRuntimeExecutionProvider, RuntimeExecutionRequest
+from backend.sandbox.transfers import CHUNK_BYTES
 
 FRAME_LIMIT = 48 * 1024 * 1024
 HTTP_REQUEST_LIMIT = 1024 * 1024
@@ -29,6 +33,12 @@ class ExecutionRelay:
         self.servers = []
         self.http_pending = {}
         self.handlers = set()
+        self.file_chunks = {}
+
+    def close_file_chunks(self):
+        for file, _, _ in self.file_chunks.values():
+            file.close()
+        self.file_chunks.clear()
 
     def send(self, value):
         line = json.dumps(value, ensure_ascii=True, separators=(',', ':'))
@@ -160,9 +170,47 @@ class ExecutionRelay:
         if method == 'write_file':
             path = await self.execution.write_file(args['path'],base64.b64decode(args['data'],validate=True),root=args['root'])
             return {'path':path}
+        if method == 'prepare_file_chunk':
+            if self.execution.closed:
+                raise ValueError('Execution relay is closed')
+            size, checksum = args.get('size'), args.get('sha256')
+            if (set(args) != {'size', 'sha256'} or type(size) is not int or not 0 < size <= CHUNK_BYTES
+                    or not isinstance(checksum, str) or len(checksum) != 64
+                    or any(char not in '0123456789abcdef' for char in checksum)):
+                raise ValueError('Invalid file chunk size or SHA256')
+            if len(self.file_chunks) >= 4:
+                raise ValueError('Runtime file chunk limit exceeded')
+            file = tempfile.TemporaryFile()
+            chunk_id = uuid4().hex
+            self.file_chunks[chunk_id] = (file, size, checksum)
+            return {'chunk_id': chunk_id, 'descriptor': file.fileno(), 'pid': os.getpid()}
+        if method == 'discard_file_chunk':
+            chunk_id = args.get('chunk_id')
+            if set(args) != {'chunk_id'} or not isinstance(chunk_id, str) or chunk_id not in self.file_chunks:
+                raise ValueError('Unknown file chunk identity')
+            file, _, _ = self.file_chunks.pop(chunk_id)
+            file.close()
+            return {'discarded': True}
         if method == 'upload_file':
             if args.get('operation') not in {'upload_begin', 'upload_chunk', 'upload_commit', 'upload_abort'}:
                 raise ValueError('Unknown streamed file operation')
+            if 'chunk_id' in args:
+                options = dict(args)
+                chunk_id = options.pop('chunk_id')
+                if options['operation'] != 'upload_chunk' or 'data' in options:
+                    raise ValueError('File chunk identities require upload_chunk without inline data')
+                if not isinstance(chunk_id, str) or chunk_id not in self.file_chunks:
+                    raise ValueError('Unknown file chunk identity')
+                file, size, checksum = self.file_chunks.pop(chunk_id)
+                try:
+                    file.seek(0)
+                    content = file.read(CHUNK_BYTES + 1)
+                    if len(content) != size or hashlib.sha256(content).hexdigest() != checksum:
+                        raise ValueError('File chunk size or SHA256 did not match')
+                    options['data'] = base64.b64encode(content).decode('ascii')
+                    return await self.execution._file_upload(**options)
+                finally:
+                    file.close()
             return await self.execution._file_upload(**args)
         if method == 'forward_http':
             proxy_id,path = args['proxy_id'],args['path']
@@ -185,6 +233,7 @@ class ExecutionRelay:
             await asyncio.wait_for(queue.put((method[5:],args)),30)
             return {'accepted':True}
         if method == 'close':
+            self.close_file_chunks()
             await self.execution.close()
             return {}
         raise ValueError('Unknown execution relay operation')
@@ -216,6 +265,7 @@ class ExecutionRelay:
             for task in tuple(self.handlers):
                 task.cancel()
             await asyncio.gather(*self.handlers,return_exceptions=True)
+            self.close_file_chunks()
             if self.execution is not None:
                 await self.execution.close()
             await asyncio.gather(*self.pumps,return_exceptions=True)
