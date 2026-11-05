@@ -88,7 +88,7 @@ class SourceLaunchers(unittest.TestCase):
             f'with Path({str(audit)!r}).open("a") as f: f.write(json.dumps({{"kind":"backend-check","argv":sys.argv[1:]}})+"\\n")\n')
         (self.root / "backend").mkdir()
         (self.root / "backend/__init__.py").touch()
-        (self.root / "backend/launcher.py").write_text('''import http.server,json,os,sys,threading
+        (self.root / "backend/launcher.py").write_text('''import http.server,json,os,socketserver,sys,threading
 from pathlib import Path
 audit = Path(__file__).resolve().parents[1] / 'audit.jsonl'
 def record(kind):
@@ -96,7 +96,12 @@ def record(kind):
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self): self.send_response(200); self.end_headers()
     def log_message(self, *args): pass
-server = http.server.HTTPServer(('127.0.0.1', int(sys.argv[sys.argv.index('--port')+1])), Handler)
+class LocalHTTPServer(http.server.HTTPServer):
+    def server_bind(self):
+        # This offline numeric-loopback fixture must not perform reverse DNS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+server = LocalHTTPServer(('127.0.0.1', int(sys.argv[sys.argv.index('--port')+1])), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 record('backend')
 sys.stdin.readline()
