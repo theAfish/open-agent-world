@@ -82,6 +82,7 @@ async def migrate_profile(config: WorkerConfig, *, services_factory=None) -> dic
                 raise ValueError("Finish or stop active runs before upgrading")
         settings = replace(Settings.for_data_root(root), agent_runtime=config.agent_runtime,
                            sandbox_runtime=None, marketplace_url=None, inherit_runtime_environment=False,
+                           hosted_pack_management=config.pack_management, hosted_pack_versions=config.approved_packs,
                            tenant_scope=hosted_scope(config.user_id, config.application_id, config.profile_id))
         services = (services_factory or create_worker_services)(settings)
         result, changed = None, []
