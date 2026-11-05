@@ -12,8 +12,9 @@ import json
 from pathlib import Path
 import sys
 from uuid import uuid4
+from urllib.parse import urlsplit
 
-from backend.agents.execution import NativeRuntimeExecutionProvider, RuntimeExecutionRequest
+from backend.agents.execution import FILE_LIMIT, NativeRuntimeExecutionProvider, RuntimeExecutionRequest
 
 FRAME_LIMIT = 48 * 1024 * 1024
 HTTP_REQUEST_LIMIT = 1024 * 1024
@@ -62,28 +63,54 @@ class ExecutionRelay:
                 task.cancel()
             await asyncio.gather(out, err, return_exceptions=True)
 
-    async def http(self, proxy_id, expected_path, reader, writer):
+    async def http(self, proxy_id, expected_path, reader, writer, *, path_prefix=False, stream=False):
         request_id = uuid4().hex
+        responded = False
         try:
             async with asyncio.timeout(10):
                 header = (await reader.readuntil(b'\r\n\r\n')).decode('ascii')
                 first, *lines = header.rstrip('\r\n').split('\r\n')
-                method, path, version = first.split(' ')
+                method, raw_target, version = first.split(' ')
+                target = urlsplit(raw_target)
+                path = target.path
                 pairs = [line.split(':',1) for line in lines]
                 headers = {k.lower():v.strip() for k,v in pairs}
-                if (method != 'POST' or path != expected_path or version != 'HTTP/1.1'
+                permitted_path=path==expected_path or path_prefix and path.startswith(expected_path.rstrip('/')+'/')
+                if (method != 'POST' or target.scheme or target.netloc or target.fragment
+                        or (target.query and not path_prefix) or not permitted_path or version != 'HTTP/1.1'
                         or len(headers) != len(pairs) or 'transfer-encoding' in headers):
                     raise ValueError('Unsupported tool proxy request')
                 length = int(headers.get('content-length','-1'))
-                if not 0 <= length <= HTTP_REQUEST_LIMIT:
+                if not 0 <= length <= (FILE_LIMIT if stream else HTTP_REQUEST_LIMIT):
                     raise ValueError('Tool proxy request exceeds limit')
                 body = await reader.readexactly(length)
             if len(self.http_pending) >= 16:
                 raise ValueError('Too many tool proxy requests')
-            future = asyncio.get_running_loop().create_future()
+            future = asyncio.Queue(maxsize=4) if stream else asyncio.get_running_loop().create_future()
             self.http_pending[request_id] = future
             self.send({'event':'http','proxy_id':proxy_id,'request_id':request_id,
-                'headers':headers,'data':base64.b64encode(body).decode()})
+                'path':path,'query':target.query,'headers':headers,'data':base64.b64encode(body).decode()})
+            if stream:
+                kind,reply=await asyncio.wait_for(future.get(),600)
+                if kind!='start':raise ValueError('Missing HTTP stream headers')
+                status=reply['status'];media=reply['content_type']
+                if (type(status) is not int or not 200<=status<=599 or not isinstance(media,str)
+                        or len(media)>200 or any(ord(c)<32 or ord(c)>126 for c in media)):
+                    raise ValueError('Invalid HTTP stream headers')
+                writer.write(f'HTTP/1.1 {status} Response\r\nContent-Type: {media}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n'.encode())
+                responded = True
+                await writer.drain()
+                size=0
+                while True:
+                    kind,reply=await asyncio.wait_for(future.get(),600)
+                    if kind=='end':
+                        writer.write(b'0\r\n\r\n');await writer.drain();return
+                    if kind!='chunk':raise ValueError('HTTP stream was interrupted')
+                    data=base64.b64decode(reply['data'],validate=True);size+=len(data)
+                    if not data or len(data)>16384 or size>HTTP_RESPONSE_LIMIT:
+                        raise ValueError('Invalid HTTP stream data')
+                    writer.write(f'{len(data):x}\r\n'.encode()+data+b'\r\n')
+                    await writer.drain()
             reply = await asyncio.wait_for(future,600)
             data = base64.b64decode(reply['data'],validate=True)
             status = reply['status']
@@ -93,9 +120,10 @@ class ExecutionRelay:
             writer.write(f'HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n'.encode()+data)
             await writer.drain()
         except (ValueError,OSError,TimeoutError,asyncio.IncompleteReadError,asyncio.LimitOverrunError):
-            with suppress(OSError):
-                writer.write(b'HTTP/1.1 502 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
-                await writer.drain()
+            if not responded:
+                with suppress(OSError):
+                    writer.write(b'HTTP/1.1 502 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+                    await writer.drain()
         finally:
             self.http_pending.pop(request_id,None)
             writer.close()
@@ -136,7 +164,10 @@ class ExecutionRelay:
             proxy_id,path = args['proxy_id'],args['path']
             if not isinstance(path,str) or not path.startswith('/') or '\r' in path or '\n' in path:
                 raise ValueError('Invalid tool proxy path')
-            server = await asyncio.start_server(lambda r,w:self.task(self.http(proxy_id,path,r,w),self.handlers),'127.0.0.1',0,limit=16384)
+            prefix,stream=args.get('path_prefix',False),args.get('stream',False)
+            if type(prefix) is not bool or type(stream) is not bool:
+                raise ValueError('Invalid HTTP forwarding options')
+            server = await asyncio.start_server(lambda r,w:self.task(self.http(proxy_id,path,r,w,path_prefix=prefix,stream=stream),self.handlers),'127.0.0.1',0,limit=16384)
             self.servers.append(server)
             return {'url':f'http://127.0.0.1:{server.sockets[0].getsockname()[1]}{path}'}
         if method == 'http_response':
@@ -144,6 +175,11 @@ class ExecutionRelay:
             if future is not None and not future.done():
                 future.set_result(args)
             return {}
+        if method in {'http_start','http_chunk','http_end','http_abort'}:
+            queue=self.http_pending.get(args['request_id'])
+            if not isinstance(queue,asyncio.Queue):return {'accepted':False}
+            await asyncio.wait_for(queue.put((method[5:],args)),30)
+            return {'accepted':True}
         if method == 'close':
             await self.execution.close()
             return {}

@@ -82,8 +82,28 @@ async def test_remote_peer_cannot_select_an_arbitrary_host_url(tmp_path, monkeyp
         monkeypatch.setattr(host, 'request', reply)
         await host._forward_http({'proxy_id':'forged','request_id':'request',
             'url':'http://169.254.169.254/latest/meta-data/','data':'','headers':{}})
-        host.proxies['registered'] = 'http://127.0.0.1:18081/mcp'
+        host.proxies['registered'] = {'url':'http://127.0.0.1:18081/mcp','path_prefix':False,'stream':False}
         await host._forward_http({'proxy_id':'registered','request_id':'malformed',
             'data':'','headers':[]})
+        await host._forward_http({'proxy_id':'registered','request_id':'query',
+            'query':'route=other','data':'','headers':{}})
         assert [(method,p['request_id'],p['status']) for method,p in calls] == [
-            ('http_response','request',502),('http_response','malformed',502)]
+            ('http_response','request',502),('http_response','malformed',502),('http_response','query',502)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('path',['/private','/models-escape/chat','//169.254.169.254/latest',
+    '/models/%2e%2e/private','/models/../private','/models/chat?target=http://evil.example','/models/\\private'])
+async def test_forwarded_model_paths_cannot_escape_registered_prefix(tmp_path,monkeypatch,path):
+    import httpx
+    def forbidden(*args,**kwargs):
+        pytest.fail('An escaped path reached the host network')
+    monkeypatch.setattr(httpx,'AsyncClient',forbidden)
+    async with relay(tmp_path) as host:
+        host.proxies['model']={'url':'http://127.0.0.1:18081/models','path_prefix':True,'stream':True}
+        calls=[]
+        async def reply(method,**params):calls.append((method,params))
+        monkeypatch.setattr(host,'request',reply)
+        await host._forward_http({'proxy_id':'model','request_id':'forged','path':path,'data':'','headers':{}})
+        assert [method for method,_ in calls]==['http_start','http_end']
+        assert calls[0][1]['status']==502

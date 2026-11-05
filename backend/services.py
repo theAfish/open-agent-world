@@ -3980,7 +3980,7 @@ def create_services(
     execution_provider = runtime_execution_provider
     if execution_provider is None and settings.tenant_scope == LOCAL_TENANT:
         execution_provider = NativeRuntimeExecutionProvider()
-    services.runtime_execution = RuntimeExecutionBroker(execution_provider)
+    services.runtime_execution = RuntimeExecutionBroker(execution_provider, resolve_model=provider.resolve_model)
     services.node_execution = NodeExecutionService(services)
     from backend.sandbox.operations import SandboxOperations
     services.sandbox_operations = SandboxOperations(services)
