@@ -63,6 +63,65 @@ def test_runtime_lists_current_history_and_reads_verified_binary(files):
     assert state['services'].resources.artifacts.consumers[state['attachment']['version_id']] == 0
 
 
+async def stage_attachment(state, directory, reference):
+    from backend.agents.execution import NativeRuntimeExecutionProvider, RuntimeExecutionRequest
+    execution = await NativeRuntimeExecutionProvider().open(RuntimeExecutionRequest(
+        state['agent']['id'], state['run'].run_id, directory / 'project', directory / 'home'))
+    token = _current_invocation.set(state['context'])
+    try:
+        stream = state['provider'].stream_conversation_attachment(
+            state['agent']['id'], state['run'].run_id, **ref(reference))
+        return await execution.write_file_stream('inputs/' + reference['name'], stream)
+    finally:
+        _current_invocation.reset(token)
+        await execution.close()
+
+
+def test_runtime_streams_large_retained_attachment_into_execution_workspace(files, tmp_path):
+    from backend.conversations.models import ConversationAttachment
+    state = files
+    chunk = b'x' * (256 * 1024)
+    response = state['client'].post(state['base'] + '/attachments', params={'filename': 'large.xlsx'},
+        content=iter([chunk] * 132), headers={'Content-Type': 'application/octet-stream'})
+    assert response.status_code == 201, response.text
+    attachment = response.json()
+    message = state['send'](ConversationAttachment.model_validate(attachment))
+    state['services'].run_manager.store.update_lifecycle(state['run'].run_id, conversation_max_sequence=message.sequence)
+    target = state['client'].portal.call(lambda: stage_attachment(state, tmp_path, attachment))
+    from pathlib import Path
+    assert Path(target).stat().st_size == 33 * 1024 * 1024
+    assert state['services'].resources.artifacts.consumers[attachment['version_id']] == 0
+
+
+@pytest.mark.parametrize('failure', ['revoked_at_eof', 'checksum', 'cancelled'])
+def test_streamed_attachment_is_not_published_before_verified_eof(files, tmp_path, monkeypatch, failure):
+    import asyncio
+    from concurrent.futures import CancelledError
+    state = files
+    store = state['services'].resources.artifacts
+    original = store.read
+
+    async def read(*args, **kwargs):
+        async with aclosing(original(*args, **kwargs)) as stream:
+            async for chunk in stream:
+                yield chunk
+                if failure == 'cancelled':
+                    raise asyncio.CancelledError
+        if failure == 'revoked_at_eof':
+            await state['services'].delete_edge(state['edge']['id'])
+
+    if failure == 'checksum':
+        path = store.path(state['attachment']['version_id']) / state['attachment']['path']
+        path.write_bytes(b'x' * len(state['data']))
+    monkeypatch.setattr(store, 'read', read)
+    # BlockingPortal exposes task cancellation through concurrent.futures.
+    error = CancelledError if failure == 'cancelled' else PermissionDeniedError if failure == 'revoked_at_eof' else ResourceValidationError
+    with pytest.raises(error):
+        state['client'].portal.call(lambda: stage_attachment(state, tmp_path, state['attachment']))
+    assert not list((tmp_path / 'project').rglob('*.*'))
+    assert store.consumers[state['attachment']['version_id']] == 0
+
+
 def test_runtime_history_boundary_excludes_later_attachments_and_tracks_resends(files):
     from backend.conversations.models import ConversationAttachment
     state = files

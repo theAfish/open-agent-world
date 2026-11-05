@@ -41,7 +41,8 @@ def execution_worker_argv(python='/usr/bin/python3'):
     root = Path(__file__).resolve().parents[1]
     sources = {'backend':'','backend.agents':'','backend.sandbox':''}
     for name in ['errors','agents.execution','agents.execution_worker',
-            'sandbox.models','sandbox.materialization','sandbox.files','sandbox.environment']:
+            'sandbox.models','sandbox.materialization','sandbox.files','sandbox.environment',
+            'sandbox.streaming','sandbox.transfers']:
         sources['backend.'+name] = (root/Path(*name.split('.'))).with_suffix('.py').read_text(encoding='utf-8')
     encoded = base64.b64encode(zlib.compress(json.dumps(sources).encode())).decode()
     return (python,'-I','-S','-u','-c',_BOOTSTRAP,encoded)
@@ -235,6 +236,9 @@ class RelayRuntimeExecution(RuntimeExecution):
             raise ResourceValidationError('Runtime file must contain at most 32 MiB of bytes')
         value=await self.request('write_file',path=path,root=root,data=base64.b64encode(data).decode())
         return value['path']
+
+    async def _file_upload(self, operation, path, *, root='workspace', **options):
+        return await self.request('upload_file', operation=operation, path=path, root=root, **options)
 
     async def forward_http(self, url, *, path_prefix=False, stream=False):
         target=loopback_endpoint(url)

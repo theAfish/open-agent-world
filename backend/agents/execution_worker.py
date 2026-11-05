@@ -160,6 +160,10 @@ class ExecutionRelay:
         if method == 'write_file':
             path = await self.execution.write_file(args['path'],base64.b64decode(args['data'],validate=True),root=args['root'])
             return {'path':path}
+        if method == 'upload_file':
+            if args.get('operation') not in {'upload_begin', 'upload_chunk', 'upload_commit', 'upload_abort'}:
+                raise ValueError('Unknown streamed file operation')
+            return await self.execution._file_upload(**args)
         if method == 'forward_http':
             proxy_id,path = args['proxy_id'],args['path']
             if not isinstance(path,str) or not path.startswith('/') or '\r' in path or '\n' in path:

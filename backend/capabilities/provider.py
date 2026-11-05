@@ -636,9 +636,20 @@ class WorldAgentCapabilityProvider:
 
     async def read_conversation_attachment(self, agent_id, run_id, version_id, path, *, max_bytes=32 * 1024 * 1024):
         from contextlib import aclosing
-        from backend.errors import PermissionDeniedError
         if type(max_bytes) is not int or not 0 < max_bytes <= 32 * 1024 * 1024:
             raise ResourceValidationError('Attachment read limit must be between 1 byte and 32 MiB')
+        content = bytearray()
+        async with aclosing(self.stream_conversation_attachment(agent_id, run_id, version_id, path, max_bytes=max_bytes)) as stream:
+            async for chunk in stream:
+                content.extend(chunk)
+        return bytes(content)
+
+    async def stream_conversation_attachment(self, agent_id, run_id, version_id, path, *, max_bytes=512 * 1024 * 1024):
+        from contextlib import aclosing
+        from backend.errors import PermissionDeniedError
+        from backend.resources.artifacts import MAX_CONVERSATION_UPLOAD_BYTES
+        if type(max_bytes) is not int or not 0 < max_bytes <= MAX_CONVERSATION_UPLOAD_BYTES:
+            raise ResourceValidationError('Attachment stream limit must be between 1 byte and 512 MiB')
 
         def authorize():
             attachment = next((entry for entry in self._conversation_attachment_entries(agent_id, run_id)
@@ -651,7 +662,7 @@ class WorldAgentCapabilityProvider:
 
         async with self.services._node_mutation(read_only=True):
             attachment = authorize()
-        content = bytearray()
+        size = 0
         store = self.services.resources.artifacts
         # ArtifactStore takes its own lock before graph access. Never hold the
         # graph lock while awaiting its stream; reauthorize after every read.
@@ -659,12 +670,12 @@ class WorldAgentCapabilityProvider:
             async for chunk in stream:
                 async with self.services._node_mutation(read_only=True):
                     authorize()
-                if len(content) + len(chunk) > max_bytes:
+                if size + len(chunk) > max_bytes:
                     raise ResourceValidationError(f'Attachment exceeds the {max_bytes}-byte transfer limit')
-                content.extend(chunk)
+                size += len(chunk)
+                yield chunk
         async with self.services._node_mutation(read_only=True):
             authorize()
-        return bytes(content)
 
     async def publish_conversation_attachment(self, agent_id, run_id, name, data, *, request_key):
         import hashlib

@@ -60,6 +60,60 @@ async def test_bounded_files_use_the_existing_no_follow_contract(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('interrupted_operation', ['upload_begin', 'upload_chunk'])
+async def test_stream_cancellation_joins_file_side_effect_before_cleanup(tmp_path, monkeypatch, interrupted_operation):
+    host = await execution(tmp_path)
+    original = host._file_upload
+    applied, release = asyncio.Event(), asyncio.Event()
+
+    async def upload(operation, *args, **kwargs):
+        result = await original(operation, *args, **kwargs)
+        if operation == interrupted_operation:
+            applied.set()
+            await release.wait()
+        return result
+
+    async def content():
+        yield b'partial input'
+
+    monkeypatch.setattr(host, '_file_upload', upload)
+    task = asyncio.create_task(host.write_file_stream('input/test.xlsx', content()))
+    try:
+        await asyncio.wait_for(applied.wait(), 5)
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not list((tmp_path / 'project').rglob('*.*'))
+    finally:
+        release.set()
+        await host.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['file_limit', 'chunk_limit'])
+async def test_stream_limits_abort_owned_staging_and_close_source(tmp_path, failure):
+    host = await execution(tmp_path)
+    closed = False
+
+    async def content():
+        nonlocal closed
+        try:
+            yield b'x' * (256 * 1024 + 1) if failure == 'chunk_limit' else b'123'
+        finally:
+            closed = True
+
+    try:
+        with pytest.raises(ResourceValidationError, match='limit'):
+            await host.write_file_stream('input/test.xlsx', content(),
+                max_bytes=512 * 1024 * 1024 if failure == 'chunk_limit' else 2)
+        assert closed
+        assert not list((tmp_path / 'project').rglob('*.*'))
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('url', ['http://example.com/mcp','https://127.0.0.1:18081/mcp',
     'http://127.0.0.1:80/mcp','http://user@127.0.0.1:18081/mcp','http://127.0.0.1:18081/mcp?next=/'])
 async def test_forwarding_does_not_accept_arbitrary_host_endpoints(tmp_path, url):
