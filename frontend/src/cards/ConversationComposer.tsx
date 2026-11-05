@@ -16,7 +16,7 @@ type Props = {
 
 export function ConversationComposer({ composer, activeSession, selectedAgentName, busy, onInteract }: Props) {
   const {
-    draft, setDraft, attachments, setAttachments, fileInput, messageInput,
+    draft, setDraft, attachments, setAttachments, attachmentError, fileInput, messageInput,
     selectedAgentId, completion, mentionIndex, setMentionIndex, setMentionCaret,
     chooseMention, submit, transfers, intake, uploading,
   } = composer;
@@ -50,6 +50,7 @@ export function ConversationComposer({ composer, activeSession, selectedAgentNam
   return (
     <div className="workspace-composer" {...intake.pasteProps} onPointerDown={onInteract}>
       <TransferList queue={transfers.queue} items={transfers.items} />
+      {attachmentError && <p className="conversation-execution-error" role="alert">{attachmentError}</p>}
       <input ref={fileInput} type="file" multiple hidden aria-label={t("Attach files")} onChange={(event) => {
         const files = Array.from(event.target.files ?? []);
         event.target.value = "";

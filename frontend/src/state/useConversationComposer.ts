@@ -31,6 +31,7 @@ export function useConversationComposer({
   const [draft, setDraft] = useSurfaceDraft(surfaceDraftKey(conversationId, 'composer', activeSessionId), '');
   const [attachments, setAttachments] = useSurfaceDraft(surfaceDraftKey(conversationId, 'attachments', activeSessionId), NO_ATTACHMENTS);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [attachmentError, setAttachmentError] = useState<string>();
   const [outgoing, setOutgoing] = useSurfaceDraft(surfaceDraftKey(conversationId, 'outgoing'), NO_OUTGOING);
   const revealOutgoing = useRef(false);
   const [preferredAgentId, setPreferredAgentId] = useSurfaceDraft<string | undefined>(surfaceDraftKey(conversationId, 'conversation-agent', activeSessionId), undefined);
@@ -43,11 +44,12 @@ export function useConversationComposer({
   const transfers = useTransferQueue(conversationId);
   const intake = useFileIntake({
     disabled: !activeSession || busy || transfers.active,
-    limits: { maxEntries: Math.max(0, 20 - attachments.length), maxFileBytes: 64 * 1024 * 1024, directories: false },
+    limits: { maxEntries: Math.max(0, 20 - attachments.length), maxFileBytes: 512 * 1024 * 1024, directories: false },
     destination: () => activeSession?.id,
-    onError: reason => pushToast({ tone: 'error', title: t('File upload failed'), detail: apiErrorMessage(reason) }),
+    onError: reason => setAttachmentError(apiErrorMessage(reason)),
     onEntries: async (entries, sessionId) => {
       if (!sessionId) return;
+      setAttachmentError(undefined);
       // This setter belongs to the session where intake began, including after a switch.
       const appendAttachments = setAttachments;
       const draftKey = surfaceDraftKey(conversationId, 'attachments', sessionId);
@@ -77,6 +79,7 @@ export function useConversationComposer({
 
   useEffect(() => {
     setMentionCaret(undefined);
+    setAttachmentError(undefined);
   }, [activeSessionId]);
 
   const chooseMention = (agent: Pick<ConversationAgent, "id" | "name">) => {
@@ -157,7 +160,7 @@ export function useConversationComposer({
   };
 
   return {
-    draft, setDraft, attachments, setAttachments, fileInput, messageInput,
+    draft, setDraft, attachments, setAttachments, attachmentError, fileInput, messageInput,
     selectedAgentId, setPreferredAgentId, completion, mentionIndex, setMentionIndex,
     setMentionCaret, chooseMention, submit, restoreMessageDraft, transfers, intake, uploading,
     visibleOutgoing, messages,

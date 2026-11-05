@@ -496,6 +496,39 @@ describe("ConversationWorkspace snapshots", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('accepts a spreadsheet larger than the former 64 MiB limit', async () => {
+    const file = new File(['workbook'], 'large.xlsx');
+    Object.defineProperty(file, 'size', { value: 135382831 });
+    const upload = vi.spyOn(worldApi, 'uploadConversationAttachment').mockResolvedValue({
+      version_id: 'large', path: file.name, name: file.name, size_bytes: file.size, media_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.change(screen.getByLabelText('Attach files', { selector: 'input' }), { target: { files: [file] } });
+    expect(await screen.findByRole('button', { name: 'Remove attachment large.xlsx' })).toBeTruthy();
+    expect(upload).toHaveBeenCalledWith(card.id, session.id, file, expect.any(Object));
+  });
+
+  it('shows oversized-file errors inside the composer and clears them after a valid upload', async () => {
+    const file = new File(['workbook'], 'oversized.xlsx');
+    Object.defineProperty(file, 'size', { value: 512 * 1024 * 1024 + 1 });
+    const upload = vi.spyOn(worldApi, 'uploadConversationAttachment').mockResolvedValue({
+      version_id: 'ok', path: 'ok.txt', name: 'ok.txt', size_bytes: 2, media_type: 'text/plain',
+    });
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    const input = screen.getByLabelText('Attach files', { selector: 'input' });
+    fireEvent.change(input, { target: { files: [file] } });
+    const error = await screen.findByRole('alert');
+    expect(error.closest('.workspace-composer')).toBeTruthy();
+    expect(error.textContent).toContain('512 MiB');
+    expect(error.textContent).toContain('oversized.xlsx');
+    expect(upload).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { files: [new File(['ok'], 'ok.txt')] } });
+    await screen.findByRole('button', { name: 'Remove attachment ok.txt' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('continues a batch after a failed attachment and prevents simultaneous duplicate intake', async () => {
     let finish!: () => void;
     const upload = vi.spyOn(worldApi, 'uploadConversationAttachment')
