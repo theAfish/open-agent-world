@@ -7,15 +7,14 @@ import json
 import httpx
 
 from backend.errors import ResourceValidationError
-from backend.security.model_connections import ConnectionEdit, ModelConnectionStore
+from backend.security.model_connections import ConnectionEdit, ModelConnectionStore, DEFAULT_MODEL_BASE_URLS
 
 
 async def discover_models(edit: ConnectionEdit, store: ModelConnectionStore) -> dict:
     if edit.adapter not in {"openai", "anthropic", "gemini"}:
         raise ResourceValidationError("This service requires manual model configuration.")
     key = store.discovery_key(edit)
-    defaults = {"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com", "gemini": "https://generativelanguage.googleapis.com/v1beta"}
-    base = edit.base_url or defaults[edit.adapter]
+    base = edit.base_url or DEFAULT_MODEL_BASE_URLS[edit.adapter]
     if edit.auth_mode == "none" and not edit.base_url:
         raise ResourceValidationError("Enter the local service address.")
     if edit.adapter == "anthropic":

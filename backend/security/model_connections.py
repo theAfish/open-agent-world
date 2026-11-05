@@ -16,6 +16,8 @@ MODEL_REF_PREFIX = "oaw:model:"
 _KEY = "model_connections"
 DEFAULT_CONTEXT_WINDOW = 128_000
 DEFAULT_MAX_OUTPUT_TOKENS = 8192
+DEFAULT_MODEL_BASE_URLS = {"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com",
+                          "gemini": "https://generativelanguage.googleapis.com/v1beta"}
 
 
 class ModelEntry(BaseModel):

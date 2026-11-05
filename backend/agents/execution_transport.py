@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 import zlib
+from urllib.parse import unquote
 
 from backend.agents.execution import (
     FILE_LIMIT, RuntimeExecution, RuntimeProcess, command_arguments, loopback_endpoint,
@@ -235,22 +236,43 @@ class RelayRuntimeExecution(RuntimeExecution):
         value=await self.request('write_file',path=path,root=root,data=base64.b64encode(data).decode())
         return value['path']
 
-    async def forward_http(self, url):
+    async def forward_http(self, url, *, path_prefix=False, stream=False):
         target=loopback_endpoint(url)
+        if type(path_prefix) is not bool or type(stream) is not bool:
+            raise ResourceValidationError('HTTP forwarding options must be booleans')
         proxy_id=uuid4().hex
-        self.proxies[proxy_id]=url
-        value=await self.request('forward_http',proxy_id=proxy_id,path=target.path or '/')
+        self.proxies[proxy_id]={'url':url,'path_prefix':path_prefix,'stream':stream}
+        value=await self.request('forward_http',proxy_id=proxy_id,path=target.path or '/',path_prefix=path_prefix,stream=stream)
         loopback_endpoint(value['url'])
         return value['url']
 
     async def _forward_http(self, value):
         import httpx
         request_id=value.get('request_id')
+        streaming=False
+        started=False
         try:
             # The remote peer selects only an opaque registration, never a host URL.
-            url=self.proxies[value['proxy_id']]
+            registration=self.proxies[value['proxy_id']]
+            target=loopback_endpoint(registration['url'])
+            streaming=registration['stream']
+            path=value.get('path',target.path or '/')
+            if (not isinstance(path,str) or not path.startswith('/') or path.startswith('//')
+                    or any(c in path for c in ('\\','?','#')) or any(ord(c)<32 for c in path)
+                    or '..' in unquote(path).split('/')):
+                raise ValueError('Invalid forwarded path')
+            expected=target.path or '/'
+            if (path != expected and (not registration['path_prefix']
+                    or not path.startswith(expected.rstrip('/')+'/'))):
+                raise ValueError('Forwarded path escaped its registration')
+            query=value.get('query','')
+            if (not isinstance(query,str) or len(query)>4096
+                    or query and not registration['path_prefix']
+                    or any(ord(c)<32 or c in ('#','\\') for c in query)):
+                raise ValueError('Invalid forwarded query')
+            url=target._replace(path=path,query=query).geturl()
             body=base64.b64decode(value['data'],validate=True)
-            if len(body)>HTTP_REQUEST_LIMIT:raise ValueError('Tool proxy request exceeds limit')
+            if len(body)>(FILE_LIMIT if streaming else HTTP_REQUEST_LIMIT):raise ValueError('HTTP proxy request exceeds limit')
             source = value['headers']
             if not isinstance(source, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k,v in source.items()):
                 raise ValueError('Invalid tool proxy headers')
@@ -258,12 +280,33 @@ class RelayRuntimeExecution(RuntimeExecution):
                 if k.lower() not in {'host','connection','content-length','transfer-encoding'}}
             async with httpx.AsyncClient(trust_env=False,follow_redirects=False,timeout=600) as client:
                 async with client.stream('POST',url,content=body,headers=headers) as response:
+                    if streaming:
+                        media=response.headers.get('content-type','application/json')
+                        await self.request('http_start',request_id=request_id,status=response.status_code,content_type=media)
+                        started=True
+                        size=0
+                        async for chunk in response.aiter_bytes():
+                            size+=len(chunk)
+                            if size>HTTP_RESPONSE_LIMIT:raise ValueError('HTTP proxy response exceeds limit')
+                            for offset in range(0,len(chunk),16384):
+                                reply=await self.request('http_chunk',request_id=request_id,data=base64.b64encode(chunk[offset:offset+16384]).decode())
+                                if not reply['accepted']:return
+                        await self.request('http_end',request_id=request_id)
+                        return
                     data=bytearray()
                     async for chunk in response.aiter_bytes():
                         data.extend(chunk)
                         if len(data)>HTTP_RESPONSE_LIMIT:raise ValueError('Tool proxy response exceeds limit')
                     result={'request_id':request_id,'status':response.status_code,'data':base64.b64encode(data).decode()}
         except (KeyError,TypeError,ValueError,httpx.HTTPError):
+            if streaming:
+                with suppress(RuntimeUnavailableError):
+                    if started:
+                        await self.request('http_abort',request_id=request_id)
+                    else:
+                        await self.request('http_start',request_id=request_id,status=502,content_type='application/json')
+                        await self.request('http_end',request_id=request_id)
+                return
             result={'request_id':request_id,'status':502,'data':''}
         with suppress(RuntimeUnavailableError):
             await self.request('http_response',**result)
