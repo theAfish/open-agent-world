@@ -27,6 +27,7 @@ class DuplexSDK(FakeSDK):
     def __init__(self,root):
         super().__init__(root)
         self.handles={}
+        self.file_uploads=[]
         self.fail_kill=False
 
     async def create(self,**kwargs):
@@ -36,6 +37,8 @@ class DuplexSDK(FakeSDK):
             async def run(self,command,**options):
                 inspect.signature(Commands.run).bind(self,command,**options)
                 argv=shlex.split(command)
+                if argv[0]=='exec':
+                    argv.pop(0)
                 argv[0]=sys.executable
                 process=await asyncio.create_subprocess_exec(*argv,stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE,
@@ -83,6 +86,13 @@ class DuplexSDK(FakeSDK):
                 sdk.commands.append((command,options))
                 return Handle()
         sandbox.commands=RemoteCommands()
+        async def write_file(path, data, **options):
+            assert sys.platform=='linux' and len(data)<=256*1024
+            assert options=={'user':'user','request_timeout':20}
+            with open(path,'wb') as output:
+                output.write(data)
+            sdk.file_uploads.append((path,len(data)))
+        sandbox.files=SimpleNamespace(write=write_file)
         return sandbox
 
     async def kill(self,remote_id,**kwargs):
@@ -129,18 +139,37 @@ async def test_runtime_owns_private_networked_vm_and_persists_only_its_volume(tm
 
 
 @pytest.mark.asyncio
-async def test_streamed_attachment_crosses_fragmented_sdk_stdin(tmp_path):
+async def test_legacy_file_write_crosses_fragmented_sdk_stdin(tmp_path):
     sdk=DuplexSDK(tmp_path)
     provider=AliyunRuntimeExecutionProvider(tmp_path/'bindings',settings(),sdk=sdk)
     execution=await provider.open(request(tmp_path))
     chunk=bytes(range(256))*1024
-    async def source():
-        for _ in range(3):
-            yield chunk
     try:
         async with asyncio.timeout(15):
-            await execution.write_file_stream('attachment.bin',source())
+            await execution.write_file('attachment.bin',chunk*3)
             assert await execution.read_file('attachment.bin')==chunk*3
+    finally:
+        await execution.close()
+    assert len(sdk.killed)==1 and not sdk.instances
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform!='linux',reason='Agent Sandbox binary uploads reopen an owned Linux /proc FD')
+async def test_streamed_file_uses_binary_sdk_and_preserves_verified_output(tmp_path):
+    import hashlib
+    sdk=DuplexSDK(tmp_path)
+    execution=await AliyunRuntimeExecutionProvider(tmp_path/'bindings',settings(),sdk=sdk).open(request(tmp_path))
+    chunk=bytes(range(256))*1024
+    async def source():
+        for _ in range(132):  # 33 MiB exceeds one Alibaba file API request's limit.
+            yield chunk
+    try:
+        target=await execution.write_file_stream('attachment.bin',source())
+        expected=hashlib.sha256(chunk*132).hexdigest()
+        with Path(target).open('rb') as content:
+            assert hashlib.file_digest(content,'sha256').hexdigest()==expected
+        assert len(sdk.file_uploads)==132
+        assert all(size==len(chunk) for _,size in sdk.file_uploads)
     finally:
         await execution.close()
     assert len(sdk.killed)==1 and not sdk.instances
