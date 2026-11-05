@@ -24,6 +24,43 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.45 adds `RuntimeExecution.model_connection(reference)`, an async
+context manager accepting `oaw:default` or an `oaw:model:...` reference. It reuses
+the existing model settings and yields a `RuntimeModelConnection` whose base URL
+is private and whose API key is an execution-scoped token. The stored provider
+key remains in the host. Model, endpoint and credentials resolve together;
+disabled or changed connections fail explicitly. OpenAI and Anthropic compatible
+HTTP protocols are supported. Other adapters are rejected without falling back
+to another model. Closing either the context or execution revokes the connection.
+
+This uses the existing private forwarding transport with opt-in `path_prefix`
+and `stream` options. Registered destinations remain fixed; remote code cannot
+choose a host URL. Model streaming is incremental and bounded. Browser model
+selection reuses public `useModelOptions`; no credentials enter card settings.
+
+Acquire the model inside the existing execution context and keep both contexts
+open until the CLI finishes:
+
+```python
+async with capabilities.runtime_execution(agent_id, run_id, workspace=workspace, home=home) as execution:
+    async with execution.model_connection("oaw:default") as model:
+        # Adapt this CLI's own provider configuration to model.adapter,
+        # model.model_id and model.base_url. Only pass model.api_key as a
+        # child-process environment variable; it is a temporary proxy token.
+        process = await execution.spawn(argv, env={"HARNESS_MODEL_TOKEN": model.api_key or ""})
+        await process.wait()
+```
+
+This API provides protocol access, not a CLI's configuration format. The Pack
+maps the returned connection to that Harness's public provider configuration.
+Existing independent Harness settings remain available when the Pack does not
+request a model connection. OpenAI routes are `/v1/chat/completions` and
+`/v1/responses`; Anthropic routes are `/v1/messages` and
+`/v1/messages/count_tokens`, including the SDK's `beta=true` query and
+`anthropic-beta` header. Other routes, arbitrary queries and redirects are rejected.
+Credential rotation takes effect on the next request. A changed model or endpoint
+requires a new execution. No token or upstream error body belongs in UI or logs.
+
 Plugin API 1.44 adds host-selected `AgentCapabilityProvider.runtime_execution`
 and `NodeResourceContext.open_execution`, including duplex processes, bounded
 file transfer and private loopback tool forwarding. Native paths remain personal

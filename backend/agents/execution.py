@@ -64,6 +64,20 @@ class RuntimeExecution(ABC):
     environment: Mapping[str, str]
     command: tuple[str, ...] | None = None
 
+    @asynccontextmanager
+    async def model_connection(self, reference: str):
+        """Use an OAW model through a private, execution-scoped connection.
+
+        The returned API key is a temporary proxy token, never the stored key.
+        Provider/model/base URL resolve together; independent Harness settings
+        remain available by not requesting this connection.
+        """
+        factory = getattr(self, '_model_connection', None)
+        if factory is None:
+            raise RuntimeUnavailableError('This host has no model connection service')
+        async with factory(reference) as connection:
+            yield connection
+
     @abstractmethod
     async def spawn(self, argv: list[str], *, env: Mapping[str, str]) -> RuntimeProcess: ...
 
@@ -74,7 +88,7 @@ class RuntimeExecution(ABC):
     async def write_file(self, path: str, data: bytes, *, root: str = "workspace") -> str: ...
 
     @abstractmethod
-    async def forward_http(self, url: str) -> str:
+    async def forward_http(self, url: str, *, path_prefix: bool = False, stream: bool = False) -> str:
         """Make a host-issued loopback tool endpoint reachable by this execution.
 
         Forwarding must stay private and bounded; it must never expose arbitrary
@@ -110,8 +124,9 @@ async def _settle(operation):
 class RuntimeExecutionBroker:
     """Host-owned admission and cleanup, including a runtime that forgets to close."""
 
-    def __init__(self, provider: RuntimeExecutionProvider | None):
+    def __init__(self, provider: RuntimeExecutionProvider | None, *, resolve_model=None):
         self.provider = provider
+        self.resolve_model = resolve_model
         self.active = {}
         self.closing = False
 
@@ -125,11 +140,13 @@ class RuntimeExecutionBroker:
         if self.closing or request.node_id in self.active:
             raise RuntimeUnavailableError("Runtime execution is busy or shutting down")
         opening = asyncio.create_task(self.provider.open(request))
-        entry = {"operation_id": request.operation_id, "opening": opening, "execution": None}
+        entry = {"operation_id": request.operation_id, "opening": opening, "execution": None,
+                 "models": set(), "closing": False, "close_lock": asyncio.Lock()}
         self.active[request.node_id] = entry
         try:
             execution, interrupted = await _settle(opening)
             entry["execution"] = execution
+            execution._model_connection = lambda reference: self._model_connection(request.node_id, entry, reference)
             if interrupted:
                 raise asyncio.CancelledError
             yield execution
@@ -139,7 +156,36 @@ class RuntimeExecutionBroker:
             else:
                 await self._close(request.node_id, entry)
 
+    @asynccontextmanager
+    async def _model_connection(self, node_id, entry, reference):
+        from backend.agents.model_proxy import RuntimeModelProxy
+        active = lambda: self.active.get(node_id) is entry and not entry['closing'] and not self.closing
+        if not active() or self.resolve_model is None:
+            raise RuntimeUnavailableError('Model connection requires an active hosted execution')
+        proxy = RuntimeModelProxy(self.resolve_model, reference, active)
+        entry['models'].add(proxy)
+        try:
+            connection = await proxy.open(entry['execution'])
+            yield connection
+        finally:
+            _, interrupted = await _settle(proxy.close())
+            entry['models'].discard(proxy)
+            if interrupted:
+                raise asyncio.CancelledError
+
     async def _close(self, node_id, entry):
+        async with entry['close_lock']:
+            entry['closing'] = True
+            interrupted = False
+            for proxy in tuple(entry['models']):
+                _, cancelled = await _settle(proxy.close())
+                interrupted = interrupted or cancelled
+                entry['models'].discard(proxy)
+            await self._close_execution(node_id, entry)
+            if interrupted:
+                raise asyncio.CancelledError
+
+    async def _close_execution(self, node_id, entry):
         execution = entry["execution"]
         if execution is None:
             execution, _ = await _settle(entry["opening"])
@@ -329,7 +375,7 @@ class NativeRuntimeExecution(RuntimeExecution):
             raise ResourceValidationError(str(error)) from error
         return str(target)
 
-    async def forward_http(self, url):
+    async def forward_http(self, url, *, path_prefix=False, stream=False):
         self._root("workspace")
         loopback_endpoint(url)
         return url
