@@ -41,6 +41,40 @@ async def test_real_relay_duplex_process_and_scoped_files(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_real_relay_streams_large_files_and_discards_failed_transfers(tmp_path):
+    import hashlib
+
+    chunk = b'x' * (256 * 1024)
+
+    async def content():
+        for _ in range(132):  # 33 MiB, larger than the unary file limit.
+            yield chunk
+
+    async with relay(tmp_path) as host:
+        target = await host.write_file_stream('input/large.xlsx', content())
+        path = tmp_path / 'project/input/large.xlsx'
+        assert target == str(path)
+        expected = hashlib.sha256()
+        for _ in range(132):
+            expected.update(chunk)
+        with path.open('rb') as source:
+            assert hashlib.file_digest(source, 'sha256').hexdigest() == expected.hexdigest()
+
+        async def revoked():
+            yield b'partial'
+            raise PermissionError('attachment access revoked')
+
+        with pytest.raises(PermissionError, match='revoked'):
+            await host.write_file_stream('input/revoked.xlsx', revoked())
+        assert not (path.parent / 'revoked.xlsx').exists()
+        assert not list(path.parent.glob('.oaw-upload-*.part'))
+        with pytest.raises(ResourceValidationError):
+            await host.write_file_stream('../outside', content())
+        with pytest.raises(ResourceValidationError, match='already exists'):
+            await host.write_file_stream('input/large.xlsx', content())
+
+
+@pytest.mark.asyncio
 async def test_private_http_tool_bridge_round_trip(tmp_path):
     calls=[]
     async def tool(reader,writer):

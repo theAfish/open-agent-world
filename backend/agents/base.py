@@ -83,6 +83,17 @@ class AgentCapabilityProvider(Protocol):
         """Read verified, bounded bytes from a listed current-session attachment."""
         ...
 
+    def stream_conversation_attachment(
+        self, agent_id: str, run_id: str, version_id: str, path: str,
+        *, max_bytes: int = 512 * 1024 * 1024,
+    ) -> AsyncIterator[bytes]:
+        """Stream a visible attachment, checking live access and its final checksum.
+
+        Consumers must exhaust the iterator before publishing the destination,
+        and close it when interrupted. Bytes stay outside the model prompt.
+        """
+        ...
+
     async def publish_conversation_attachment(
         self, agent_id: str, run_id: str, name: str, data: bytes, *, request_key: str,
     ) -> dict[str, Any]:

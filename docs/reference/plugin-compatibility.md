@@ -24,6 +24,17 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.46 adds `AgentCapabilityProvider.stream_conversation_attachment`
+and `RuntimeExecution.write_file_stream(path, chunks)`. Together they stage a
+sent attachment as an execution-workspace file without buffering its entire
+contents or embedding them in a model prompt. Transfers support files up to
+512 MiB with chunks of at most 256 KiB. The source iterator must be exhausted
+before committing: live Run/session authorization and the stored checksum are
+checked through EOF. Interruption aborts the staging file. Destinations stay
+within the selected execution root and must be new files; existing files are
+never overwritten. Native and relayed execution reuse the Sandbox uploader.
+The existing 32 MiB byte-returning APIs and relay-frame limits are unchanged.
+
 Plugin API 1.45 adds `RuntimeExecution.model_connection(reference)`, an async
 context manager accepting `oaw:default` or an `oaw:model:...` reference. It reuses
 the existing model settings and yields a `RuntimeModelConnection` whose base URL

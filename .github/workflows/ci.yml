@@ -146,6 +146,9 @@ jobs:
       - name: Verify Pack build dependency boundaries
         working-directory: frontend
         run: npm run test:pack-sdk
+      - name: Use Ubuntu HTTPS mirror for browser dependencies
+        # The Azure HTTP mirror can make browser prerequisites exceed the job timeout.
+        run: sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
       - name: Install UI acceptance browsers
         working-directory: frontend
         run: npx --no-install playwright install --with-deps chromium webkit
