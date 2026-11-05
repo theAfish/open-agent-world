@@ -52,16 +52,26 @@ class DuplexSDK(FakeSDK):
                 class Handle:
                     pid=process.pid
                     pending=bytearray()
+                    initialized=False
                     async def send_stdin(self,data,request_timeout=None):
                         assert len(data)<=64*1024
+                        if self.initialized:
+                            # The SDK forwards bytes immediately, including incomplete
+                            # JSON lines. Buffer only the fixture's initial path rewrite.
+                            await native.write(data)
+                            return
                         self.pending.extend(data)
-                        while b'\n' in self.pending:
-                            line,_,rest=self.pending.partition(b'\n');self.pending=bytearray(rest)
+                        if b'\n' in self.pending:
+                            line,_,rest=self.pending.partition(b'\n')
+                            self.pending.clear()
                             value=json.loads(line)
-                            if value['method']=='initialize':
-                                for name in ('workspace','home'):
-                                    value['params'][name]=str(sdk.root/'volume'/value['params'][name].removeprefix('/workspace/'))
+                            assert value['method']=='initialize'
+                            for name in ('workspace','home'):
+                                value['params'][name]=str(sdk.root/'volume'/value['params'][name].removeprefix('/workspace/'))
                             await native.write(json.dumps(value).encode()+b'\n')
+                            self.initialized=True
+                            if rest:
+                                await native.write(rest)
                     async def wait(self):
                         code=await native.wait()
                         await asyncio.gather(*streams)
@@ -116,6 +126,24 @@ async def test_runtime_owns_private_networked_vm_and_persists_only_its_volume(tm
     finally:
         await two.close()
     assert not (tmp_path/'must-not-exist').exists()
+
+
+@pytest.mark.asyncio
+async def test_streamed_attachment_crosses_fragmented_sdk_stdin(tmp_path):
+    sdk=DuplexSDK(tmp_path)
+    provider=AliyunRuntimeExecutionProvider(tmp_path/'bindings',settings(),sdk=sdk)
+    execution=await provider.open(request(tmp_path))
+    chunk=bytes(range(256))*1024
+    async def source():
+        for _ in range(3):
+            yield chunk
+    try:
+        async with asyncio.timeout(15):
+            await execution.write_file_stream('attachment.bin',source())
+            assert await execution.read_file('attachment.bin')==chunk*3
+    finally:
+        await execution.close()
+    assert len(sdk.killed)==1 and not sdk.instances
 
 
 @pytest.mark.asyncio
