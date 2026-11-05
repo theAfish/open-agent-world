@@ -8,7 +8,7 @@ import pytest
 
 from backend.agents.execution import NativeRuntimeProcess
 from backend.agents.execution_transport import FRAME_LIMIT, RelayRuntimeExecution, execution_worker_argv
-from backend.errors import ResourceValidationError
+from backend.errors import ResourceValidationError, RuntimeUnavailableError
 
 
 @asynccontextmanager
@@ -72,6 +72,89 @@ async def test_real_relay_streams_large_files_and_discards_failed_transfers(tmp_
             await host.write_file_stream('../outside', content())
         with pytest.raises(ResourceValidationError, match='already exists'):
             await host.write_file_stream('input/large.xlsx', content())
+
+
+@pytest.mark.asyncio
+async def test_partial_frame_failure_blocks_abort_and_queued_requests_but_still_closes_transport(tmp_path, monkeypatch):
+    entered, release = asyncio.Event(), asyncio.Event()
+    operations = []
+
+    async def content():
+        yield b'file content'
+
+    async with relay(tmp_path) as host:
+        original_write = host.transport.write
+        transport = host.transport
+
+        async def interrupted_write(data):
+            operation = json.loads(data)['params'].get('operation')
+            operations.append(operation)
+            if operation == 'upload_chunk':
+                await original_write(data[:20])
+                entered.set()
+                await release.wait()
+                raise OSError('SDK stdin response was lost')
+            await original_write(data)
+
+        monkeypatch.setattr(transport, 'write', interrupted_write)
+        upload = asyncio.create_task(host.write_file_stream('input/test.xlsx', content()))
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            queued = asyncio.create_task(host.read_file('another-file'))
+            await asyncio.sleep(0)
+            assert len(host.pending) == 2
+            release.set()
+            failed_upload, failed_queued = await asyncio.gather(upload, queued, return_exceptions=True)
+            assert isinstance(failed_upload, RuntimeUnavailableError)
+            assert 'outcome is uncertain' in str(failed_upload)
+            assert failed_queued is failed_upload
+            assert isinstance(failed_upload.__cause__, OSError)
+            assert operations == ['upload_begin', 'upload_chunk']
+            assert not host.pending
+        finally:
+            release.set()
+            await asyncio.gather(upload, return_exceptions=True)
+    assert host.closed and transport._closed
+    assert host.failure is failed_upload  # EOF during owned cleanup cannot replace the first failure.
+
+
+@pytest.mark.asyncio
+async def test_reader_failure_during_pending_write_is_observed_and_preserved(tmp_path, monkeypatch):
+    import gc
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unobserved = []
+    loop.set_exception_handler(lambda _, context: unobserved.append(context))
+    try:
+        async with relay(tmp_path) as host:
+            async def interrupted_write(data):
+                entered.set()
+                await release.wait()
+                raise OSError('write failed after reader reached EOF')
+
+            monkeypatch.setattr(host.transport, 'write', interrupted_write)
+            request = asyncio.create_task(host.read_file('input.xlsx'))
+            try:
+                await asyncio.wait_for(entered.wait(), 5)
+                await host.transport.close()
+                await host.reader
+                first_failure = host.failure
+                release.set()
+                with pytest.raises(RuntimeUnavailableError) as error:
+                    await request
+                assert error.value is first_failure
+                assert not host.pending
+            finally:
+                release.set()
+                await asyncio.gather(request, return_exceptions=True)
+        del request
+        gc.collect()
+        await asyncio.sleep(0)
+        assert not unobserved
+    finally:
+        loop.set_exception_handler(previous_handler)
 
 
 @pytest.mark.asyncio
