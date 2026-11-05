@@ -191,3 +191,20 @@ async def test_unsupported_adapter_and_changed_endpoint_fail_without_fallback(tm
             async with httpx.AsyncClient(trust_env=False) as client:
                 response=await client.post(model.base_url+'/chat/completions',json={},headers={'Authorization':'Bearer '+model.api_key})
                 assert response.status_code==403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('adapter',['openai','anthropic'])
+async def test_keyless_local_models_keep_upstream_auth_disabled(tmp_path,adapter):
+    async def handle(first,headers,body,writer):
+        assert 'authorization' not in headers and 'x-api-key' not in headers
+        writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}');await writer.drain()
+    async with upstream(handle) as base:
+        raw=RuntimeModelConnection(adapter,'local-model',base,None)
+        broker=RuntimeExecutionBroker(NativeRuntimeExecutionProvider(),resolve_model=lambda _:raw)
+        async with broker.open(request(tmp_path)) as execution:
+            async with execution.model_connection('oaw:default') as model:
+                path='/chat/completions' if adapter=='openai' else '/v1/messages'
+                headers={'Authorization':'Bearer '+model.api_key} if adapter=='openai' else {'x-api-key':model.api_key}
+                async with httpx.AsyncClient(trust_env=False) as client:
+                    assert (await client.post(model.base_url+path,json={},headers=headers)).status_code==200

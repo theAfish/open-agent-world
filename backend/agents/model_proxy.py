@@ -133,11 +133,13 @@ class RuntimeModelProxy:
                 suffix = suffix[3:]
             headers = {"content-type": "application/json", "accept": "text/event-stream, application/json"}
             if current.adapter == "anthropic":
-                headers.update({"x-api-key": current.api_key or "", "anthropic-version": "2023-06-01"})
+                headers['anthropic-version'] = '2023-06-01'
+                if current.api_key:
+                    headers['x-api-key'] = current.api_key
                 if beta := incoming.get('anthropic-beta'):
                     headers['anthropic-beta'] = beta
-            else:
-                headers["authorization"] = "Bearer " + (current.api_key or "")
+            elif current.api_key:
+                headers["authorization"] = "Bearer " + current.api_key
             try:
                 url = base + "/" + suffix + ('?' + target.query if target.query else '')
                 async with self.client.stream("POST", url, json=payload, headers=headers) as response:
