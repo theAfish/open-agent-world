@@ -135,12 +135,23 @@ def test_approved_archive_is_prepared_and_loaded_in_a_separate_user_process(tmp_
     value = {**asdict(worker),'data_root':str(worker.data_root)}
     script = '''
 import asyncio,json,sys
+from dataclasses import replace
+import pytest
 from backend.hosting.worker import WorkerConfig,create_worker_app
 from backend.hosting.templates import initialize_runtime
+from backend.hosting.upgrades import migrate_profile
 from fastapi.testclient import TestClient
 value=json.loads(sys.stdin.readline())
 config=WorkerConfig(**value['worker'])
 asyncio.run(initialize_runtime(config,__import__('pathlib').Path(value['template'])))
+manifest=config.data_root/'deployment.json'
+original=manifest.read_bytes()
+bad=replace(config,approved_packs=({**config.approved_packs[0],'sha256':'0'*64},))
+with pytest.raises(ValueError,match='administrator-approved'):
+ asyncio.run(migrate_profile(bad))
+assert manifest.read_bytes()==original
+asyncio.run(migrate_profile(config))
+assert json.loads(manifest.read_text())['plugin_versions']['test.greeter']=='0.1.0'
 with TestClient(create_worker_app(config)) as client:
  services=client.app.state.services
  assert services.plugins.has_plugin('test.greeter')
