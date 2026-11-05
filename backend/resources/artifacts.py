@@ -16,6 +16,8 @@ from backend.errors import ConflictError, NotFoundError, PermissionDeniedError, 
 from backend.sandbox.files import parts, pinned, run_file_operation
 from backend.sandbox.transfers import CHUNK_BYTES
 
+MAX_CONVERSATION_UPLOAD_BYTES = 512 * 1024 * 1024
+
 
 def now():
     return datetime.now(UTC).isoformat()
@@ -355,8 +357,8 @@ class ArtifactStore:
                     async with self._lock, services._node_mutation(read_only=True):
                         authorize()
                         size = record['size_bytes'] + len(chunk)
-                        if size > min(self.max_version_bytes, 64 * 1024 * 1024):
-                            raise ResourceValidationError('Conversation upload exceeds the 64 MiB or configured artifact limit')
+                        if size > min(self.max_version_bytes, MAX_CONVERSATION_UPLOAD_BYTES):
+                            raise ResourceValidationError('Conversation upload exceeds the 512 MiB or configured artifact limit')
                         used = sum(r['size_bytes'] for r in self.all() if r['state'] in {'ready', 'staging', 'deleting'} or
                                    (r['state'] == 'failed' and r.get('cleanup') != 'complete'))
                         if used + len(chunk) > self.max_storage_bytes:

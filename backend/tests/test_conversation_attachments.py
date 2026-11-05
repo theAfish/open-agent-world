@@ -103,6 +103,32 @@ def test_image_preview_and_active_content_download(client):
     assert response.headers['content-disposition'].startswith('attachment;')
 
 
+def test_large_upload_streams_past_the_former_64_mib_limit(client):
+    _, _, base = room(client)
+    chunk = b'x' * (1024 * 1024)
+    response = client.post(base + '/attachments', params={'filename': 'large.xlsx'},
+                           content=iter([chunk] * 65), headers={'Content-Type': 'application/octet-stream'})
+    assert response.status_code == 201, response.text
+    assert response.json()['size_bytes'] == 65 * 1024 * 1024
+    record = client.app.state.services.resources.artifacts.get(response.json()['version_id'])
+    assert record['state'] == 'ready'
+    assert record['manifest'][0]['size'] == 65 * 1024 * 1024
+
+
+def test_streamed_upload_enforces_conversation_cap_and_cleans_partial_file(client, monkeypatch):
+    # Scale only the conversation cap, keeping the independent artifact quota larger.
+    monkeypatch.setattr('backend.resources.artifacts.MAX_CONVERSATION_UPLOAD_BYTES', 4)
+    _, _, base = room(client)
+    response = client.post(base + '/attachments', params={'filename': 'oversized.xlsx'},
+                           content=iter([b'123', b'45']), headers={'Content-Type': 'application/octet-stream'})
+    assert response.status_code == 422
+    store = client.app.state.services.resources.artifacts
+    record = store.all()[-1]
+    assert record['state'] == 'failed' and record['cleanup'] == 'complete'
+    assert not store.path(record['version_id']).exists()
+    assert not store.path(record['version_id'], staging=True).exists()
+
+
 def test_attachment_and_admission_survive_restart(data_root):
     settings = Settings.for_data_root(data_root)
     with TestClient(create_app(settings)) as client:

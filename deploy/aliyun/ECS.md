@@ -197,7 +197,7 @@ ASE、pymatgen、Matplotlib，以 UID 1000 完成线性方程计算并访问公�
 不能反复 start/stop 或重放命令。修复旧的挂起绑定前先备份，确认没有活跃任务和远程 VM，
 保留用户文件及操作记录。
 
-Nginx 的 `client_max_body_size` 至少为 `48m`，供最大 32 MiB 知识库文件的 base64 请求使用；
+Nginx 的 `client_max_body_size` 至少为 `512m`，供最大 512 MiB 聊天附件上传使用，也覆盖最大 32 MiB 知识库文件的 base64 请求；
 `proxy_read_timeout` 至少为 `3600s`，避免在 Sandbox 冷启动期间切断请求。
 网关为 start、execute 和 Python 安装请求保留该响应等待时间，实际执行时限仍由 worker 控制。
 普通配置 JSON 仍限制为 4 MiB；节点操作限制为 48 MiB，并继续检查托管路径策略。
