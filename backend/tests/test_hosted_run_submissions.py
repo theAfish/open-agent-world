@@ -9,7 +9,8 @@ from backend.tests.test_hosted_gateway import ORIGIN, fixture_data
 
 
 @pytest.mark.asyncio
-async def test_run_submission_keys_respect_hosted_profile_and_agent_boundaries(tmp_path):
+@pytest.mark.parametrize("enqueue", [False, True])
+async def test_run_submission_keys_respect_hosted_profile_and_agent_boundaries(tmp_path, enqueue):
     store, users, profiles, frontend, settings = fixture_data(tmp_path)
     workers = {
         profile.upstream: create_worker_app(WorkerConfig(
@@ -30,7 +31,7 @@ async def test_run_submission_keys_respect_hosted_profile_and_agent_boundaries(t
     ]
     agent_id = "shared-agent-id"
     url = f"/api/agents/{agent_id}/run"
-    body = {"prompt": "Same request in separate profiles"}
+    body = {"prompt": "Same request in separate profiles", "enqueue": enqueue}
     async with AsyncExitStack() as stack:
         for worker in workers.values():
             await stack.enter_async_context(worker.router.lifespan_context(worker))

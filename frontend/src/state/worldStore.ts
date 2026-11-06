@@ -11,6 +11,7 @@ import { isShadow } from "./shadowCollection";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { profileStorage } from "./profileStorage";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
+import { isHosted } from "../auth/hostedSession";
 import type {
   CardType,
   EdgeDirection,
@@ -1560,18 +1561,21 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   },
 
   runAgent: async (id, prompt, freshContext) => {
+    const queued = isHosted();
+    const before = queued ? get().cards.find(card => card.id === id) : undefined;
     try {
       await worldApi.runAgent(id, prompt, freshContext);
       set((state) => ({
-        cards: state.cards.map((card) =>
-          card.id === id
-            ? mergeCardPatch(card, { status: "running", config: { prompt } })
-            : card,
-        ),
+        cards: state.cards.map(card => {
+          // A live event or published poll may already reflect newer state.
+          if (card.id !== id || (queued && card !== before)) return card;
+          const status = queued && card.status !== "running" ? "waiting" : "running";
+          return mergeCardPatch(card, { status, config: { prompt } });
+        }),
         activityOpen: true,
       }));
     } catch (error) {
-      get().pushToast({ tone: "error", title: "Agent did not start", detail: apiErrorMessage(error) });
+      get().pushToast({ tone: "error", title: queued ? "Run submission not confirmed" : "Agent did not start", detail: apiErrorMessage(error) });
     }
   },
 

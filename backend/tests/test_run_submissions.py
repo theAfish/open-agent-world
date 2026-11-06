@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from backend.idempotency import IdempotencyStore
+from backend.events.models import EventType
 from backend.main import create_app
 from backend.request_context import bind_request_context, create_local_request_context
 from backend.runs import RunStatus
@@ -167,3 +168,103 @@ async def test_replay_rechecks_agent_availability(tmp_path):
         await services.delete_card(agent.id)
         replay = await client.post(url, headers=headers, json={"prompt": "work"})
         assert replay.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_queued_http_submission_waits_for_capacity_and_can_be_cancelled(tmp_path):
+    provider = RecordingProvider(mode="block")
+    async with api(tmp_path, provider) as (services, client):
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        url = f"/api/agents/{agent.id}/run"
+        first = await client.post(url, json={"prompt": "occupy capacity"})
+        await asyncio.wait_for(provider.started.wait(), timeout=1)
+        headers = {"Idempotency-Key": "queued-work"}
+        body = {"prompt": "work later", "enqueue": True, "fresh_context": True}
+        queued = await client.post(url, headers=headers, json=body)
+        assert queued.status_code == 202, queued.text
+        run_id = queued.json()["run_id"]
+        status = (await client.get(f"/api/runs/{run_id}")).json()
+        assert status["status"] == "created"
+        assert status["lifecycle"]["execution"] == "queued"
+        assert not status["lifecycle"]["holds_capacity"]
+        replay = await client.post(url, headers=headers, json=body)
+        assert replay.json() == queued.json()
+        changed = await client.post(url, headers=headers, json={**body, "prompt": "changed"})
+        assert changed.status_code == 409
+        immediate = await client.post(url, headers=headers, json={**body, "enqueue": False})
+        assert immediate.status_code == 409
+        assert len(provider.contexts) == 1
+        cancelled = await client.post(f"/api/runs/{run_id}/cancel")
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["status"] == "cancelled"
+        await services._require_run_manager().cancel_run(first.json()["run_id"])
+        await services._require_run_manager().dispatch_pending()
+        assert len(provider.contexts) == 1
+
+
+@pytest.mark.asyncio
+async def test_queued_http_input_survives_application_shutdown_and_reopen(tmp_path):
+    body = {"prompt": "accepted input survives restart", "enqueue": True}
+    headers = {"Idempotency-Key": "restart-queued"}
+    async with api(tmp_path, RecordingProvider(mode="block")) as (services, client):
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        url = f"/api/agents/{agent.id}/run"
+        active = await client.post(url, json={"prompt": "occupy capacity"})
+        queued = await client.post(url, headers=headers, json=body)
+        assert queued.status_code == 202
+        queued_id = queued.json()["run_id"]
+    provider = RecordingProvider()
+    async with api(tmp_path, provider) as (services, client):
+        manager = services._require_run_manager()
+        finished = await asyncio.wait_for(manager.wait_terminal(queued_id), timeout=2)
+        await manager.wait_execution(queued_id)
+        assert finished.status is RunStatus.SUCCEEDED
+        assert manager.final_text(queued_id) == body["prompt"]
+        assert [context.run_id for context in provider.contexts] == [queued_id]
+        assert manager.get_run(active.json()["run_id"]).status is RunStatus.CANCELLED
+        replay = await client.post(url, headers=headers, json=body)
+        assert replay.json() == queued.json()
+
+
+@pytest.mark.asyncio
+async def test_queued_http_response_failure_does_not_lose_or_duplicate_execution(tmp_path, monkeypatch):
+    provider = RecordingProvider()
+    async with api(tmp_path, provider) as (services, client):
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        manager = services._require_run_manager()
+        publish = type(manager)._publish_run
+
+        async def fail_receipt_notification(self, record, event_type):
+            if event_type is EventType.RUN_CREATED:
+                raise RuntimeError("response lost after queue commit")
+            await publish(self, record, event_type)
+
+        url = f"/api/agents/{agent.id}/run"
+        body = {"prompt": "saved before acknowledgement", "enqueue": True}
+        headers = {"Idempotency-Key": "lost-queued-response"}
+        with monkeypatch.context() as patch:
+            patch.setattr(type(manager), "_publish_run", fail_receipt_notification)
+            with pytest.raises(RuntimeError, match="response lost after queue commit"):
+                await client.post(url, headers=headers, json=body)
+        [original] = manager.list_runs()
+        replay = await client.post(url, headers=headers, json=body)
+        assert replay.status_code == 202, replay.text
+        assert replay.json()["run_id"] == original.run_id
+        finished = await asyncio.wait_for(manager.wait_settled(original.run_id), timeout=2)
+        assert finished.status is RunStatus.SUCCEEDED
+        assert len(provider.contexts) == 1
+
+
+@pytest.mark.asyncio
+async def test_http_cancel_during_drain_does_not_acknowledge_preserved_work(tmp_path):
+    async with api(tmp_path, RecordingProvider(mode="block")) as (services, client):
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        await client.post(f"/api/agents/{agent.id}/run", json={"prompt": "occupy capacity"})
+        queued = await client.post(f"/api/agents/{agent.id}/run", json={"prompt": "later", "enqueue": True})
+        assert queued.status_code == 202
+        run_id = queued.json()["run_id"]
+        manager = services._require_run_manager()
+        await manager.stop_dispatcher()
+        assert (await client.post(f"/api/runs/{run_id}/cancel")).status_code == 503
+        assert (await client.post(f"/api/agents/{agent.id}/stop")).status_code == 503
+        assert manager.store.is_pending(run_id)

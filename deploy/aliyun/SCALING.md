@@ -17,25 +17,66 @@ with different input returns HTTP `409`. Requests without a key retain their
 current behavior. This is available on both `/api/agents/{agent_id}/run` and the
 published `/api/runtime-app/workspace/agents/{agent_id}/run` endpoint.
 The key and its Run are recorded in the existing profile SQLite database, which
-still has a single writer. Existing Run status APIs remain the way to observe the
-result, including a Run interrupted by a worker restart. An HTTP retry does not
-replay execution. A crash after the atomic Run reservation but before execution
-can leave a Run that never started; startup marks it interrupted, and a retry
-still returns that Run ID. Durable acceptance does not yet guarantee execution.
-Clients inspect its status before intentionally submitting new work with a new key.
+still has a single writer. For immediate submissions, a crash after the atomic
+Run reservation but before execution can leave a Run that never started. Startup
+marks it interrupted, and a retry still returns that Run ID. Clients inspect Run
+status before intentionally submitting new work with a new key.
 
 Acceptance covers duplicate requests while a Run is active and after it finishes,
 conflicting input, a lost-response retry after restarting the worker, and rejection
-of requests outside the caller's authorized scope. This increment covers direct
-Run submission. The execution and infrastructure phases below are proposed work.
+of requests outside the caller's authorized scope.
 
 ## 2. Give a separate runner ownership of execution
 
-- Start with one hosted Agent workflow. Keep its Run ID, status, activity, and
-  cancel operations. Persist the Run input before acknowledging it, then let a
-  separate service claim it. Define which process owns each state transition and
-  how the API reads status. Keep the existing SQLite profile owner until shared
-  state has a migration path.
+### 2a. Persist queued direct Runs
+
+Direct Agent clients can opt into the queue with `enqueue: true`. The hosted UI
+uses this path for direct Run actions and generates an `Idempotency-Key` for each
+intentional submission. The existing Agent status and Stop controls still use
+the same workspace APIs. The UI does not automatically resend a failed mutation.
+API clients can repeat an uncertain submission with the original key and body.
+
+The pending backlog defaults to 128 Runs per profile. Operators can set the
+positive integer `run_queue_limit` in that profile's `worker.json`; this bounds
+waiting work, independently of execution concurrency or total website users.
+A full queue returns `503` without consuming the submission key. Replays of
+accepted requests still return their Run ID when the queue is full.
+
+```http
+POST /api/runtime-app/workspace/agents/AGENT_ID/run
+Content-Type: application/json
+Idempotency-Key: workspace-analysis-001
+
+{"prompt":"Run the configured analysis","enqueue":true}
+```
+
+In a published workspace, the submitter can read a queued Run at
+`GET /api/runtime-app/workspace/runs/{run_id}` or cancel it with
+`POST /api/runtime-app/workspace/runs/{run_id}/cancel` while the Agent remains
+published and the caller has access.
+
+The profile worker saves the input with its Run ID and claims it outside the
+request. Pending work survives an owner restart. A claimed attempt with an
+unconfirmed outcome is interrupted during recovery. It is never automatically
+executed again. The existing profile worker still owns SQLite and execution.
+The gateway already runs independently of the profile workers.
+
+Check pending recovery, same-ID replay, cancellation before claim, and prevention
+of duplicate execution after an owner restart. Before rolling back to code that
+does not understand queued Runs, stop admitting new queue requests and drain or
+cancel the existing queue. Preserve the profile database and submission receipts.
+Remove the optional `run_queue_limit` configuration key before starting worker
+code that predates this option. During worker shutdown, explicit HTTP cancellation
+returns `503`; retry against the ready worker to cancel any preserved pending work.
+
+### 2b. Separate the API and runner processes
+
+The execution service and infrastructure phases below are proposed work.
+
+- Let a separate service claim a queued Run. Keep its Run ID, status, activity,
+  and cancel operations. Define which process owns each state transition and how
+  the API reads status. Keep one SQLite profile owner until shared state has a
+  migration path.
 - Record the execution attempt and provider resource IDs. When a claim expires or
   a provider response is missing, reconcile the attempt before starting any new
   work. Resume a supported remote operation only after checking ownership and

@@ -16,7 +16,7 @@ from typing import Mapping
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from backend.config import Settings
+from backend.config import DEFAULT_RUN_QUEUE_LIMIT, Settings
 from backend.hosting.identity import ProfileAccess, VerifiedIdentity
 from backend.request_context import TenantScope
 
@@ -148,12 +148,15 @@ class WorkerConfig:
     shared_environment_origin: str | None = None
     pack_management: bool = False
     approved_packs: tuple[dict, ...] = ()
+    run_queue_limit: int = DEFAULT_RUN_QUEUE_LIMIT
 
     def __post_init__(self):
         hosted_scope(self.user_id, self.application_id, self.profile_id)
         _key(self.secret)
         if self.mode not in {"builder", "runtime"}:
             raise ValueError("Worker mode must be builder or runtime")
+        if type(self.run_queue_limit) is not int or self.run_queue_limit <= 0:
+            raise ValueError("run_queue_limit must be a positive integer")
         if type(self.pack_management) is not bool or self.pack_management and self.mode != 'builder':
             raise ValueError("Pack management requires an operator-enabled builder")
         from .packs import pack_locks
@@ -226,7 +229,7 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
     settings = replace(Settings.for_data_root(config.data_root), tenant_scope=tenant,
                        agent_runtime=config.agent_runtime, sandbox_runtime=None,
                        inherit_runtime_environment=False, hosted_pack_management=config.pack_management,
-                       hosted_pack_versions=config.approved_packs)
+                       hosted_pack_versions=config.approved_packs, run_queue_limit=config.run_queue_limit)
     access = HostedProfileAccess(
         WorkerIdentityProvider(config.secret, config.profile_id, config.user_id),
         VerifiedIdentity(ISSUER, config.user_id), tenant, config.public_origin,
