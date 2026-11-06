@@ -5,7 +5,7 @@ description = "Research knowledge base: raw data to markdown, projection, review
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.11,<3",
-    "mat-know-base @ git+https://github.com/theAfish/mat_know_base.git@eb7fbd1cf9e9faaf41878081f6e21a4c434009eb",
+    "mat-know-base @ git+https://github.com/theAfish/mat_know_base.git@9deb5ed1f9d7049eeff267a1a71673aa04996a5e",
     # The converter uses the standalone to_markdown API (removed in 2.x).
     # Intel macOS must avoid the 1.x layout/ONNX closure: coloredlogs ships
     # a .pth hook rejected by the shared-adapter wheel boundary.
