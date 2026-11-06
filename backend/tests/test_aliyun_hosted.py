@@ -115,6 +115,30 @@ def configure(monkeypatch, profile):
         monkeypatch.setenv(name, value)
 
 
+@pytest.mark.parametrize('budget,lease,expected_budget,expected_lease', [
+    (None, None, 3600, 600), ('21600', '300', 21600, 300), ('120', '600', 120, 120),
+])
+def test_hosted_execution_budget_is_independent_of_renewable_vm_lease(
+        tmp_path, monkeypatch, budget, lease, expected_budget, expected_lease):
+    profile = str(uuid4())
+    configure(monkeypatch, profile)
+    for name, value in [('OAW_ALIYUN_RUNTIME_LIFETIME', budget), ('OAW_ALIYUN_RUNTIME_LEASE_SECONDS', lease)]:
+        monkeypatch.delenv(name, raising=False)
+        if value is not None:
+            monkeypatch.setenv(name, value)
+    monkeypatch.setattr(hosted, 'approved_plugins', lambda *args, **kwargs: None)
+    monkeypatch.setattr(hosted, 'create_services', lambda settings, **kwargs:
+        SimpleNamespace(world=SimpleNamespace(list_cards=lambda: []), settings=settings,
+                        runtime=kwargs['runtime_execution_provider']))
+    settings = replace(Settings.for_data_root(tmp_path),
+                       tenant_scope=hosted_scope(str(uuid4()), 'canvas', profile))
+    services = hosted.create_hosted_services(settings)
+    assert services.settings.run_execution_deadline_seconds == expected_budget
+    assert services.runtime.configuration(None)['max_execution_seconds'] == expected_budget
+    assert services.runtime.configuration(None)['lease_seconds'] == expected_lease
+    assert settings.run_execution_deadline_seconds == 3600  # Personal defaults are unchanged.
+
+
 def test_hosted_composition_exposes_only_unavailable_cloud_runtime_until_verified(tmp_path, monkeypatch):
     profile, user = str(uuid4()), str(uuid4())
     configure(monkeypatch, profile)

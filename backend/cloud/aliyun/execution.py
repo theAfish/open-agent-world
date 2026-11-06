@@ -1,7 +1,8 @@
 """Provider-neutral CLI sessions in owned Agent Sandbox VMs.
 
 This is separate from the short-command Sandbox Card: a CLI and its tool relay
-share one bounded VM lifetime. Only the profile's dedicated Volume persists.
+share a renewable VM lease and a finite operation budget. Only the profile's
+dedicated Volume persists.
 """
 from __future__ import annotations
 
@@ -11,14 +12,18 @@ from dataclasses import replace
 import hashlib
 from pathlib import Path
 import shlex
+import time
 
 from backend.agents.execution import RuntimeExecutionPolicy, RuntimeExecutionProvider, RuntimeProcess
 from backend.agents.execution_transport import FRAME_LIMIT, RelayRuntimeExecution, execution_worker_argv
 from backend.errors import ResourceValidationError, RuntimeUnavailableError
 from backend.sandbox.transfers import CHUNK_BYTES
+from backend.sandbox.models import SandboxSecurityError
 from .sandbox import AliyunSandboxBackend
 
 OUTPUT_QUOTA = 128*1024*1024
+DEFAULT_RUNTIME_LIFETIME = 3600
+DEFAULT_RUNTIME_LEASE = 600
 
 
 class _Channel:
@@ -40,15 +45,23 @@ class _Channel:
 
 class SandboxProcess(RuntimeProcess):
     """SDK handles and PIDs stay inside this provider; VM kill owns cleanup."""
-    def __init__(self, backend, value):
+    def __init__(self, backend, value, *, lifetime_seconds=DEFAULT_RUNTIME_LIFETIME):
         self.backend,self.value = backend,value
+        self.lifetime_seconds = lifetime_seconds
         self.stdout,self.stderr = _Channel(),_Channel()
         self.handle,self.monitor = None,None
+        self.renewal,self.command_wait,self.cleanup = None,None,None
+        self.sandbox = None
+        self.failure = None
+        self.ownership_lost = False
+        self.closing = False
         self.closed = False
         self.output_bytes = 0
         self.write_lock,self.close_lock = asyncio.Lock(),asyncio.Lock()
 
     def output(self, channel, text):
+        if self.closing or self.failure is not None:
+            return
         data = text.encode('utf-8')
         self.output_bytes += len(data)
         if self.output_bytes > OUTPUT_QUOTA:
@@ -56,40 +69,108 @@ class SandboxProcess(RuntimeProcess):
         channel.feed(data)
 
     async def start(self, sandbox, operation_id):
+        self.sandbox = sandbox
+        self.started_at = time.monotonic()
+        self.deadline = self.started_at + self.lifetime_seconds
         self.value.update(state='running',command={'id':operation_id,'state':'admitted'})
         self.backend._write(self.value)
         self.handle = await sandbox.commands.run('exec '+shlex.join(execution_worker_argv()),
-            background=True,stdin=True,user='user',cwd='/',timeout=self.backend.settings.lifetime_seconds-5,
+            # This SDK timeout bounds only the output connection. The renewable
+            # VM lease and our absolute operation deadline own resource cleanup.
+            background=True,stdin=True,user='user',cwd='/',timeout=0,
             on_stdout=lambda text:self.output(self.stdout,text),on_stderr=lambda text:self.output(self.stderr,text))
         self.value['command'].update(pid=self.handle.pid,state='running')
         self.backend._write(self.value)
         self.monitor = asyncio.create_task(self._wait())
         self.monitor.add_done_callback(lambda task:task.exception() if not task.cancelled() else None)
 
-    async def _wait(self):
+    async def _command_result(self):
         from e2b.sandbox.commands.command_handle import CommandExitException
         try:
+            result=await self.handle.wait()
+            return result.exit_code
+        except CommandExitException as error:
+            return error.exit_code
+
+    async def _renew(self):
+        lease = self.backend.settings.lifetime_seconds
+        while True:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeUnavailableError(f'Alibaba runtime reached its {self.lifetime_seconds}s execution deadline')
+            await asyncio.sleep(min(lease / 3, remaining))
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeUnavailableError(f'Alibaba runtime reached its {self.lifetime_seconds}s execution deadline')
             try:
-                result=await self.handle.wait()
-                return result.exit_code
-            except CommandExitException as error:
-                return error.exit_code
-        except Exception:
-            error=RuntimeUnavailableError(f'Alibaba runtime transport failed or reached its {self.backend.settings.lifetime_seconds}s session limit; the command was not replayed')
-            self.stdout.reader.set_exception(error)
-            self.stderr.reader.set_exception(error)
-            raise error from None
+                async with asyncio.timeout(min(20, remaining)):
+                    # The same SDK object/VM is renewed; never reconnect or
+                    # create a replacement for a command with unknown effects.
+                    await self.backend._verify_ownership(self.value,self.sandbox)
+                    remaining = self.deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError()
+                    await self.sandbox.set_timeout(max(1,min(lease,int(remaining))))
+            except SandboxSecurityError:
+                self.ownership_lost = True
+                self.value['state'] = 'uncertain'
+                self.backend._write(self.value)
+                raise RuntimeUnavailableError('Alibaba runtime ownership changed; operator reconciliation is required') from None
+            except Exception as error:
+                if time.monotonic() >= self.deadline:
+                    raise RuntimeUnavailableError(f'Alibaba runtime reached its {self.lifetime_seconds}s execution deadline') from None
+                raise RuntimeUnavailableError(f'Alibaba runtime lease renewal failed ({type(error).__name__})') from None
+
+    def _start_cleanup(self):
+        if self.cleanup is None:
+            self.cleanup = asyncio.create_task(self._close())
+            self.cleanup.add_done_callback(lambda task:task.exception() if not task.cancelled() else None)
+        return self.cleanup
+
+    async def _wait(self):
+        self.command_wait = asyncio.create_task(self._command_result())
+        self.renewal = asyncio.create_task(self._renew())
+        failure = None
+        try:
+            done,_ = await asyncio.wait((self.command_wait,self.renewal),return_when=asyncio.FIRST_COMPLETED)
+            if self.renewal in done:
+                await self.renewal
+            return await self.command_wait
+        except Exception as cause:
+            elapsed = time.monotonic() - self.started_at
+            # Raw SDK errors can contain authenticated URLs or remote output.
+            message = str(cause) if isinstance(cause,RuntimeUnavailableError) else (
+                f'Alibaba runtime transport failed after {elapsed:.0f}s ({type(cause).__name__})')
+            failure = RuntimeUnavailableError(message+'; the command was not replayed')
+            self.failure = failure
+            self.stdout.reader.set_exception(failure)
+            self.stderr.reader.set_exception(failure)
         finally:
+            for task in (self.command_wait,self.renewal):
+                task.cancel()
+            await asyncio.gather(self.command_wait,self.renewal,return_exceptions=True)
             self.stdout.reader.feed_eof()
             self.stderr.reader.feed_eof()
+        if failure is not None:
+            # Start after child tasks have stopped, so close never awaits the
+            # monitor while the monitor is awaiting that same cleanup task.
+            if not self.closing:
+                self._start_cleanup()
+            raise failure from None
 
     async def write(self, data):
-        if self.closed or self.handle is None or self.monitor is not None and self.monitor.done():
+        if self.failure is not None:
+            raise self.failure
+        if self.closing or self.closed or self.handle is None or self.monitor is not None and self.monitor.done():
             raise RuntimeUnavailableError('Alibaba runtime transport is closed')
         async with self.write_lock:
             # Avoid a large unary SDK request for binary/base64 file frames.
             # A failed chunk is never submitted again because its outcome is unknown.
             for offset in range(0,len(data),64*1024):
+                if self.failure is not None:
+                    raise self.failure
+                if self.closing:
+                    raise RuntimeUnavailableError('Alibaba runtime transport is closing')
                 await self.handle.send_stdin(data[offset:offset+64*1024],request_timeout=20)
 
     async def readline(self):
@@ -105,9 +186,31 @@ class SandboxProcess(RuntimeProcess):
         return await asyncio.shield(self.monitor)
 
     async def close(self):
+        task = self._start_cleanup()
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await asyncio.shield(task)
+            raise
+        except Exception:
+            # A subsequent explicit close may retry an uncertain disposal.
+            if self.cleanup is task:
+                self.cleanup = None
+            raise
+
+    async def _close(self):
         async with self.close_lock:
             if self.closed:
                 return
+            self.closing = True
+            if self.renewal is not None:
+                self.renewal.cancel()
+                await asyncio.gather(self.renewal,return_exceptions=True)
+            if self.monitor is not None:
+                self.monitor.cancel()
+                await asyncio.gather(self.monitor,return_exceptions=True)
+            if self.ownership_lost:
+                raise SandboxSecurityError('Runtime VM ownership changed; automatic termination is forbidden')
             # Do not release ownership on a mere relay acknowledgement or PID exit.
             await self.backend._join_dispose(self.value)
             self.closed=True
@@ -117,9 +220,6 @@ class SandboxProcess(RuntimeProcess):
                         await self.handle.disconnect()
                 except Exception:
                     pass  # The VM is already confirmed gone.
-            if self.monitor is not None:
-                self.monitor.cancel()
-                await asyncio.gather(self.monitor,return_exceptions=True)
             self.stdout.reader.feed_eof()
             self.stderr.reader.feed_eof()
 
@@ -210,9 +310,15 @@ class AliyunRuntimeExecution(RelayRuntimeExecution):
 
 
 class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
-    def __init__(self,root:Path,settings,*,sdk=None,lifetime_seconds=900,default_permission='workspace-write'):
+    def __init__(self,root:Path,settings,*,sdk=None,lifetime_seconds=DEFAULT_RUNTIME_LIFETIME,
+                 lease_seconds=DEFAULT_RUNTIME_LEASE,default_permission='workspace-write'):
+        if type(lifetime_seconds) is not int or not 60 <= lifetime_seconds <= 86400:
+            raise ValueError('Runtime execution budget must be 60..86400 seconds')
+        if type(lease_seconds) is not int or not 60 <= lease_seconds <= 3600:
+            raise ValueError('Runtime VM lease must be 60..3600 seconds')
         self.root=Path(root)
-        self.settings=replace(settings,lifetime_seconds=lifetime_seconds)
+        self.lifetime_seconds=lifetime_seconds
+        self.settings=replace(settings,lifetime_seconds=min(lease_seconds,lifetime_seconds))
         self.sdk=sdk
         # Operator policy, never a graph/card setting or an inference from remote.
         self.policy=RuntimeExecutionPolicy(isolation='dedicated-vm',default_permission=default_permission)
@@ -220,7 +326,8 @@ class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
     def configuration(self,runtime_id):
         ready=self.settings.workspace_store=='volume' and not self.settings.unavailable_reason
         return {'mode':'remote','configured':ready,'provider':'aliyun.agent-sandbox',
-                'max_execution_seconds':self.settings.lifetime_seconds,
+                'max_execution_seconds':self.lifetime_seconds,
+                'lease_seconds':self.settings.lifetime_seconds,'renewable':True,
                 'default_permission':self.policy.default_permission}
 
     async def open(self,request):
@@ -240,7 +347,7 @@ class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
             await backend._connect(value)  # Enforces profile/request ownership.
             await backend._join_dispose(value)
         backend._apply_network_policy(value,{'network_enabled':True})
-        transport=SandboxProcess(backend,value)
+        transport=SandboxProcess(backend,value,lifetime_seconds=self.lifetime_seconds)
         ownership_verified=False
         try:
             sandbox=await backend._ensure_remote(value)
