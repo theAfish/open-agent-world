@@ -11,6 +11,10 @@ For an independent Card App, use the [developer guide](../developers/index.md).
 4. Run the smallest relevant checks, then the subsystem tests required by the risk.
 5. Update the affected guide and open a PR against `dev`.
 
+For changes intended for the **Ali integration branch**, instead use the
+[Ali PR and Private Preview guide](../../.github/ALI_PR_GUIDE.md): it explains
+the separate PR target, automated shared Preview, SSH access and reviewer workflow.
+
 Preserve security, authorization, persistence and lifecycle assertions. Report
 which checks ran and what remains unverified. Do not infer installed-desktop,
 production or native isolation acceptance from unit tests or a browser build.

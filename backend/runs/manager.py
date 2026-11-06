@@ -4,10 +4,11 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from contextvars import ContextVar
+from contextvars import Context, ContextVar
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any
+from uuid import uuid4
 
 from backend.agents import (
     AgentConfig,
@@ -18,11 +19,15 @@ from backend.agents import (
     ModelConnectionResolver,
     RuntimeProvider,
 )
-from backend.errors import RuntimeUnavailableError
+from backend.card_state import DEFAULT_SESSION, state_session
+from backend.config import DEFAULT_RUN_QUEUE_LIMIT
+from backend.errors import DomainError, PermissionDeniedError, RuntimeUnavailableError
 from backend.legions.runtime import group_context, member_team
 from backend.events.hub import EventHub
 from backend.events.models import EventType, RuntimeEvent
+from backend.idempotency import IdempotencyStore
 from backend.plugins import PluginRegistry
+from backend.request_context import RequestContext, TenantScope, bind_request_context, require_request_context
 from backend.state import StateContext, StateScope, StateStore
 from backend.world.models import Card, CardPatch
 from backend.world.store import WorldStore
@@ -38,6 +43,7 @@ from .models import (
 )
 from .activity import activity_update
 from .store import RunStore
+from .submissions import RunSubmission
 from .trace import public_tool_payload
 
 logger = logging.getLogger(__name__)
@@ -110,11 +116,18 @@ class RunManager:
     conversation_event: Callable[[AgentEvent, RunRecord], Awaitable[str | None]] | None = None
     shutting_down: bool = False
     require_managed_execution: bool = False
+    tenant_scope: TenantScope | None = None
+    run_queue_limit: int = DEFAULT_RUN_QUEUE_LIMIT
+    _dispatcher: asyncio.Task[None] | None = None
+    _dispatch_enabled: bool = False
+    _dispatch_wakeup: asyncio.Event = field(default_factory=asyncio.Event)
 
     def __post_init__(self):
         import math
         if any(not math.isfinite(value) or value <= 0 for value in (self.cleanup_timeout_seconds, self.execution_deadline_seconds)):
             raise ValueError('Run execution and cleanup deadlines must be finite positive seconds')
+        if type(self.run_queue_limit) is not int or self.run_queue_limit <= 0:
+            raise ValueError("run_queue_limit must be a positive integer")
 
     @property
     def current_context(self) -> InvocationContext | None:
@@ -205,7 +218,10 @@ class RunManager:
                 recovery_receipts=visible_receipts)
             self._terminal_done.setdefault(record.run_id, asyncio.Event()).set()
             await self._publish_run(record, EventType.RUN_INTERRUPTED)
+        pending = set(self.store.pending_submissions())
         for record in self.list_runs():
+            if record.run_id in pending:
+                continue
             from .reasoning import RunReasoning
             RunReasoning(self.state, record.run_id).interrupt()
             from .invocation_logs import RunInvocationLogs
@@ -217,9 +233,10 @@ class RunManager:
                     cleanup_reason='Backend restarted before execution settled; external termination is unconfirmed')
 
     async def shutdown(self) -> None:
-        self.shutting_down = True
-        records = [record for record in self.list_runs() if record.status not in TERMINAL_RUN_STATUSES
-                   or record.lifecycle.get('cleanup') in {'pending', 'failed'}]
+        await self.stop_dispatcher()
+        pending = set(self.store.pending_submissions())
+        records = [record for record in self.list_runs() if record.run_id not in pending and (
+                   record.status not in TERMINAL_RUN_STATUSES or record.lifecycle.get('cleanup') in {'pending', 'failed'})]
         results = await asyncio.gather(*(self.cancel_run(record.run_id) for record in records), return_exceptions=True)
         for record, result in zip(records, results):
             if isinstance(result, BaseException):
@@ -277,91 +294,366 @@ class RunManager:
         initial_lifecycle: Mapping[str, Any] | None = None,
         resume_external_work: bool = False,
         task_prompt: str | None = None,
+        fresh_context: bool = False,
+        idempotency_key: str | None = None,
     ) -> RunRecord:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Run prompt must be a non-empty string")
         lock = self._start_locks.setdefault(agent_id, asyncio.Lock())
         async with lock:
+            def create_record() -> tuple[RunRecord, Card]:
+                self._assert_agent_accepts_runs(agent_id)
+                card = self._agent_card(agent_id)
+                provider_id = self._provider_id(card)
+                self._check_concurrency(card)
+                run_parent_id = parent_run_id
+                if not detached and run_parent_id is None and self.current_context is not None:
+                    run_parent_id = self.current_context.run_id
+                run_task_id, run_context_id = self._resolve_lineage(
+                    parent_run_id=run_parent_id, task_id=task_id, context_id=context_id,
+                    detached=detached, fresh_context=fresh_context,
+                    recovering_external=resume_external_work and caller_kind == "delegation",
+                )
+                record = self.store.create(
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    runtime_provider_id=provider_id,
+                    caller_kind=caller_kind,
+                    caller_id=caller_id,
+                    parent_run_id=run_parent_id,
+                    task_id=run_task_id,
+                    context_id=run_context_id,
+                )
+                return record, card
+
+            if idempotency_key is None:
+                record, card = create_record()
+            else:
+                def authorize() -> None:
+                    self.world.require_available_card(self._agent_card(agent_id))
+
+                def reserve() -> dict[str, str]:
+                    record, _ = create_record()
+                    return {"run_id": record.run_id}
+
+                # Commit the accepted Run ID with its row, before starting the
+                # provider. Replays return before checking execution capacity.
+                result = IdempotencyStore(self.store.database).execute(
+                    require_request_context(),
+                    operation=f"agent.run.create.v1:{agent_id}",
+                    key=idempotency_key,
+                    payload={
+                        "prompt": prompt, "task_id": task_id, "parent_run_id": parent_run_id,
+                        "detached": detached, "fresh_context": fresh_context, "context_id": context_id,
+                    },
+                    authorize=authorize,
+                    mutate=reserve,
+                )
+                record = self.get_run(result.value["run_id"])
+                if result.replayed:
+                    return record
+                card = self._agent_card(agent_id)
+            return await self._launch_run(
+                record, card, prompt, independent=detached, task_prompt=task_prompt,
+                initial_lifecycle=initial_lifecycle,
+            )
+
+    async def submit_run(
+        self, agent_id: str, prompt: str, *, task_id: str | None = None,
+        parent_run_id: str | None = None, detached: bool = False, fresh_context: bool = False,
+        idempotency_key: str | None = None, state_session_id: str | None = None,
+    ) -> RunRecord:
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Run prompt must be a non-empty string")
+        context = require_request_context()
+        if self.tenant_scope is not None and context.tenant != self.tenant_scope:
+            raise PermissionDeniedError("Run submission belongs to another profile")
+
+        def authorize() -> None:
+            self.world.require_available_card(self._agent_card(agent_id))
+
+        def reserve() -> dict[str, str]:
             self._assert_agent_accepts_runs(agent_id)
+            if self.shutting_down:
+                raise RuntimeUnavailableError("The profile is shutting down; retry submission when it is ready")
+            if self.store.pending_count() >= self.run_queue_limit:
+                raise RuntimeUnavailableError("The profile's Run queue is full; retry after pending Runs are processed")
             card = self._agent_card(agent_id)
-            provider_id = self._provider_id(card)
-            self._check_concurrency(card)
-            if detached and parent_run_id is not None:
-                raise ValueError("a detached Run cannot also specify parent_run_id")
-            if (
-                not detached
-                and parent_run_id is None
-                and self.current_context is not None
-            ):
-                parent_run_id = self.current_context.run_id
-            if parent_run_id is not None:
-                parent = self.get_run(parent_run_id)
-                ancestor = parent
-                recovering_external = resume_external_work and caller_kind == "delegation"
-                while ancestor:
-                    recovering_external = recovering_external or bool(ancestor.lifecycle.get("background_job_notification") and ancestor.lifecycle.get("work_continuation"))
-                    user_stopped = ancestor.lifecycle.get('cancellation_requested') and ancestor.lifecycle.get('cancellation_origin') != 'shutdown'
-                    if user_stopped or (not recovering_external and ancestor.status in {RunStatus.CANCELLED, RunStatus.INTERRUPTED, RunStatus.FAILED}):
-                        raise RuntimeUnavailableError('The parent Run has ended; dependent work cannot be admitted')
-                    ancestor = self.get_run(ancestor.parent_run_id) if ancestor.parent_run_id else None
-                task_id = task_id or parent.task_id
-                context_id = context_id or parent.context_id
+            resolved_task, resolved_context = self._resolve_lineage(
+                parent_run_id=parent_run_id, task_id=task_id, context_id=None, detached=detached,
+                fresh_context=fresh_context, require_active=True,
+            )
             record = self.store.create(
-                agent_id=agent_id,
-                run_id=run_id,
-                runtime_provider_id=provider_id,
-                caller_kind=caller_kind,
-                caller_id=caller_id,
-                parent_run_id=parent_run_id,
-                task_id=task_id,
-                context_id=context_id,
+                agent_id=agent_id, runtime_provider_id=self._provider_id(card), caller_kind="user",
+                caller_id=context.actor.id, parent_run_id=parent_run_id, task_id=resolved_task, context_id=resolved_context,
             )
-            record = self.store.update_lifecycle(
-                record.run_id,
-                **{
-                    "owner_kind": "agent",
-                    "owner_id": agent_id,
-                    "cancellation_policy": "independent" if detached or parent_run_id is None else "dependent",
-                    "execution": "running",
-                    "holds_capacity": True,
-                    "cleanup": "none",
-                    "tool_metrics": {"started": 0, "completed": 0, "by_name": {}},
-                    "tool_calls": [],
-                    "model_requests": [],
-                    **dict(initial_lifecycle or {}),
-                },
+            self.store.update_lifecycle(
+                record.run_id, owner_kind="agent", owner_id=agent_id, execution="queued",
+                cancellation_policy="independent" if parent_run_id is None else "dependent",
+                holds_capacity=False, cleanup="none",
             )
-            team = group_context(self.world, self.state, card)
-            state_context = self._state_context(record)
-            self.state.set(state_context.local_scope, "legion_context", team or {})
-            self.state.set(
-                state_context.local_scope,
-                "input",
-                prompt,
-                actor_id=agent_id,
-                run_id=record.run_id,
+            self.store.enqueue(record.run_id, RunSubmission(prompt, context, state_session_id))
+            return {"run_id": record.run_id}
+
+        async with self._start_locks.setdefault(agent_id, asyncio.Lock()):
+            if idempotency_key is None:
+                with self.store.database.transaction(immediate=True):
+                    authorize()
+                    result = reserve()
+            else:
+                receipt = IdempotencyStore(self.store.database).execute(
+                    context, operation=f"agent.run.create.v1:{agent_id}", key=idempotency_key,
+                    payload={
+                        "dispatch": "queued", "prompt": prompt, "task_id": task_id, "parent_run_id": parent_run_id,
+                        "detached": detached, "fresh_context": fresh_context, "state_session_id": state_session_id,
+                    },
+                    authorize=authorize, mutate=reserve,
+                )
+                result = receipt.value
+                if receipt.replayed:
+                    return self.get_run(result["run_id"])
+            record = self.get_run(result["run_id"])
+            try:
+                await self._publish_run(record, EventType.RUN_CREATED)
+                await self._publish_submission_status(record)
+            finally:
+                self._wake_dispatcher()
+            return record
+
+    def submission_owner_matches(self, run_id: str, context: RequestContext) -> bool:
+        submission = self.store.submission(run_id)
+        if submission is None:
+            return False
+        owner = submission.context
+        return (owner.tenant == context.tenant and owner.actor.kind == context.actor.kind
+                and owner.actor.id == context.actor.id)
+
+    def start_dispatcher(self) -> None:
+        self._dispatch_enabled = True
+        if self.store.pending_submissions():
+            self._wake_dispatcher()
+
+    def _wake_dispatcher(self) -> None:
+        self._dispatch_wakeup.set()
+        if self._dispatch_enabled and not self.shutting_down and (self._dispatcher is None or self._dispatcher.done()):
+            self._dispatcher = asyncio.create_task(self._dispatch_submissions(), context=Context(), name="run-dispatcher")
+
+    async def stop_dispatcher(self) -> None:
+        self.shutting_down = True
+        self._dispatch_enabled = False
+        self._dispatch_wakeup.set()
+        if self._dispatcher is not None:
+            try:
+                await self._dispatcher
+            finally:
+                self._dispatcher = None
+
+    async def _dispatch_submissions(self) -> None:
+        while not self.shutting_down:
+            self._dispatch_wakeup.clear()
+            try:
+                if not await self.dispatch_pending():
+                    return
+            except Exception:
+                logger.exception("Could not read pending Run submissions")
+            try:
+                await asyncio.wait_for(self._dispatch_wakeup.wait(), timeout=1.0)
+            except TimeoutError:
+                pass
+
+    async def dispatch_pending(self) -> bool:
+        pending = self.store.pending_submissions()
+        for run_id in pending:
+            if self.shutting_down:
+                break
+            try:
+                await self._dispatch_one(run_id)
+            except Exception:
+                logger.exception("Could not process queued Run %s", run_id)
+            # A large backlog must not monopolize the profile event loop.
+            await asyncio.sleep(0)
+        return bool(pending)
+
+    async def _dispatch_one(self, run_id: str) -> None:
+        record = self.get_run(run_id)
+        async with self._start_locks.setdefault(record.agent_id, asyncio.Lock()):
+            if self.shutting_down or not self.store.is_pending(run_id):
+                return
+            try:
+                submission = self.store.submission(run_id)
+                if submission is None:
+                    return
+                if self.tenant_scope is not None and submission.context.tenant != self.tenant_scope:
+                    raise PermissionDeniedError("Run submission belongs to another profile")
+                self._assert_agent_accepts_runs(record.agent_id)
+                card = self._agent_card(record.agent_id)
+                self.world.require_available_card(card)
+                if self._provider_id(card) != record.runtime_provider_id:
+                    raise RuntimeUnavailableError("The Agent runtime changed after submission")
+                if record.parent_run_id is not None:
+                    parent = self._admissible_parent(record.parent_run_id, require_active=True)
+                    if parent.status is RunStatus.CREATED:
+                        await self._publish_submission_status(record)
+                        return
+                if submission.state_session_id not in (None, DEFAULT_SESSION):
+                    with self.store.database.locked() as connection:
+                        if connection.execute("SELECT 1 FROM conversation_sessions WHERE id=?",
+                                              (submission.state_session_id,)).fetchone() is None:
+                            raise RuntimeUnavailableError("The selected Conversation session no longer exists")
+            except DomainError as error:
+                await self._finish_pending(run_id, RunStatus.FAILED, error=error.message)
+                return
+
+            try:
+                self._check_concurrency(card)
+            except RuntimeUnavailableError:
+                # Busy, paused, or still cleaning up. Leave the attempt pending.
+                await self._publish_submission_status(record)
+                return
+            if not self.store.claim_submission(run_id):
+                return
+            with bind_request_context(submission.context), state_session(submission.state_session_id):
+                try:
+                    await self._launch_run(record, card, submission.prompt, independent=record.parent_run_id is None,
+                                           queued=True)
+                except (Exception, asyncio.CancelledError) as error:
+                    current = self.get_run(run_id)
+                    if current.status not in TERMINAL_RUN_STATUSES and run_id not in self._runtime_tasks:
+                        status = RunStatus.INTERRUPTED if isinstance(error, asyncio.CancelledError) else RunStatus.FAILED
+                        with self.store.database.transaction(immediate=True):
+                            self.store.update_status(run_id, status, error="Queued Run could not be started")
+                            current = self.store.update_lifecycle(
+                                run_id, execution="finished", holds_capacity=False, cleanup="none",
+                            )
+                        self._release_agent_slot(run_id)
+                        if event := self._execution_done.get(run_id):
+                            event.set()
+                        self._terminal_done.setdefault(run_id, asyncio.Event()).set()
+                        await self._publish_run(current, _RUN_EVENTS[status])
+                        await self._publish_submission_status(current)
+                    raise
+
+    async def _finish_pending(
+        self, run_id: str, status: RunStatus, *, error: str | None = None,
+    ) -> RunRecord | None:
+        record = self.store.finish_pending(run_id, status, error=error)
+        if record is not None:
+            self._terminal_done.setdefault(run_id, asyncio.Event()).set()
+            await self._publish_run(record, _RUN_EVENTS[status])
+            await self._publish_submission_status(record)
+        return record
+
+    def _agent_operational_status(self, agent_id: str) -> AgentStatus:
+        if self._occupied_agent_runs(agent_id):
+            return AgentStatus.RUNNING
+        return AgentStatus.WAITING if self.store.has_pending_for_agent(agent_id) else AgentStatus.IDLE
+
+    async def _publish_submission_status(self, record: RunRecord) -> None:
+        card = self.world.maybe_get_card(record.agent_id)
+        if card is not None:
+            status = self._agent_operational_status(record.agent_id)
+            if card.status != status:
+                await self._publish_agent_operational(record.agent_id, status, record.run_id)
+
+    def _resolve_lineage(
+        self, *, parent_run_id: str | None, task_id: str | None, context_id: str | None,
+        detached: bool, fresh_context: bool, recovering_external: bool = False, require_active: bool = False,
+    ) -> tuple[str | None, str | None]:
+        if detached and parent_run_id is not None:
+            raise ValueError("a detached Run cannot also specify parent_run_id")
+        # An isolated context cannot name a real Conversation session.
+        resolved_context = f"isolated:{uuid4()}" if fresh_context else context_id
+        if parent_run_id is None:
+            return task_id, resolved_context
+        parent = self._admissible_parent(parent_run_id, recovering_external, require_active=require_active)
+        return task_id or parent.task_id, resolved_context or parent.context_id
+
+    def _admissible_parent(
+        self, parent_run_id: str, recovering_external: bool = False, *, require_active: bool = False,
+    ) -> RunRecord:
+        parent = self.get_run(parent_run_id)
+        ancestor = parent
+        while ancestor:
+            recovering_external = recovering_external or bool(
+                ancestor.lifecycle.get("background_job_notification") and ancestor.lifecycle.get("work_continuation")
             )
-            self._execution_done[record.run_id] = asyncio.Event()
-            self._terminal_done[record.run_id] = asyncio.Event()
-            self._occupied_runs[record.run_id] = agent_id
+            user_stopped = (
+                ancestor.lifecycle.get("cancellation_requested")
+                and ancestor.lifecycle.get("cancellation_origin") != "shutdown"
+            )
+            ended = ancestor.status in (
+                TERMINAL_RUN_STATUSES if require_active
+                else {RunStatus.CANCELLED, RunStatus.INTERRUPTED, RunStatus.FAILED}
+            )
+            if user_stopped or (ended and (require_active or not recovering_external)):
+                raise RuntimeUnavailableError("The parent Run has ended; dependent work cannot be admitted")
+            ancestor = self.get_run(ancestor.parent_run_id) if ancestor.parent_run_id else None
+        return parent
+
+    async def _launch_run(
+        self, record: RunRecord, card: Card, prompt: str, *, independent: bool,
+        task_prompt: str | None = None, initial_lifecycle: Mapping[str, Any] | None = None,
+        queued: bool = False,
+    ) -> RunRecord:
+        agent_id = record.agent_id
+        record = self.store.update_lifecycle(
+            record.run_id,
+            **{
+                "owner_kind": "agent",
+                "owner_id": agent_id,
+                "cancellation_policy": "independent" if independent or record.parent_run_id is None else "dependent",
+                "execution": "running",
+                "holds_capacity": True,
+                "cleanup": "none",
+                "tool_metrics": {"started": 0, "completed": 0, "by_name": {}},
+                "tool_calls": [],
+                "model_requests": [],
+                **dict(initial_lifecycle or {}),
+            },
+        )
+        team = group_context(self.world, self.state, card)
+        state_context = self._state_context(record)
+        self.state.set(state_context.local_scope, "legion_context", team or {})
+        self.state.set(
+            state_context.local_scope,
+            "input",
+            prompt,
+            actor_id=agent_id,
+            run_id=record.run_id,
+        )
+        self._execution_done[record.run_id] = asyncio.Event()
+        self._terminal_done.setdefault(record.run_id, asyncio.Event())
+        self._occupied_runs[record.run_id] = agent_id
+        if not queued:
             await self._publish_run(record, EventType.RUN_CREATED)
-            record = await self._transition_run_admitted(
-                record.run_id, RunStatus.RUNNING
-            )
-            await self._publish_agent_operational(
-                agent_id, "running", record.run_id, started=True
-            )
-            # Register execution before releasing admission. Otherwise deletion
-            # can reserve this Agent, cancel the durable Run, and still have this
-            # method launch an untracked provider coroutine afterward.
-            task = asyncio.create_task(
-                self._execute(record, card, RuntimeInput(prompt=prompt, task_prompt=task_prompt)),
-                name=f"run:{record.run_id}",
-            )
-            self._runtime_tasks[record.run_id] = task
-            task.add_done_callback(
-                lambda completed, run_id=record.run_id: self._task_finished(run_id)
-            )
+        record = self.get_run(record.run_id)
+        if record.status is not RunStatus.CREATED:
+            return record
+        record = await self._transition_run_admitted(
+            record.run_id, RunStatus.RUNNING
+        )
+        record = self.get_run(record.run_id)
+        if record.status is not RunStatus.RUNNING:
+            return record
+        await self._publish_agent_operational(
+            agent_id, "running", record.run_id, started=True
+        )
+        record = self.get_run(record.run_id)
+        if record.status is not RunStatus.RUNNING:
+            return record
+        if queued and record.parent_run_id is not None:
+            self._admissible_parent(record.parent_run_id, require_active=True)
+        # Register execution before releasing admission. Otherwise deletion
+        # can reserve this Agent, cancel the durable Run, and still have this
+        # method launch an untracked provider coroutine afterward.
+        task = asyncio.create_task(
+            self._execute(record, card, RuntimeInput(prompt=prompt, task_prompt=task_prompt)),
+            name=f"run:{record.run_id}",
+        )
+        self._runtime_tasks[record.run_id] = task
+        task.add_done_callback(
+            lambda completed, run_id=record.run_id: self._task_finished(run_id)
+        )
         return record
 
     async def wait_execution(self, run_id: str) -> RunRecord:
@@ -511,7 +803,7 @@ class RunManager:
         elif target in TERMINAL_RUN_STATUSES:
             await self._publish_agent_operational(
                 record.agent_id,
-                "running" if self._occupied_agent_runs(record.agent_id) else "idle",
+                self._agent_operational_status(record.agent_id),
                 run_id,
             )
         return record
@@ -529,6 +821,15 @@ class RunManager:
         self, run_id: str, *, propagate: bool
     ) -> RunRecord:
         current = self.store.get(run_id)
+        if self.store.is_pending(run_id):
+            if self.shutting_down:
+                return current
+            if pending := await self._finish_pending(run_id, RunStatus.CANCELLED):
+                if propagate:
+                    for child in self.list_child_runs(run_id):
+                        if child.lifecycle.get('cancellation_policy', 'dependent') == 'dependent':
+                            await self.cancel_run(child.run_id)
+                return pending
         if current.status in TERMINAL_RUN_STATUSES and current.lifecycle.get('cleanup') not in {'pending', 'failed', 'uncertain'}:
             # Explicit Stop also revokes pending continuations of a finished turn.
             if not self.shutting_down:
@@ -584,7 +885,7 @@ class RunManager:
                 termination_scope='provider-owned execution; remote side effects are not inferred')
             self._release_settled_capacity(run_id)
             await self._publish_agent_operational(
-                current.agent_id, "running" if self._occupied_agent_runs(current.agent_id) else "idle", run_id)
+                current.agent_id, self._agent_operational_status(current.agent_id), run_id)
         pending = self._cleanup_tasks.get(run_id)
         if pending is not None and pending.done() and (pending.cancelled() or pending.exception() is not None):
             self._cleanup_tasks.pop(run_id, None)
@@ -616,6 +917,9 @@ class RunManager:
 
     async def cancel_agent_runs(self, agent_id: str) -> list[RunRecord]:
         runs = self.list_runs(agent_id=agent_id)
+        if self.shutting_down:
+            pending = set(self.store.pending_submissions())
+            runs = [record for record in runs if record.run_id not in pending]
         if not runs:
             return []
         active_run_ids = {
@@ -766,7 +1070,7 @@ class RunManager:
         executing = self._occupied_agent_runs(agent_id)
         return replace(
             info,
-            status=AgentStatus.RUNNING if executing else AgentStatus.IDLE,
+            status=self._agent_operational_status(agent_id),
             active_run_id=executing[0].run_id if executing else None,
         )
 
@@ -1019,7 +1323,7 @@ class RunManager:
                 execution_done.set()
             await self._publish_agent_operational(
                 record.agent_id,
-                "running" if self._occupied_agent_runs(record.agent_id) else "idle",
+                self._agent_operational_status(record.agent_id),
                 record.run_id,
             )
 
@@ -1102,6 +1406,7 @@ class RunManager:
             # Successful terminal output has already been checkpointed once
             # before the terminal transition; release the ephemeral overlay.
             self._live_output.pop(run_id, None)
+        self._dispatch_wakeup.set()
         if self.execution_settled is not None:
             self.execution_settled()
 

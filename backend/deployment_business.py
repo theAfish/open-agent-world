@@ -6,6 +6,8 @@ from backend.document_transformations import TransformationRequest
 from backend.api.dependencies import get_services
 from backend.plugins.deployment import default_deployment, merged_surfaces, resolve_surface
 from backend.publication_scope import PRIVATE_FIELDS, PublicationScope, business_mutation, public_value
+from backend.request_context import require_request_context
+from backend.runs import TERMINAL_RUN_STATUSES
 from backend.world.models import CardCreate, CardPatch, EdgeCreate
 
 MANAGED_CONFIG = PRIVATE_FIELDS | {"runtime_provider_id", "workspace_layout", "plugin_directories"}
@@ -84,16 +86,62 @@ def business_router(manifest):
         return value
 
     @router.post("/agents/{agent_id}/run", status_code=202)
-    async def run(agent_id: str, request: runtime.AgentRunRequest, services=Depends(get_services)):
+    async def run(agent_id: str, request: runtime.AgentRunRequest, services=Depends(get_services),
+                  idempotency_key: runtime.AgentRunIdempotencyKey = None):
         require(agent_id, services)
         if request.parent_run_id is not None or request.task_id is not None:
             raise HTTPException(403, "Run ownership is assigned by the application")
-        return await runtime.run_agent(agent_id, request, services)
+        return await runtime.run_agent(agent_id, request, services, idempotency_key=idempotency_key)
 
     @router.post("/agents/{agent_id}/stop")
     async def stop(agent_id: str, services=Depends(get_services)):
         require(agent_id, services)
+        manager = services._require_run_manager()
+        context = require_request_context()
+        for record in manager.list_runs(agent_id=agent_id):
+            if (record.status in TERMINAL_RUN_STATUSES
+                    and not manager.execution_in_progress(record.run_id)
+                    and record.lifecycle.get("cleanup") not in {"pending", "failed", "uncertain"}):
+                continue
+            submission = manager.store.submission(record.run_id)
+            if submission is not None:
+                owner = submission.context
+                if (owner.tenant != context.tenant or owner.actor.kind != context.actor.kind
+                        or owner.actor.id != context.actor.id):
+                    raise HTTPException(409, "Another caller has work on this Agent; cancel your individual Run")
         return await runtime.stop_agent(agent_id, services)
+
+    def require_direct_run(run_id, services):
+        manager = services._require_run_manager()
+        run = manager.get_run(run_id)
+        if (run.parent_run_id is not None or run.caller_kind != "user"
+                or not manager.submission_owner_matches(run_id, require_request_context())):
+            raise HTTPException(404, "This Run is not part of the caller's published workspace")
+        require(run.agent_id, services)
+        services._require_agent(run.agent_id)
+        return run
+
+    def direct_run_status(run):
+        # Direct submissions expose progress, never raw inputs, model requests,
+        # provider error details, or another caller's execution metadata.
+        value = run.model_dump(mode="json")
+        return {
+            **{key: value[key] for key in (
+                "run_id", "agent_id", "status", "created_at", "updated_at", "started_at", "finished_at",
+            )},
+            "lifecycle": {key: value["lifecycle"][key] for key in (
+                "execution", "holds_capacity", "cleanup", "cancellation_requested",
+            ) if key in value["lifecycle"]},
+        }
+
+    @router.get("/runs/{run_id}")
+    async def direct_run(run_id: str, services=Depends(get_services)):
+        return direct_run_status(require_direct_run(run_id, services))
+
+    @router.post("/runs/{run_id}/cancel")
+    async def cancel_direct_run(run_id: str, services=Depends(get_services)):
+        require_direct_run(run_id, services)
+        return direct_run_status(await runtime.cancel_run(run_id, services))
 
     @router.patch("/nodes/{card_id}")
     async def configure(card_id: str, request: CardPatch, services=Depends(get_services)):

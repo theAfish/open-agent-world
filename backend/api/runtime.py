@@ -3,14 +3,14 @@ from __future__ import annotations
 from pathlib import PurePath
 from dataclasses import fields
 from typing import Annotated, Literal
-from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from backend.api.dependencies import get_services
+from backend.errors import RuntimeUnavailableError
 from backend.services import ApplicationServices
 from backend.runs import RunRecord
 from backend.sandbox.settings import SandboxSettingsUpdate, SandboxSettingsStatus, SandboxSettingsStore
@@ -116,6 +116,7 @@ class AgentRunRequest(BaseModel):
     detached: bool = False
     # Run in a new agent context instead of the Agent's shared default history.
     fresh_context: bool = False
+    enqueue: bool = False
 
     @model_validator(mode="after")
     def validate_lineage(self) -> "AgentRunRequest":
@@ -187,27 +188,38 @@ async def get_agent(
     }
 
 
+AgentRunIdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key")]
+
+
 @router.post("/agents/{agent_id}/run", status_code=status.HTTP_202_ACCEPTED)
 async def run_agent(
     agent_id: str,
     request: AgentRunRequest,
     services: ApplicationServices = Depends(get_services),
+    idempotency_key: AgentRunIdempotencyKey = None,
 ) -> dict[str, object]:
-    # The prefix keeps it from ever naming a real conversation session.
-    context_id = f"isolated:{uuid4()}" if request.fresh_context else None
+    if request.enqueue:
+        return await services.submit_agent_run(
+            agent_id, request.prompt, task_id=request.task_id,
+            parent_run_id=request.parent_run_id, detached=request.detached,
+            fresh_context=request.fresh_context, idempotency_key=idempotency_key,
+        )
     if (
         request.task_id is None
         and request.parent_run_id is None
         and not request.detached
     ):
-        return await services.run_agent(agent_id, request.prompt, context_id=context_id)
+        return await services.run_agent(
+            agent_id, request.prompt, fresh_context=request.fresh_context, idempotency_key=idempotency_key,
+        )
     run = await services._require_run_manager().start_run(
         agent_id,
         request.prompt,
         task_id=request.task_id,
         parent_run_id=request.parent_run_id,
         detached=request.detached,
-        context_id=context_id,
+        fresh_context=request.fresh_context,
+        idempotency_key=idempotency_key,
     )
     return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
@@ -296,7 +308,10 @@ async def cancel_run(
     run_id: str,
     services: ApplicationServices = Depends(get_services),
 ) -> RunRecord:
-    return await services._require_run_manager().cancel_run(run_id)
+    manager = services._require_run_manager()
+    if manager.shutting_down:
+        raise RuntimeUnavailableError("The profile is shutting down; retry cancellation when it is ready")
+    return await manager.cancel_run(run_id)
 
 
 @router.post("/agents/{agent_id}/stop")
@@ -304,6 +319,8 @@ async def stop_agent(
     agent_id: str,
     services: ApplicationServices = Depends(get_services),
 ) -> dict[str, object]:
+    if services._require_run_manager().shutting_down:
+        raise RuntimeUnavailableError("The profile is shutting down; retry Stop when it is ready")
     return await services.stop_agent(agent_id)
 
 

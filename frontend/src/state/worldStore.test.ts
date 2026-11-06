@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
+import * as hostedAuth from "../auth/hostedSession";
 import type { LegionSummary, WorldCard, WorldEdge, WorldSnapshot } from "../types/world";
 import { buildCardDraft } from "./helpers";
 import { TEST_CATALOG } from "./catalog.fixture";
@@ -80,6 +81,37 @@ describe("authoritative world synchronization", () => {
       historyBusy: false,
       positionCommitBusy: false,
     });
+  });
+
+  it.each([["idle", "waiting"], ["running", "running"]])(
+    "shows a queued hosted Run on a %s Agent as %s and keeps Stop available", async (initial, expected) => {
+      vi.spyOn(hostedAuth, "isHosted").mockReturnValue(true);
+      vi.spyOn(worldApi, "runAgent").mockResolvedValue({ run_id: "queued-run" });
+      const stop = vi.spyOn(worldApi, "stopAgent").mockResolvedValue({});
+      const agent = { ...card("agent", "agent"), status: initial };
+      useWorldStore.setState({ cards: [agent] });
+
+      await useWorldStore.getState().runAgent(agent.id, "Analyze the file");
+      expect(useWorldStore.getState().cards[0].status).toBe(expected);
+      await useWorldStore.getState().stopAgent(agent.id);
+      expect(stop).toHaveBeenCalledWith(agent.id);
+      expect(useWorldStore.getState().cards[0].status).toBe("idle");
+    },
+  );
+
+  it("keeps a terminal hosted status received before the submission response", async () => {
+    vi.spyOn(hostedAuth, "isHosted").mockReturnValue(true);
+    const receipt = deferred<Record<string, unknown>>();
+    vi.spyOn(worldApi, "runAgent").mockReturnValue(receipt.promise);
+    const agent = { ...card("agent", "agent"), status: "idle" };
+    useWorldStore.setState({ cards: [agent] });
+
+    const submitting = useWorldStore.getState().runAgent(agent.id, "Finish quickly");
+    const finished = { ...agent, revision: 5 };
+    useWorldStore.setState({ cards: [finished] });
+    receipt.resolve({ run_id: "finished-run" });
+    await submitting;
+    expect(useWorldStore.getState().cards[0]).toBe(finished);
   });
 
   it("deletes a large selection in one request and redoes it as one transaction", async () => {

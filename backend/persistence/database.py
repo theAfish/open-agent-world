@@ -188,6 +188,14 @@ CREATE INDEX IF NOT EXISTS runs_agent_idx ON runs (agent_id, created_at);
 CREATE INDEX IF NOT EXISTS runs_parent_idx ON runs (parent_run_id, created_at);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs (task_id, created_at);
 
+-- Private input and identity for opt-in direct Run dispatch.
+CREATE TABLE IF NOT EXISTS run_submissions (
+    run_id TEXT PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+    state TEXT NOT NULL CHECK(state IN ('pending', 'claimed', 'closed')),
+    input_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS run_submissions_state_idx ON run_submissions(state);
+
 -- A small, pageable directory of observable Run activity. Native invocation
 -- and thinking bodies remain in Run state; public-only events keep their
 -- sanitized body here so rotating the live preview never deletes history.

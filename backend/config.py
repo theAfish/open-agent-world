@@ -9,6 +9,9 @@ from backend import official_marketplace
 from backend.request_context import LOCAL_TENANT, TenantScope
 
 
+DEFAULT_RUN_QUEUE_LIMIT = 128
+
+
 def _default_data_root() -> Path:
     configured = os.environ.get("OPEN_AGENT_WORLD_DATA_ROOT")
     if configured:
@@ -47,6 +50,7 @@ class Settings:
     inherit_runtime_environment: bool = True
     hosted_pack_management: bool = False
     hosted_pack_versions: tuple[dict, ...] = ()
+    run_queue_limit: int = DEFAULT_RUN_QUEUE_LIMIT
 
     @classmethod
     def from_environment(cls) -> "Settings":

@@ -847,17 +847,20 @@ class ApplicationServices:
 
         if self.plugin_bootstrap is not None:
             self.plugin_bootstrap.enqueue()
+        manager.start_dispatcher()
 
     async def shutdown(self) -> None:
         # Lifecycle shutdown drains providers without cancelling scheduled checks
         # whose originating turns already finished successfully.
-        self._require_run_manager().shutting_down = True
+        manager = self._require_run_manager()
+        manager.shutting_down = True
         failures = []
         async def drain(operation):
             try:
                 await operation
             except BaseException as error:
                 failures.append(error)
+        await drain(manager.stop_dispatcher())
         if self.plugin_bootstrap is not None:
             await drain(self.plugin_bootstrap.shutdown())
         await drain(self.node_execution.shutdown())
@@ -875,7 +878,7 @@ class ApplicationServices:
             await drain(self._run_bounded_lifecycle_cleanup(lifecycle.on_shutdown(context, card),
                 timeout_seconds=self._lifecycle_cleanup_timeout_seconds))
         self._restored_lifecycles.clear()
-        await drain(self._require_run_manager().shutdown())
+        await drain(manager.shutdown())
         if self.runtime_execution is not None:
             await drain(self.runtime_execution.shutdown())
         if self.node_execution.continuation_outputs:
@@ -2530,9 +2533,27 @@ class ApplicationServices:
         await self._publish_resource_modified(document, agent_id=agent_id, operation="patch")
         return document
 
-    async def run_agent(self, agent_id: str, prompt: str, *, context_id: str | None = None) -> dict[str, Any]:
+    async def run_agent(
+        self, agent_id: str, prompt: str, *, context_id: str | None = None,
+        fresh_context: bool = False, idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         self._require_agent(agent_id)
-        run = await self._require_run_manager().start_run(agent_id, prompt, context_id=context_id)
+        run = await self._require_run_manager().start_run(
+            agent_id, prompt, context_id=context_id, fresh_context=fresh_context, idempotency_key=idempotency_key,
+        )
+        return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
+
+    async def submit_agent_run(
+        self, agent_id: str, prompt: str, *, task_id: str | None = None,
+        parent_run_id: str | None = None, detached: bool = False,
+        fresh_context: bool = False, idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        self._require_agent(agent_id)
+        run = await self._require_run_manager().submit_run(
+            agent_id, prompt, task_id=task_id, parent_run_id=parent_run_id,
+            detached=detached, fresh_context=fresh_context, idempotency_key=idempotency_key,
+            state_session_id=self.card_state.session_id(agent_id),
+        )
         return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
     def conversation_summary(self, conversation_id: str) -> ConversationSummary:
@@ -4001,6 +4022,8 @@ def create_services(
         capability_provider=provider,
         state=state,
         require_managed_execution=settings.tenant_scope != LOCAL_TENANT,
+        tenant_scope=settings.tenant_scope,
+        run_queue_limit=settings.run_queue_limit,
         cleanup_execution=services._cleanup_run_execution,
         execution_settled=services.node_execution.signal_continuations,
         conversation_event=services._persist_conversation_event,
