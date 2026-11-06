@@ -12,7 +12,7 @@ from uuid import uuid4
 from .files import parts, pinned
 from .models import SandboxSecurityError, SandboxValidationError
 from .transfers import CHUNK_BYTES, signature
-from backend.file_transfer import MAX_FILE_BYTES
+from .file_policy import MAX_FILE_BYTES
 
 UPLOAD_LIMIT = MAX_FILE_BYTES
 

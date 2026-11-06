@@ -16,16 +16,9 @@ import tempfile
 from typing import BinaryIO
 
 from backend.errors import ResourceValidationError, RuntimeUnavailableError
-
-MAX_FILE_BYTES = 512 * 1024 * 1024
-FILE_CHUNK_BYTES = 256 * 1024
-# Compatibility APIs returning bytes are intentionally small. This is a memory /
-# control-message budget, never the limit for a referenced or streamed file.
-INLINE_FILE_BYTES = 32 * 1024 * 1024
-
-
-def file_transfer_policy():
-    return {"max_file_bytes": MAX_FILE_BYTES, "chunk_bytes": FILE_CHUNK_BYTES}
+from backend.sandbox.file_policy import (
+    MAX_FILE_BYTES, FILE_CHUNK_BYTES, INLINE_FILE_BYTES, file_transfer_policy,
+)
 
 
 def validate_file_limit(max_bytes: int) -> int:

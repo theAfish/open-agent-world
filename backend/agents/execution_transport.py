@@ -42,7 +42,7 @@ def execution_worker_argv(python='/usr/bin/python3'):
     sources = {'backend':'','backend.agents':'','backend.sandbox':''}
     for name in ['errors','file_transfer','agents.execution','agents.execution_worker',
             'sandbox.models','sandbox.materialization','sandbox.files','sandbox.environment',
-            'sandbox.streaming','sandbox.transfers']:
+            'sandbox.file_policy','sandbox.streaming','sandbox.transfers']:
         sources['backend.'+name] = (root/Path(*name.split('.'))).with_suffix('.py').read_text(encoding='utf-8')
     # Keep the stdlib bootstrap below Windows' 32767-character argv bound.
     encoded = base64.b85encode(zlib.compress(json.dumps(sources).encode(), level=9)).decode()

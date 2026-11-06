@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .files import parts, pinned
 from .models import SandboxSecurityError, SandboxValidationError
-from backend.file_transfer import FILE_CHUNK_BYTES
+from .file_policy import FILE_CHUNK_BYTES
 
 CHUNK_BYTES = FILE_CHUNK_BYTES
 MAX_ENTRIES = 10000
