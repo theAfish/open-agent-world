@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any
+from uuid import uuid4
 
 from backend.agents import (
     AgentConfig,
@@ -22,7 +23,9 @@ from backend.errors import RuntimeUnavailableError
 from backend.legions.runtime import group_context, member_team
 from backend.events.hub import EventHub
 from backend.events.models import EventType, RuntimeEvent
+from backend.idempotency import IdempotencyStore
 from backend.plugins import PluginRegistry
+from backend.request_context import require_request_context
 from backend.state import StateContext, StateScope, StateStore
 from backend.world.models import Card, CardPatch
 from backend.world.store import WorldStore
@@ -277,51 +280,83 @@ class RunManager:
         initial_lifecycle: Mapping[str, Any] | None = None,
         resume_external_work: bool = False,
         task_prompt: str | None = None,
+        fresh_context: bool = False,
+        idempotency_key: str | None = None,
     ) -> RunRecord:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Run prompt must be a non-empty string")
         lock = self._start_locks.setdefault(agent_id, asyncio.Lock())
         async with lock:
-            self._assert_agent_accepts_runs(agent_id)
-            card = self._agent_card(agent_id)
-            provider_id = self._provider_id(card)
-            self._check_concurrency(card)
-            if detached and parent_run_id is not None:
-                raise ValueError("a detached Run cannot also specify parent_run_id")
-            if (
-                not detached
-                and parent_run_id is None
-                and self.current_context is not None
-            ):
-                parent_run_id = self.current_context.run_id
-            if parent_run_id is not None:
-                parent = self.get_run(parent_run_id)
-                ancestor = parent
-                recovering_external = resume_external_work and caller_kind == "delegation"
-                while ancestor:
-                    recovering_external = recovering_external or bool(ancestor.lifecycle.get("background_job_notification") and ancestor.lifecycle.get("work_continuation"))
-                    user_stopped = ancestor.lifecycle.get('cancellation_requested') and ancestor.lifecycle.get('cancellation_origin') != 'shutdown'
-                    if user_stopped or (not recovering_external and ancestor.status in {RunStatus.CANCELLED, RunStatus.INTERRUPTED, RunStatus.FAILED}):
-                        raise RuntimeUnavailableError('The parent Run has ended; dependent work cannot be admitted')
-                    ancestor = self.get_run(ancestor.parent_run_id) if ancestor.parent_run_id else None
-                task_id = task_id or parent.task_id
-                context_id = context_id or parent.context_id
-            record = self.store.create(
-                agent_id=agent_id,
-                run_id=run_id,
-                runtime_provider_id=provider_id,
-                caller_kind=caller_kind,
-                caller_id=caller_id,
-                parent_run_id=parent_run_id,
-                task_id=task_id,
-                context_id=context_id,
-            )
+            def create_record() -> tuple[RunRecord, Card]:
+                self._assert_agent_accepts_runs(agent_id)
+                card = self._agent_card(agent_id)
+                provider_id = self._provider_id(card)
+                self._check_concurrency(card)
+                if detached and parent_run_id is not None:
+                    raise ValueError("a detached Run cannot also specify parent_run_id")
+                run_parent_id = parent_run_id
+                run_task_id = task_id
+                # An isolated context cannot name a real Conversation session.
+                run_context_id = f"isolated:{uuid4()}" if fresh_context else context_id
+                if not detached and run_parent_id is None and self.current_context is not None:
+                    run_parent_id = self.current_context.run_id
+                if run_parent_id is not None:
+                    parent = self.get_run(run_parent_id)
+                    ancestor = parent
+                    recovering_external = resume_external_work and caller_kind == "delegation"
+                    while ancestor:
+                        recovering_external = recovering_external or bool(ancestor.lifecycle.get("background_job_notification") and ancestor.lifecycle.get("work_continuation"))
+                        user_stopped = ancestor.lifecycle.get('cancellation_requested') and ancestor.lifecycle.get('cancellation_origin') != 'shutdown'
+                        if user_stopped or (not recovering_external and ancestor.status in {RunStatus.CANCELLED, RunStatus.INTERRUPTED, RunStatus.FAILED}):
+                            raise RuntimeUnavailableError('The parent Run has ended; dependent work cannot be admitted')
+                        ancestor = self.get_run(ancestor.parent_run_id) if ancestor.parent_run_id else None
+                    run_task_id = run_task_id or parent.task_id
+                    run_context_id = run_context_id or parent.context_id
+                record = self.store.create(
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    runtime_provider_id=provider_id,
+                    caller_kind=caller_kind,
+                    caller_id=caller_id,
+                    parent_run_id=run_parent_id,
+                    task_id=run_task_id,
+                    context_id=run_context_id,
+                )
+                return record, card
+
+            if idempotency_key is None:
+                record, card = create_record()
+            else:
+                def authorize() -> None:
+                    self.world.require_available_card(self._agent_card(agent_id))
+
+                def reserve() -> dict[str, str]:
+                    record, _ = create_record()
+                    return {"run_id": record.run_id}
+
+                # Commit the accepted Run ID with its row, before starting the
+                # provider. Replays return before checking execution capacity.
+                result = IdempotencyStore(self.store.database).execute(
+                    require_request_context(),
+                    operation=f"agent.run.create.v1:{agent_id}",
+                    key=idempotency_key,
+                    payload={
+                        "prompt": prompt, "task_id": task_id, "parent_run_id": parent_run_id,
+                        "detached": detached, "fresh_context": fresh_context, "context_id": context_id,
+                    },
+                    authorize=authorize,
+                    mutate=reserve,
+                )
+                record = self.get_run(result.value["run_id"])
+                if result.replayed:
+                    return record
+                card = self._agent_card(agent_id)
             record = self.store.update_lifecycle(
                 record.run_id,
                 **{
                     "owner_kind": "agent",
                     "owner_id": agent_id,
-                    "cancellation_policy": "independent" if detached or parent_run_id is None else "dependent",
+                    "cancellation_policy": "independent" if detached or record.parent_run_id is None else "dependent",
                     "execution": "running",
                     "holds_capacity": True,
                     "cleanup": "none",

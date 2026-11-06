@@ -84,11 +84,12 @@ def business_router(manifest):
         return value
 
     @router.post("/agents/{agent_id}/run", status_code=202)
-    async def run(agent_id: str, request: runtime.AgentRunRequest, services=Depends(get_services)):
+    async def run(agent_id: str, request: runtime.AgentRunRequest, services=Depends(get_services),
+                  idempotency_key: runtime.AgentRunIdempotencyKey = None):
         require(agent_id, services)
         if request.parent_run_id is not None or request.task_id is not None:
             raise HTTPException(403, "Run ownership is assigned by the application")
-        return await runtime.run_agent(agent_id, request, services)
+        return await runtime.run_agent(agent_id, request, services, idempotency_key=idempotency_key)
 
     @router.post("/agents/{agent_id}/stop")
     async def stop(agent_id: str, services=Depends(get_services)):

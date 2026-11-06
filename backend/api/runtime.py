@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import PurePath
 from dataclasses import fields
 from typing import Annotated, Literal
-from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -187,27 +186,32 @@ async def get_agent(
     }
 
 
+AgentRunIdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key")]
+
+
 @router.post("/agents/{agent_id}/run", status_code=status.HTTP_202_ACCEPTED)
 async def run_agent(
     agent_id: str,
     request: AgentRunRequest,
     services: ApplicationServices = Depends(get_services),
+    idempotency_key: AgentRunIdempotencyKey = None,
 ) -> dict[str, object]:
-    # The prefix keeps it from ever naming a real conversation session.
-    context_id = f"isolated:{uuid4()}" if request.fresh_context else None
     if (
         request.task_id is None
         and request.parent_run_id is None
         and not request.detached
     ):
-        return await services.run_agent(agent_id, request.prompt, context_id=context_id)
+        return await services.run_agent(
+            agent_id, request.prompt, fresh_context=request.fresh_context, idempotency_key=idempotency_key,
+        )
     run = await services._require_run_manager().start_run(
         agent_id,
         request.prompt,
         task_id=request.task_id,
         parent_run_id=request.parent_run_id,
         detached=request.detached,
-        context_id=context_id,
+        fresh_context=request.fresh_context,
+        idempotency_key=idempotency_key,
     )
     return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
