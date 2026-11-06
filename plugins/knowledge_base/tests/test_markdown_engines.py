@@ -76,6 +76,46 @@ def test_a_corrupt_xlsx_reports_a_knowledge_error_not_a_crash():
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+def test_large_xlsx_uses_bounded_private_file_handoff_instead_of_json_bytes(tmp_path, monkeypatch):
+    import json
+    import zipfile
+    from pathlib import Path
+    from oaw_knowledge_base import markdown
+
+    path = tmp_path / 'large.xlsx'
+    path.write_bytes(_xlsx_bytes({'Results': [['Sample', 'Value'], ['A', 3.2]]}))
+    with zipfile.ZipFile(path, 'a') as archive, archive.open('padding.bin', 'w') as padding:
+        for _ in range(132):
+            padding.write(b'x' * markdown.FILE_CHUNK_BYTES)
+    run = markdown.subprocess.run
+    staged = []
+
+    def inspect_handoff(*args, **kwargs):
+        request = json.loads(kwargs['input'])
+        assert 'data' not in request and len(kwargs['input']) < 16384
+        staged.append(Path(request['path']))
+        assert staged[-1].stat().st_size == path.stat().st_size
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(markdown.subprocess, 'run', inspect_handoff)
+    with path.open('rb') as stream:
+        text, _, _ = to_markdown(stream, path.name, '')
+        assert not stream.closed
+    assert '| A | 3.2 |' in text
+    assert staged and all(not path.exists() for path in staged)
+
+
+def test_tabular_row_budget_stops_reading_before_materializing_the_input():
+    from oaw_knowledge_base import markdown
+
+    def rows():
+        for index in range(markdown.MAX_TABULAR_ROWS + 1):
+            assert index < markdown.MAX_TABULAR_ROWS, 'Converter read beyond its row budget'
+            yield [index]
+
+    assert markdown._rows_to_markdown_table(rows())
+
+
 class _FakeResponse:
     def __init__(self, status_code, body):
         self.status_code = status_code

@@ -498,12 +498,9 @@ async def open_sandbox_folder(sandbox_id: str, body: OpenSandboxFolderRequest, r
 async def upload_sandbox_file(sandbox_id: str, path: str, request: Request,
                               directory: bool = False, services=Depends(get_services)):
     """Stream into a staged file with a binding lease and bounded runtime chunks."""
-    import base64
-    import asyncio
-    import logging
     from backend.sandbox.files import parts
     from backend.sandbox.streaming import UPLOAD_LIMIT
-    from backend.sandbox.transfers import CHUNK_BYTES
+    from backend.sandbox.file_streams import SandboxFileTransfer
     if not parts(path):
         raise SandboxValidationError("Choose a file or folder within the workspace")
     services._require_card_type(sandbox_id, "sandbox")
@@ -515,58 +512,21 @@ async def upload_sandbox_file(sandbox_id: str, path: str, request: Request,
             services._require_card_type(sandbox_id, 'sandbox')
             return await services._require_sandbox_backend().file_operation(sandbox_id, 'mkdir', path=path)
     async with services.resources.artifacts.workspace(services, sandbox_id, None, allow_running=True):
-        backend = services._require_sandbox_backend()
-        async def step(operation, **options):
-            # Runtime workers finish under their pins even on cancellation. Obtain
-            # the receipt first so cleanup always knows the created file identity.
-            task = asyncio.create_task(backend.file_operation(sandbox_id, operation, path=path, **options))
-            cancelled = False
-            while not task.done():
-                try:
-                    await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    cancelled = True
-            return task.result(), cancelled
-        staged, cancelled = await step('upload_begin')
-        expected, offset = staged['signature'], 0
-        committed = False
-        try:
-            if cancelled:
-                raise asyncio.CancelledError
+        def authorize():
+            services._require_card_type(sandbox_id, 'sandbox')
+        transfer = SandboxFileTransfer(services, sandbox_id, authorize)
+        async def chunks():
+            size = 0
             async for incoming in request.stream():
-                if offset + len(incoming) > UPLOAD_LIMIT:
-                    raise HTTPException(413, detail='File exceeds the 1 GiB upload limit')
-                for start in range(0, len(incoming), CHUNK_BYTES):
-                    chunk = incoming[start:start + CHUNK_BYTES]
-                    result, cancelled = await step('upload_chunk',
-                        staging=staged['staging'], expected=expected, offset=offset, data=base64.b64encode(chunk).decode())
-                    expected = result['signature']
-                    offset += len(chunk)
-                    if cancelled:
-                        raise asyncio.CancelledError
+                size += len(incoming)
+                if size > UPLOAD_LIMIT:
+                    raise HTTPException(413, detail='File exceeds the 512 MiB upload limit')
+                yield incoming
             if await request.is_disconnected():
                 from starlette.requests import ClientDisconnect
                 raise ClientDisconnect()
-            result, _ = await step('upload_commit',
-                staging=staged['staging'], expected=expected, offset=offset)
-            committed = True
-            return result
-        finally:
-            if not committed:
-                cleanup = asyncio.create_task(backend.file_operation(sandbox_id, 'upload_abort', path=path,
-                    staging=staged['staging'], expected=expected))
-                # Keep the lease until cancellation cleanup finishes, too.
-                while not cleanup.done():
-                    try:
-                        await asyncio.shield(cleanup)
-                    except asyncio.CancelledError:
-                        continue
-                    except Exception:
-                        break
-                try:
-                    cleanup.result()
-                except Exception:
-                    logging.getLogger(__name__).warning('Sandbox upload cleanup failed', exc_info=True)
+        await transfer.write_file_stream(path, chunks())
+        return transfer.result
 
 
 class SandboxFileMove(BaseModel):

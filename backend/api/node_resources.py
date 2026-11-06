@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.api.dependencies import get_services
@@ -6,6 +6,22 @@ from backend.node_resources import ResourceActionRequest, invoke_resource_action
 from backend.services import ApplicationServices
 
 router = APIRouter(prefix="/nodes", tags=["node-resources"])
+
+
+@router.post("/{node_id}/resource/{action}/files")
+async def file_action(node_id: str, action: str, request: Request,
+                      services: ApplicationServices = Depends(get_services)):
+    from backend.resource_files import resource_files
+    from backend.hosting.policy import unsafe_host_configuration
+    from backend.errors import ResourceValidationError
+    node = services.world.get_card(node_id)
+    if action not in services.plugins.node_type(node.type).resource_actions:
+        raise ResourceValidationError("Unknown resource action")
+    async with resource_files(request) as (metadata, files):
+        if request.scope.get('oaw.hosted') and unsafe_host_configuration(metadata.arguments):
+            from fastapi import HTTPException
+            raise HTTPException(403, "Host configuration is managed by the operator")
+        return await invoke_resource_action(services, node_id, action, metadata, files=files)
 
 
 @router.get('/{node_id}/execution-sources')

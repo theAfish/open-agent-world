@@ -5,10 +5,12 @@ SQLite), not JSON snapshots. The host serializes them with graph mutations and
 runs blocking work off the event loop. Async handlers run on the host event loop
 and must offload their own blocking work. Plugins own their format and lifecycle.
 """
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
 from typing import Any, Awaitable, Callable
+from backend.file_transfer import TransferredFile, file_transfer_policy as _file_transfer_policy
 from backend.plugins.state import CardStateStore
 
 
@@ -32,6 +34,13 @@ class NodeResourceContext:
     # node selection is exposed to a Pack handler.
     open_execution: Callable[..., Any] | None = None
     execution_configuration: Callable[[], dict[str, Any]] | None = None
+    # Ephemeral file leases supplied by the host outside JSON/model arguments.
+    # Consumers must finish reading before the resource action returns.
+    files: Mapping[str, TransferredFile] = field(default_factory=dict)
+
+    @property
+    def file_transfer_policy(self):
+        return _file_transfer_policy()
 
 
 @dataclass(frozen=True, slots=True)

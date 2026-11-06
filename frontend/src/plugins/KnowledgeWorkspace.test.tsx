@@ -101,7 +101,9 @@ const open = (handler: Action, overrides: { card?: Record<string, unknown>; host
     await handler(name, args, confirm) ?? (name === "overview" ? overview() : EMPTY[name] ?? {}));
   const Workspace = plugin.views.workspace;
   const props = { card: { id: "card-1", name: "Knowledge", config: { default_model: "" }, ...overrides.card },
-    host: { resourceAction: action, ...overrides.host } };
+    host: { resourceAction: action,
+      resourceFileAction: (name: string, args: Record<string, unknown>, _files: Record<string, File>, confirm?: boolean) => action(name, args, confirm),
+      ...overrides.host } };
   const workspace = <Workspace {...props as unknown as PluginViewProps} />;
   render(overrides.wrapper ? overrides.wrapper(workspace) : workspace);
   return action;
@@ -315,6 +317,20 @@ it("routes empty results to projects and empty Spaces to an editable schema", as
   fireEvent.click(await screen.findByRole("button", { name: "Structured data" }));
   expect(await screen.findByLabelText("Output schema")).toBeTruthy();
   expect(screen.getByLabelText("Extraction instructions")).toBeTruthy();
+});
+
+it("uploads schema samples through the binary host contract", async () => {
+  const resourceFileAction = vi.fn().mockResolvedValue({ markdown: '| a | b |', truncated: false });
+  vi.stubGlobal('FileReader', class { constructor() { throw new Error('No inline sample bytes'); } });
+  open(async () => undefined, { host: { resourceFileAction } });
+  fireEvent.click(screen.getByRole('button', { name: 'Experiment' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Schemas' }));
+  fireEvent.click(await screen.findByRole('button', { name: /New schema/ }));
+  const file = new File(['a,b\n1,2'], 'sample.csv', { type: 'text/csv' });
+  fireEvent.change(screen.getByLabelText('Attach sample files'), { target: { files: [file] } });
+  await screen.findByText('ready');
+  expect(resourceFileAction).toHaveBeenCalledWith('schema_sample',
+    { filename: file.name, media_type: file.type }, { file });
 });
 
 it("searches converted project files and opens attributable source excerpts", async () => {

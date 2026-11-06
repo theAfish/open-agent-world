@@ -32,7 +32,7 @@ const baseResult = {
 };
 function mount(result?: Record<string, unknown>, level: PluginViewProps["level"] = "inspector", overrides: Partial<PluginViewProps["host"]> = {}) {
   const host: PluginViewProps["host"] = {
-    delegationAction: vi.fn(), resourceAction: vi.fn(),
+    delegationAction: vi.fn(), resourceAction: vi.fn(), resourceFileAction: vi.fn(),
     runAnalysis: vi.fn().mockResolvedValue(undefined),
     updateConfig: vi.fn().mockResolvedValue(undefined), getAgentInfo: vi.fn().mockResolvedValue({ session_id: "", details: { result } }),
     listCards: vi.fn().mockResolvedValue([]), readDocument: vi.fn(), documentAction: vi.fn(), documentDownloadUrl: vi.fn(),

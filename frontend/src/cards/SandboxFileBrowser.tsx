@@ -15,7 +15,7 @@ export interface FileEntry { name: string; path?: string; directory: boolean; bl
 export interface FileListing { entries?: FileEntry[]; truncated?: boolean; next_cursor?: string; state?: string; message?: string }
 export interface FileSelection { root: string; path: string; label: string; size?: number }
 export interface FileChange { path: string; destination?: string }
-const limits = { maxEntries: 1000, maxFileBytes: 1024 * 1024 * 1024, directories: true };
+const limits = { maxEntries: 1000, directories: true };
 
 /** File interactions are independent of the terminal and preview presentation. */
 export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, selection, error, workspacePath,
@@ -62,6 +62,7 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
   }
   const intake = useFileIntake({
     disabled: !writable || mutating, limits, destination,
+    resolveFileLimit: async () => (await worldApi.fileTransferPolicy()).max_file_bytes,
     onError: reason => { if (live.current) setFailure(apiErrorMessage(reason)); },
     onEntries: async (entries, folder) => {
       setFailure('');

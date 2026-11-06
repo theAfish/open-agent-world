@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from .file_io import STANDALONE_FILE_POLICY
+
 
 @dataclass
 class KnowledgeContext:
@@ -28,6 +30,8 @@ class KnowledgeContext:
     confirmed: bool = False
     resolve_secret: Callable[[str], str | None] | None = field(default=None, repr=False)
     resolve_model: Callable[[str], Any] | None = field(default=None, repr=False)
+    files: dict[str, Any] = field(default_factory=dict, repr=False)
+    file_transfer_policy: dict[str, int] = field(default_factory=lambda: dict(STANDALONE_FILE_POLICY))
 
 
 class MemorySettings:

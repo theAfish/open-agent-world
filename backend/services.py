@@ -3070,6 +3070,10 @@ class ApplicationServices:
             prompt,
             caller_kind="agent",
             caller_id=source_agent_id,
+            # A private message delegates only this prompt. Keep Run ancestry
+            # for cancellation and tracing without inheriting a chat's history,
+            # inbox, files or persisted model checkpoint.
+            context_id="communicate:" + uuid4().hex,
         )
         await self._await_synchronous_turn(manager, run.run_id, target.name)
         final_text = manager.final_text(run.run_id)

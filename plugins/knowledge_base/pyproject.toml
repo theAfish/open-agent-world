@@ -1,11 +1,11 @@
 [project]
 name = "oaw-knowledge-base"
-version = "0.2.0"
+version = "0.2.1"
 description = "Research knowledge base: raw data to markdown, projection, reviewed knowledge graph"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.11,<3",
-    "mat-know-base @ git+https://github.com/theAfish/mat_know_base.git@0d05057e5fdbd821ec96c99227266d4c5e0d6af6",
+    "mat-know-base @ git+https://github.com/theAfish/mat_know_base.git@4081ef73bdcaed48ba13a8b7240f4543fea62e17",
     # The converter uses the standalone to_markdown API (removed in 2.x).
     # Intel macOS must avoid the 1.x layout/ONNX closure: coloredlogs ships
     # a .pth hook rejected by the shared-adapter wheel boundary.
@@ -23,6 +23,7 @@ allow-direct-references = true
 # required by the OAW card, which reaches the same operations in process.
 service = [
     "fastapi>=0.116,<1",
+    "python-multipart>=0.0.20,<1",
     "uvicorn[standard]>=0.35,<1",
     "httpx>=0.28,<1",
     "mcp>=1.2,<2",

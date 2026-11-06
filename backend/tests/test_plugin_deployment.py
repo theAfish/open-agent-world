@@ -64,6 +64,28 @@ def test_resource_results_projected_and_section_names_cannot_grant_builtin_acces
     assert calls == ["query"]
 
 
+def test_file_actions_require_publication_and_filter_results_like_json_actions(monkeypatch):
+    import json
+    calls, handles = [], []
+    async def resource(services, node_id, action, request, *, files=None):
+        calls.append(action)
+        handles.append(files['input'].stream)
+        return {'answer': files['input'].stream.read().decode(), 'connection': 'private'}
+    monkeypatch.setattr('backend.deployment_workspace.invoke_resource_action', resource)
+    access = DeploymentSurface(resource_actions={'query': {'answer'}}).model_dump(mode='json')
+    app = FastAPI()
+    app.dependency_overrides[get_services] = lambda: publication_services()
+    app.include_router(workspace_router({'permissions': {'plugin': []}, 'plugin_access': {'plugin': access}}))
+    with TestClient(app) as client:
+        path = '/workspace/nodes/plugin/resource/query/files'
+        response = client.post(path, data={'request': json.dumps({'arguments': {}})}, files={'input': ('a.txt', b'hello')})
+        assert response.status_code == 200 and response.json() == {'answer': 'hello'}
+        for node, action in [('outside', 'query'), ('plugin', 'delete')]:
+            assert client.post(f'/workspace/nodes/{node}/resource/{action}/files', content=b'not parsed').status_code == 404
+        assert client.post(path, data={'request': json.dumps({'arguments': {'path': '/etc/passwd'}})}, files={'input': ('a.txt', b'hi')}).status_code == 403
+    assert calls == ['query'] and handles[0].closed
+
+
 def test_project_bridge_requires_prepare_prompt_save_and_failure_grants(monkeypatch):
     import json
     from types import SimpleNamespace

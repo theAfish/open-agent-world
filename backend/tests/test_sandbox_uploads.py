@@ -12,6 +12,37 @@ from backend.sandbox.files import operate
 from backend.sandbox.models import SandboxSecurityError, SandboxValidationError, ResourceAccess
 
 
+def test_plugin_stream_rechecks_sandbox_grant_and_aborts_staging_on_revocation(runtime_client):
+    from backend.capabilities.provider import _CapabilityContext
+    from backend.errors import PermissionDeniedError
+    from backend.world.models import EdgeCreate
+    client, backend, _ = runtime_client
+    services = client.app.state.services
+    agent = create_node(client, 'agent')
+    text = create_node(client, 'text', content='File instructions')
+    sandbox = create_node(client, 'sandbox')
+    async def run():
+        await services.create_edge(EdgeCreate(source=agent['id'], target=text['id'], relationship='read_edit'))
+        edge = await services.create_edge(EdgeCreate(source=agent['id'], target=sandbox['id'], relationship='execute'))
+        capability = services.capabilities.capability_for_id(agent['id'], 'text.edit:' + text['id'])
+        context = _CapabilityContext(services, capability)
+        closed = []
+        async def chunks():
+            try:
+                yield b'first chunk'
+                await services.delete_edge(edge.id)
+                yield b'must not persist'
+            finally:
+                closed.append(True)
+        with pytest.raises(PermissionDeniedError):
+            await context.write_sandbox_workspace_file_stream(capability, sandbox['id'], 'revoked.bin', chunks())
+        record = await backend._record(sandbox['id'])
+        assert not list(record.workspace.rglob('revoked.bin'))
+        assert not list(record.workspace.rglob('.oaw-upload-*'))
+        assert closed and not services.resources.artifacts.source_leases
+    client.portal.call(run)
+
+
 def test_large_upload_and_download_use_bounded_chunks(runtime_client, monkeypatch):
     client, backend, _ = runtime_client
     node = create_node(client, 'sandbox')
@@ -71,7 +102,10 @@ def test_cancellation_during_begin_still_cleans_the_created_file(runtime_client,
             return result
         monkeypatch.setattr(backend, 'file_operation', delayed)
         services = client.app.state.services
-        task = asyncio.create_task(upload_sandbox_file(node['id'], 'cancelled', None, services=services))
+        class UploadRequest:
+            async def stream(self):
+                yield b'bounded input'
+        task = asyncio.create_task(upload_sandbox_file(node['id'], 'cancelled', UploadRequest(), services=services))
         await created.wait()
         task.cancel()
         await asyncio.sleep(0)

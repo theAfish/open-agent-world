@@ -8,4 +8,4 @@ The package is layered so the pipeline can run with or without a host:
 * ``service`` serves the same operations over HTTP and MCP, and drives them from a CLI.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

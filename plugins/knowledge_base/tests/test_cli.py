@@ -1,5 +1,6 @@
 """Standalone commands use the same durable project operations."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ def test_cli_folder_preview_commit_conversion_and_space_projection(tmp_path, cap
     materials.mkdir(parents=True)
     (materials / "report.md").write_text("# Report\nMeasured temperature 25 C.", encoding="utf-8")
     (materials / "SI.csv").write_text("sample,temperature\nA,25", encoding="utf-8")
+    monkeypatch.setattr(Path, 'read_bytes', lambda *a: pytest.fail('CLI input must stay streamed'))
     preview = invoke(capsys, store, "import", str(tmp_path / "reports"), "--grouping", "depth", "--depth", "2")
     assert preview["projects"][0]["file_count"] == 2
     assert invoke(capsys, store, "projects")["projects"] == []
@@ -76,3 +78,32 @@ def test_cli_removed_arbitrary_draft_and_collection_commands():
     for arguments in (["knowledge", "open"], ["--collection", "old", "projects"], ["groups", "list"]):
         with pytest.raises(SystemExit):
             parser.parse_args(arguments)
+
+
+def test_remote_cli_import_sends_multipart_streams(tmp_path, monkeypatch, capsys):
+    import httpx
+    from fastapi.testclient import TestClient
+    from oaw_knowledge_base.service.app import create_app
+    from oaw_knowledge_base.service.store import Store
+
+    document = tmp_path / 'source.md'
+    document.write_bytes(b'# Source\nBinary multipart input.')
+    store = Store(tmp_path / 'remote-store')
+    sent = []
+    try:
+        with TestClient(create_app(store, token='secret')) as client:
+            def post(url, **kwargs):
+                assert 'json' not in kwargs
+                assert 'content_base64' not in kwargs['data']['request']
+                sent.extend(file[1] for file in kwargs['files'].values())
+                kwargs.pop('timeout')
+                return client.post(url.removeprefix('http://service'), **kwargs)
+
+            monkeypatch.setattr(httpx, 'post', post)
+            assert cli.main(['--service', 'http://service', '--token', 'secret',
+                             'import', str(document)]) == 0
+        preview = json.loads(capsys.readouterr().out)
+        assert preview['projects'][0]['file_count'] == 1
+        assert sent and all(stream.closed for stream in sent)
+    finally:
+        store.close()

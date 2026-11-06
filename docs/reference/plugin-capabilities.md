@@ -166,7 +166,9 @@ attachments through the admitting Run's accepted history boundary, including
 earlier messages for retries, and excludes unsent uploads and later queued input.
 Repeated version/path pairs use their latest visible message reference. Outside a
 Conversation, listing returns `[]`; reads and publications require an active
-Conversation Run. Delegated Runs inherit their admitting Conversation's boundary.
+Conversation Run. Explicit Conversation handoffs inherit that boundary. Private
+`communicate` helpers retain parent tracing and cancellation lineage but receive
+only the delegated prompt, with no inherited Conversation history, inbox or files.
 
 Reads verify the complete immutable manifest and checksum before returning bytes.
 `max_bytes` defaults to 32 MiB and may be lowered; it cannot exceed 32 MiB.

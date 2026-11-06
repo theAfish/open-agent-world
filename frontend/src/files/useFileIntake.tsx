@@ -4,8 +4,9 @@ import { droppedEntries, hasFiles, pickerEntries, validateEntries, type Incoming
 import './fileIntake.css';
 
 /** Owns drag recognition, asynchronous folder collection and duplicate submission. */
-export function useFileIntake<T>({ disabled, limits, destination, onEntries, onError }: {
+export function useFileIntake<T>({ disabled, limits, resolveFileLimit, destination, onEntries, onError }: {
   disabled: boolean; limits: IntakeLimits;
+  resolveFileLimit?: () => Promise<number>;
   destination: (target: EventTarget | null) => T;
   onEntries: (entries: IncomingEntry[], target: T) => Promise<void>;
   onError: (reason: unknown) => void;
@@ -19,7 +20,7 @@ export function useFileIntake<T>({ disabled, limits, destination, onEntries, onE
     lock.current = true; setProcessing(true);
     try {
       const entries = await read();
-      validateEntries(entries, limits);
+      validateEntries(entries, resolveFileLimit ? { ...limits, maxFileBytes: await resolveFileLimit() } : limits);
       if (entries.length) await onEntries(entries, target);
     } catch (reason) { onError(reason); }
     finally { lock.current = false; setProcessing(false); }

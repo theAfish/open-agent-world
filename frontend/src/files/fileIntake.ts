@@ -2,7 +2,7 @@ import { t } from '../i18n';
 
 /** Browser file intake shared by pickers and drop targets. Paths stay relative. */
 export interface IncomingEntry { path: string; file?: File }
-export interface IntakeLimits { maxEntries: number; maxFileBytes: number; directories: boolean }
+export interface IntakeLimits { maxEntries: number; maxFileBytes?: number; directories: boolean }
 
 export function pickerEntries(files: FileList | File[]): IncomingEntry[] {
   return Array.from(files, file => ({ path: file.webkitRelativePath || file.name, file }));
@@ -18,7 +18,7 @@ export function validateEntries(entries: IncomingEntry[], limits: IntakeLimits) 
     }
     if (paths.has(entry.path)) throw new Error(t('Duplicate file path: {path}', { path: entry.path }));
     paths.add(entry.path);
-    if (entry.file && entry.file.size > limits.maxFileBytes) throw new Error(t('File exceeds {limit} MiB: {path}', { limit: limits.maxFileBytes / 1024 / 1024, path: entry.path }));
+    if (entry.file && limits.maxFileBytes !== undefined && entry.file.size > limits.maxFileBytes) throw new Error(t('File exceeds {limit} MiB: {path}', { limit: limits.maxFileBytes / 1024 / 1024, path: entry.path }));
   }
 }
 

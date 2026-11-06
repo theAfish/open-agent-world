@@ -211,6 +211,7 @@ export function PluginSurface({ card, slot, level, children }: {
     registerVisualCapture: (captureKind, capture) => registerPluginVisualCapture(card.id, captureKind, capture),
     delegationAction: (action, arguments_) => worldApi.nodeDelegationAction(card.id, action, arguments_, sessionId ?? null),
     resourceAction: (action, arguments_, confirm) => worldApi.nodeResourceAction(card.id, action, arguments_, confirm, sessionId ?? null),
+    resourceFileAction: (action, arguments_, files, confirm) => worldApi.nodeResourceFileAction(card.id, action, arguments_, files, confirm, sessionId ?? null),
     readFile: (reference, signal) => worldApi.readFilePreview(card.id, reference, signal),
     openFile: (reference, name, options) => useOpenFiles.getState().open({ ...reference, source_id: card.id }, name, options),
     openInputNode: async (type, name, source, relationship) => {

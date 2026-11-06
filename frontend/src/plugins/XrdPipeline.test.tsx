@@ -29,7 +29,7 @@ const output = (index: number, status = 'completed', extra = {}) => ({ candidate
 const preopt = { run_id: 'preopt-1', status: 'completed', result: { mode: 'pipeline', stage: 'preopt', match_run_id: 'match-1', candidates: [output(0), output(1, 'rejected'), output(2, 'failed', { error: 'no cif', output_cif: undefined })] } };
 function mount({ workflow = { match_run_id: 'match-1' }, config = {}, status = 'idle', last = {}, progress, host: overrides = {}, matchResult = result }: { workflow?: Record<string, unknown>; config?: Record<string, unknown>; status?: string; last?: Record<string, unknown>; progress?: unknown; host?: Partial<PluginViewProps['host']>; matchResult?: typeof result } = {}) {
   const host: PluginViewProps['host'] = {
-    delegationAction: vi.fn(), resourceAction: vi.fn(),
+    delegationAction: vi.fn(), resourceAction: vi.fn(), resourceFileAction: vi.fn(),
     runAnalysis: vi.fn().mockResolvedValue(undefined), stopAnalysis: vi.fn().mockResolvedValue(undefined), updateConfig: vi.fn().mockResolvedValue(undefined),
     getAgentInfo: vi.fn().mockResolvedValue({ session_id: '', details: { result: matchResult, workflow, last_run: last, progress } }),
     listCards: vi.fn().mockResolvedValue([]), readDocument: vi.fn(), documentAction: vi.fn(), documentDownloadUrl: vi.fn(), transform: vi.fn(), readFile: vi.fn(), openFile: vi.fn(), clearOpenedFile: vi.fn(), openInputNode: vi.fn().mockResolvedValue(undefined),

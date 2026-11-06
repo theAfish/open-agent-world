@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .models import AgentConfig, AgentEvent, AgentInfo, RuntimeModelConnection, ScopedToolDefinition
+from backend.file_transfer import MAX_FILE_BYTES, INLINE_FILE_BYTES
 
 if TYPE_CHECKING:
     from backend.runs.models import InvocationContext, RuntimeInput
@@ -78,14 +79,14 @@ class AgentCapabilityProvider(Protocol):
 
     async def read_conversation_attachment(
         self, agent_id: str, run_id: str, version_id: str, path: str,
-        *, max_bytes: int = 32 * 1024 * 1024,
+        *, max_bytes: int = INLINE_FILE_BYTES,
     ) -> bytes:
         """Read verified, bounded bytes from a listed current-session attachment."""
         ...
 
     def stream_conversation_attachment(
         self, agent_id: str, run_id: str, version_id: str, path: str,
-        *, max_bytes: int = 512 * 1024 * 1024,
+        *, max_bytes: int = MAX_FILE_BYTES,
     ) -> AsyncIterator[bytes]:
         """Stream a visible attachment, checking live access and its final checksum.
 
@@ -103,6 +104,13 @@ class AgentCapabilityProvider(Protocol):
         a message; invoke the authorized send_conversation_message tool with the
         returned version_id/path to deliver the file.
         """
+        ...
+
+    async def publish_conversation_attachment_stream(
+        self, agent_id: str, run_id: str, name: str, chunks: AsyncIterator[bytes], *,
+        request_key: str, expected_sha256: str | None = None, max_bytes: int = MAX_FILE_BYTES,
+    ) -> dict[str, Any]:
+        """Retain a verified file stream and return its reference, never its bytes."""
         ...
 
     async def invoke_tool(

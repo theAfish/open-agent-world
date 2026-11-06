@@ -31,16 +31,16 @@ def _convert(context, state):
     context.check_cancelled()
     context.log(f"Reading {source.filename}")
 
-    data = kb.sources.read_bytes(source_id)
-    context.check_cancelled()
-    context.log(f"Converting {len(data)} bytes to markdown")
-    text, engine, metadata = to_markdown(
-        data, source.filename, source.media_type,
-        engine=context.parameters.get("engine", "auto"),
-        mineru_base_url=context.parameters.get("mineru_base_url"),
-        vision_model=context.parameters.get("vision_model") or "",
-        resolve_secret=getattr(kb, "oaw_resolve_secret", None),
-        resolve_model=getattr(kb, "oaw_resolve_model", None))
+    with kb.sources.open(source_id) as stream:
+        context.check_cancelled()
+        context.log(f"Converting {source.size} bytes to markdown")
+        text, engine, metadata = to_markdown(
+            stream, source.filename, source.media_type,
+            engine=context.parameters.get("engine", "auto"),
+            mineru_base_url=context.parameters.get("mineru_base_url"),
+            vision_model=context.parameters.get("vision_model") or "",
+            resolve_secret=getattr(kb, "oaw_resolve_secret", None),
+            resolve_model=getattr(kb, "oaw_resolve_model", None))
     context.check_cancelled()
 
     artifact_id = derived_id(source_id, "artifact")

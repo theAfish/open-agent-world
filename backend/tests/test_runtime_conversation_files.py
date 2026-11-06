@@ -63,6 +63,28 @@ def test_runtime_lists_current_history_and_reads_verified_binary(files):
     assert state['services'].resources.artifacts.consumers[state['attachment']['version_id']] == 0
 
 
+def test_runtime_publishes_large_file_stream_with_verified_digest_and_reference(files):
+    import hashlib
+    state = files
+    chunk = b'z' * (256 * 1024)
+    digest = hashlib.sha256()
+    for _ in range(132):
+        digest.update(chunk)
+    closed = []
+    async def chunks():
+        try:
+            for _ in range(132):
+                yield chunk
+        finally:
+            closed.append(True)
+    result = state['call']('publish_conversation_attachment_stream', 'large-output.xlsx', chunks(),
+        request_key='large-output', expected_sha256=digest.hexdigest())
+    assert result['size_bytes'] == 33 * 1024 * 1024
+    record = state['services'].resources.artifacts.get(result['version_id'])
+    assert record['manifest'][0]['sha256'] == digest.hexdigest()
+    assert closed and 'data' not in result
+
+
 async def stage_attachment(state, directory, reference):
     from backend.agents.execution import NativeRuntimeExecutionProvider, RuntimeExecutionRequest
     execution = await NativeRuntimeExecutionProvider().open(RuntimeExecutionRequest(
@@ -350,3 +372,38 @@ def test_cancelled_runtime_publication_cleans_uncommitted_files(files, monkeypat
     assert record['state'] == 'failed' and record['cleanup'] == 'complete'
     assert not store.path(record['version_id']).exists()
     assert not store.path(record['version_id'], staging=True).exists()
+
+
+@pytest.mark.parametrize('invalid', ['scope', 'request_key', 'max_bytes', 'connection'])
+def test_streamed_publication_closes_rejected_source_before_reading_or_spooling(files, monkeypatch, invalid):
+    import backend.capabilities.provider as module
+    state = files
+    class UnreadSource:
+        reads = 0
+        closed = False
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            self.reads += 1
+            pytest.fail('Rejected publication must not consume file data')
+        async def aclose(self):
+            self.closed = True
+    source = UnreadSource()
+    def forbidden_spool(*args, **kwargs):
+        pytest.fail('Rejected publication must not create a spool')
+    monkeypatch.setattr(module, 'receive_file', forbidden_spool)
+    arguments = {'request_key': 'rejected'}
+    if invalid == 'scope':
+        arguments['current'] = None
+    elif invalid == 'request_key':
+        arguments['request_key'] = ''
+    elif invalid == 'max_bytes':
+        arguments['max_bytes'] = 0
+    else:
+        state['client'].delete('/api/edges/' + state['edge']['id'])
+    before = len(state['services'].resources.artifacts.all())
+    error = PermissionDeniedError if invalid == 'connection' else ResourceValidationError
+    with pytest.raises(error):
+        state['call']('publish_conversation_attachment_stream', 'never-read.bin', source, **arguments)
+    assert source.closed and source.reads == 0
+    assert len(state['services'].resources.artifacts.all()) == before

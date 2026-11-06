@@ -24,6 +24,34 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.47 unifies referenced file transfers at 512 MiB per file and
+256 KiB per chunk. The host publishes its policy at `/api/files/policy` (also
+under the published Workspace API); browser clients do not carry separate size
+constants. `RuntimeExecution.read_file_stream`, streamed Conversation publication,
+and `CapabilityContext.stream_artifact_file` / `open_artifact_file` use this policy.
+`receive_file` lends a disk-backed, verified `TransferredFile` with a seekable
+stream, size, digest and `chunks()` iterator. Consume and close it within its context.
+
+Frontend `host.resourceFileAction(action, arguments, files)` sends binary multipart
+files separately from JSON metadata. Resource handlers receive those temporary
+leases in `NodeResourceContext.files`; agent capability handlers pass leases with
+`node_resource_action(..., files=...)` after authorized artifact reads. File handles
+and host paths are never accepted from model arguments. Resource upload batches
+retain the existing 1000-entry bound and have a 512 MiB total content budget.
+Authorization is checked throughout reads and again before persistence; cancellation
+joins the consumer before disposing its files. Existing byte-returning APIs remain
+small-file compatibility helpers, not the default file path. Parser expansion,
+model input, inline images and control frames have separate budgets.
+
+`RuntimeExecution.policy` is an immutable, host-owned `RuntimeExecutionPolicy`.
+Personal and unspecified providers default to no declared isolation and
+`workspace-write`; `remote=True` grants nothing. Only a verified dedicated VM
+may opt into an `environment` default. Harness connectors may offer a host-default
+setting that resolves this policy inside that VM, while explicit read-only or
+workspace-write choices remain strict. The effective policy must participate in
+runtime cache and session identities. This contract does not approve interactive
+permission requests or grant root access on the host.
+
 Plugin API 1.46 adds `AgentCapabilityProvider.stream_conversation_attachment`
 and `RuntimeExecution.write_file_stream(path, chunks)`. Together they stage a
 sent attachment as an execution-workspace file without buffering its entire

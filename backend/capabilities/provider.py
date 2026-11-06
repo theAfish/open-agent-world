@@ -5,6 +5,8 @@ from dataclasses import asdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ValidationError
+from contextlib import aclosing, asynccontextmanager
+from backend.file_transfer import MAX_FILE_BYTES, INLINE_FILE_BYTES, bounded_chunks, receive_file, validate_file_limit
 
 from backend.agents import ScopedToolDefinition, ToolParameter
 from backend.errors import ResourceValidationError, RuntimeUnavailableError
@@ -48,6 +50,7 @@ class _CapabilityContext:
     capability: Any = None
     arguments: Mapping[str, Any] | None = None
     _artifact_reads: list[tuple[str, str]] = field(default_factory=list, repr=False, compare=False)
+    _sandbox_reads: list[str] = field(default_factory=list, repr=False, compare=False)
 
     @property
     def state(self):
@@ -59,7 +62,7 @@ class _CapabilityContext:
         authorize()
         return self.services.card_state.bind(self.capability.target_id, authorize=authorize)
 
-    async def node_resource_action(self, capability, action, arguments):
+    async def node_resource_action(self, capability, action, arguments, *, files=None):
         from backend.capabilities.projection import authorize_invocation
         from backend.node_resources import ResourceActionRequest, invoke_resource_action
         async with self.services._node_mutation():
@@ -67,8 +70,10 @@ class _CapabilityContext:
             for collection_id, version_id in self._artifact_reads:
                 self.services.resources.artifacts.authorize(
                     self.services, collection_id, capability.agent_id, version_id=version_id)
+            for sandbox_id in self._sandbox_reads:
+                self.services.capabilities.require_sandbox_execute(capability.agent_id, sandbox_id)
             return await invoke_resource_action(self.services, capability.target_id, action,
-                ResourceActionRequest(arguments=arguments), capability=capability)
+                ResourceActionRequest(arguments=arguments), capability=capability, files=files)
 
     async def capture_plugin_view(self, capability, *, capture_kind, required_capability_kind, capture_options=None):
         from backend.visual_observation import observe_plugin_view
@@ -207,6 +212,47 @@ class _CapabilityContext:
                 data=base64.b64encode(data).decode("ascii"), overwrite=False,
             )
 
+    def _sandbox_file_transfer(self, capability, sandbox_id):
+        from backend.capabilities.projection import authorize_invocation
+        from backend.errors import PermissionDeniedError
+        from backend.sandbox.file_streams import SandboxFileTransfer
+        def authorize():
+            live = authorize_invocation(self.services, capability.agent_id, capability.id, self.arguments or {})
+            if live.kind != capability.kind or live.target_id != capability.target_id:
+                raise PermissionDeniedError('File transfer capability was revoked')
+            self.services.capabilities.require_sandbox_execute(capability.agent_id, sandbox_id)
+            self.services._require_card_type(sandbox_id, 'sandbox')
+        return SandboxFileTransfer(self.services, sandbox_id, authorize)
+
+    async def write_sandbox_workspace_file_stream(self, capability, sandbox_id, path, chunks, *, max_bytes=MAX_FILE_BYTES):
+        transfer = self._sandbox_file_transfer(capability, sandbox_id)
+        async with aclosing(chunks):
+            async with self.services.resources.artifacts.workspace(self.services, sandbox_id, capability.agent_id, allow_running=True):
+                async with self.services._node_mutation():
+                    transfer.authorize()
+                    await ensure_directory(self.services, sandbox_id, capability.agent_id)
+                    target = task_path(self.services, sandbox_id, path, capability.agent_id)
+                await transfer.write_file_stream(target, chunks, max_bytes=max_bytes)
+                return {**transfer.result, 'path': path}
+
+    async def stream_sandbox_workspace_file(self, capability, sandbox_id, path, *, max_bytes=MAX_FILE_BYTES):
+        transfer = self._sandbox_file_transfer(capability, sandbox_id)
+        async with self.services.resources.artifacts.workspace(self.services, sandbox_id, capability.agent_id, allow_running=True):
+            async with aclosing(transfer.read_file_stream(
+                    task_path(self.services, sandbox_id, path, capability.agent_id), max_bytes=max_bytes)) as stream:
+                async for chunk in stream:
+                    yield chunk
+            async with self.services._node_mutation(read_only=True):
+                transfer.authorize()
+                if sandbox_id not in self._sandbox_reads:
+                    self._sandbox_reads.append(sandbox_id)
+
+    @asynccontextmanager
+    async def open_sandbox_workspace_file(self, capability, sandbox_id, path, *, max_bytes=MAX_FILE_BYTES):
+        async with receive_file(self.stream_sandbox_workspace_file(capability, sandbox_id, path,
+                max_bytes=max_bytes), name=path, max_bytes=max_bytes) as file:
+            yield file
+
     async def write_sandbox_text_file(self, capability, path: str, content: str | None = None,
                                       overwrite: bool = False, *, edits: list | None = None) -> dict[str, Any]:
         """Persist bounded UTF-8 source through the pinned Sandbox file boundary."""
@@ -273,7 +319,26 @@ class _CapabilityContext:
         return data
 
     async def read_artifact_file(self, capability, collection_id: str, version_id: str,
-                                 path: str, *, max_bytes: int = 32 * 1024 * 1024) -> bytes:
+                                 path: str, *, max_bytes: int = INLINE_FILE_BYTES) -> bytes:
+        """Small-file compatibility helper; referenced files use stream/open."""
+        if type(max_bytes) is not int or not 0 < max_bytes <= INLINE_FILE_BYTES:
+            raise ResourceValidationError("Inline artifact reads are limited to 32 MiB; use stream_artifact_file")
+        content = bytearray()
+        async with aclosing(self.stream_artifact_file(capability, collection_id, version_id, path,
+                                                     max_bytes=max_bytes)) as stream:
+            async for chunk in stream:
+                content.extend(chunk)
+        return bytes(content)
+
+    @asynccontextmanager
+    async def open_artifact_file(self, capability, collection_id: str, version_id: str,
+                                 path: str, *, max_bytes: int = MAX_FILE_BYTES):
+        async with receive_file(self.stream_artifact_file(capability, collection_id, version_id,
+                                path, max_bytes=max_bytes), name=path, max_bytes=max_bytes) as file:
+            yield file
+
+    async def stream_artifact_file(self, capability, collection_id: str, version_id: str,
+                                   path: str, *, max_bytes: int = MAX_FILE_BYTES):
         """Read verified artifact bytes for trusted plugin code, never as model input.
 
         Destination and independently granted source access must remain live through
@@ -284,8 +349,7 @@ class _CapabilityContext:
         from backend.capabilities.projection import authorize_invocation
         from backend.errors import NotFoundError, PermissionDeniedError
 
-        if type(max_bytes) is not int or not 0 < max_bytes <= 32 * 1024 * 1024:
-            raise ResourceValidationError("Artifact transfer limit must be between 1 byte and 32 MiB")
+        validate_file_limit(max_bytes)
         store = self.services.resources.artifacts
 
         def authorize():
@@ -304,23 +368,19 @@ class _CapabilityContext:
             if entry["size"] > max_bytes:
                 raise ResourceValidationError(f"Artifact file exceeds the {max_bytes}-byte transfer limit")
 
-        content = bytearray()
         # Never enter ArtifactStore's lock while holding the graph lock: publication
         # acquires them in the opposite order. Recheck after each awaited read instead.
-        async with aclosing(store.read(self.services, collection_id, version_id, path,
-                                       capability.agent_id)) as stream:
+        async with aclosing(bounded_chunks(store.read(self.services, collection_id, version_id, path,
+                                       capability.agent_id), max_bytes=max_bytes)) as stream:
             async for chunk in stream:
                 async with self.services._node_mutation(read_only=True):
                     authorize()
-                if len(content) + len(chunk) > max_bytes:
-                    raise ResourceValidationError(f"Artifact file exceeds the {max_bytes}-byte transfer limit")
-                content.extend(chunk)
+                yield chunk
         async with self.services._node_mutation(read_only=True):
             authorize()
             reference = (collection_id, version_id)
             if reference not in self._artifact_reads:
                 self._artifact_reads.append(reference)
-        return bytes(content)
 
     async def communicate(
         self, source_agent_id: str, target_agent_id: str, message: str
@@ -557,6 +617,10 @@ class WorldAgentCapabilityProvider:
         conversation_id, session_id = manager._conversation_scope(run)
         if not conversation_id or not session_id:
             return None
+        # Parent lineage is retained for tracing/cancellation. It does not admit
+        # a private helper into its parent's conversation or attachment history.
+        if run.context_id != session_id:
+            return None
         session = self.services.conversations.get_session(conversation_id, session_id)
         self.services._require_session_participant(session, agent_id)
         self.services._require_conversation_connection(agent_id, conversation_id)
@@ -634,9 +698,9 @@ class WorldAgentCapabilityProvider:
         async with self.services._node_mutation(read_only=True):
             return self._conversation_attachment_entries(agent_id, run_id)
 
-    async def read_conversation_attachment(self, agent_id, run_id, version_id, path, *, max_bytes=32 * 1024 * 1024):
+    async def read_conversation_attachment(self, agent_id, run_id, version_id, path, *, max_bytes=INLINE_FILE_BYTES):
         from contextlib import aclosing
-        if type(max_bytes) is not int or not 0 < max_bytes <= 32 * 1024 * 1024:
+        if type(max_bytes) is not int or not 0 < max_bytes <= INLINE_FILE_BYTES:
             raise ResourceValidationError('Attachment read limit must be between 1 byte and 32 MiB')
         content = bytearray()
         async with aclosing(self.stream_conversation_attachment(agent_id, run_id, version_id, path, max_bytes=max_bytes)) as stream:
@@ -644,12 +708,10 @@ class WorldAgentCapabilityProvider:
                 content.extend(chunk)
         return bytes(content)
 
-    async def stream_conversation_attachment(self, agent_id, run_id, version_id, path, *, max_bytes=512 * 1024 * 1024):
+    async def stream_conversation_attachment(self, agent_id, run_id, version_id, path, *, max_bytes=MAX_FILE_BYTES):
         from contextlib import aclosing
         from backend.errors import PermissionDeniedError
-        from backend.resources.artifacts import MAX_CONVERSATION_UPLOAD_BYTES
-        if type(max_bytes) is not int or not 0 < max_bytes <= MAX_CONVERSATION_UPLOAD_BYTES:
-            raise ResourceValidationError('Attachment stream limit must be between 1 byte and 512 MiB')
+        validate_file_limit(max_bytes)
 
         def authorize():
             attachment = next((entry for entry in self._conversation_attachment_entries(agent_id, run_id)
@@ -679,31 +741,60 @@ class WorldAgentCapabilityProvider:
 
     async def publish_conversation_attachment(self, agent_id, run_id, name, data, *, request_key):
         import hashlib
+        if not isinstance(data, bytes) or len(data) > INLINE_FILE_BYTES:
+            raise ResourceValidationError('Runtime attachments must be bytes of at most 32 MiB')
+        async def chunks():
+            from backend.file_transfer import FILE_CHUNK_BYTES
+            for offset in range(0, len(data), FILE_CHUNK_BYTES):
+                yield data[offset:offset + FILE_CHUNK_BYTES]
+        return await self.publish_conversation_attachment_stream(agent_id, run_id, name, chunks(),
+            request_key=request_key, expected_sha256=hashlib.sha256(data).hexdigest())
+
+    async def publish_conversation_attachment_stream(self, agent_id, run_id, name, chunks, *,
+            request_key, expected_sha256=None, max_bytes=MAX_FILE_BYTES):
         from backend.conversations.attachments import resolve
         from backend.conversations.models import ConversationAttachmentRef
-        if not isinstance(data, bytes) or len(data) > 32 * 1024 * 1024:
-            raise ResourceValidationError('Runtime attachments must be bytes of at most 32 MiB')
-        if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128:
-            raise ResourceValidationError('Attachment request_key must contain 1 to 128 characters')
-        async with self.services._node_mutation(read_only=True):
+        store = self.services.resources.artifacts
+
+        def authorize():
             scope = self._conversation_file_scope(agent_id, run_id)
             if scope is None:
                 raise ResourceValidationError('Publishing attachments requires an active conversation Run')
             conversation_id, session_id, _ = scope
+            store.authorize(self.services, conversation_id, agent_id, 'artifact.publish')
+            return conversation_id, session_id
 
-        async def chunks():
-            from backend.sandbox.transfers import CHUNK_BYTES
-            for offset in range(0, len(data), CHUNK_BYTES):
-                yield data[offset:offset + CHUNK_BYTES]
+        # Own the source before any validation, including paths that never read
+        # a chunk. Reject invalid authority before consuming or spooling bytes.
+        async with aclosing(chunks):
+            validate_file_limit(max_bytes)
+            if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128:
+                raise ResourceValidationError('Attachment request_key must contain 1 to 128 characters')
+            async with self.services._node_mutation(read_only=True):
+                conversation_id, session_id = authorize()
 
-        record = await self.services.resources.artifacts.upload(self.services, conversation_id, session_id, name, chunks(),
-            agent_id=agent_id, run_id=run_id, request_key=request_key, expected_sha256=hashlib.sha256(data).hexdigest())
-        async with self.services._node_mutation(read_only=True):
-            if self._conversation_file_scope(agent_id, run_id) is None:
-                raise ResourceValidationError('Publishing attachments requires an active conversation Run')
-            attachment = resolve(self.services, conversation_id, session_id,
-                [ConversationAttachmentRef(version_id=record['version_id'], path=name)], agent_id)[0]
-            return {**attachment.model_dump(mode='json'), 'conversation_id': conversation_id, 'session_id': session_id}
+            async def checked_chunks():
+                async with aclosing(bounded_chunks(chunks, max_bytes=max_bytes)) as source:
+                    async for chunk in source:
+                        async with self.services._node_mutation(read_only=True):
+                            if authorize() != (conversation_id, session_id):
+                                raise ResourceValidationError('Attachment publication scope changed')
+                        yield chunk
+                async with self.services._node_mutation(read_only=True):
+                    authorize()
+
+            if expected_sha256 is None:
+                async with receive_file(checked_chunks(), name=name, max_bytes=max_bytes) as file:
+                    return await self.publish_conversation_attachment_stream(agent_id, run_id, name, file.chunks(),
+                        request_key=request_key, expected_sha256=file.sha256, max_bytes=max_bytes)
+            async with aclosing(checked_chunks()) as source:
+                record = await store.upload(self.services, conversation_id, session_id, name, source,
+                    agent_id=agent_id, run_id=run_id, request_key=request_key, expected_sha256=expected_sha256)
+            async with self.services._node_mutation(read_only=True):
+                authorize()
+                attachment = resolve(self.services, conversation_id, session_id,
+                    [ConversationAttachmentRef(version_id=record['version_id'], path=name)], agent_id)[0]
+                return {**attachment.model_dump(mode='json'), 'conversation_id': conversation_id, 'session_id': session_id}
 
     async def publish_execution(self, agent_id, run_id, snapshot):
         from backend.plugins.execution_graph import ExecutionSnapshot, MAX_EXECUTION_BYTES

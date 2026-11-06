@@ -70,13 +70,6 @@ const shortId = (value: string) => value.length > 13 ? `${value.slice(0, 8)}…`
 const bytes = (value: number) => value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 / 1024).toFixed(1)} MiB`;
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 
-const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onerror = () => reject(reader.error ?? new Error("File read failed"));
-  reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
-  reader.readAsDataURL(file);
-});
-
 /** The name an upload gets the moment its files are dropped, before anyone has
  * typed one: the first file's stem, counting the rest. Confirmed or changed in the
  * extraction window. */
@@ -406,9 +399,8 @@ export function Workspace({ host, card }: PluginViewProps) {
       name: provisionalName(list), notes: "", ...(activeGroup ? { group_id: activeGroup } : {}) });
     const bundle = result.bundle as Bundle;
     for (const file of list) {
-      const content = await fileBase64(file);
-      await call("experiment_ingest", { bundle_id: bundle.id, filename: file.name, content_base64: content,
-        media_type: file.type || "application/octet-stream" });
+      await host.resourceFileAction("experiment_ingest", { bundle_id: bundle.id, filename: file.name,
+        media_type: file.type || "application/octet-stream" }, { file });
     }
     setBundleId(bundle.id);
     setNotice(t("{v0} file(s) uploaded as \"{v1}\" · converting", { v0: list.length, v1: bundle.name }));
@@ -427,9 +419,8 @@ export function Workspace({ host, card }: PluginViewProps) {
     const list = Array.from(files);
     if (!list.length) return;
     for (const file of list) {
-      const content = await fileBase64(file);
-      await call("experiment_ingest", { bundle_id: bundle.id, filename: file.name, content_base64: content,
-        media_type: file.type || "application/octet-stream" });
+      await host.resourceFileAction("experiment_ingest", { bundle_id: bundle.id, filename: file.name,
+        media_type: file.type || "application/octet-stream" }, { file });
     }
     setNotice(t("{v0} uploaded · converting", { v0: list.length }));
     await refresh();
@@ -856,8 +847,8 @@ export function Workspace({ host, card }: PluginViewProps) {
         <SchemaEditor busy={busy} schemas={experimentSchemas} kind="experiment" call={call} perform={perform}
           draft={deployed ? undefined : { ready: !!selectedModel, modelSelect,
             convert: async file => {
-              const sample = await call("schema_sample", { filename: file.name, content_base64: await fileBase64(file),
-                media_type: file.type || "application/octet-stream" });
+              const sample = await host.resourceFileAction("schema_sample", { filename: file.name,
+                media_type: file.type || "application/octet-stream" }, { file });
               return { markdown: String(sample.markdown), truncated: !!sample.truncated };
             },
             send: body => request(`knowledge/${card.id}/schema-draft`, { ...body, model: selectedModel }, false) as

@@ -307,6 +307,9 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  fileTransferPolicy(): Promise<{ max_file_bytes: number; chunk_bytes: number }> {
+    return request('/files/policy');
+  },
   restartApplication(): Promise<{ instance_id: string }> {
     return request('/application/restart', { method: 'POST', headers: { 'X-OAW-Restart': '1' } });
   },
@@ -481,6 +484,21 @@ export const worldApi = {
   async nodeResourceAction(id: string, action: string, args: Record<string, unknown>, confirm = false, sessionId: string | null = cardStateSession(id) ?? null): Promise<Record<string, unknown>> {
     return request(`/nodes/${encodeURIComponent(id)}/resource/${encodeURIComponent(action)}`, {
       method: "POST", headers: stateSessionHeaders(sessionId), body: JSON.stringify({ arguments: args, confirm }),
+    });
+  },
+
+  async nodeResourceFileAction(id: string, action: string, args: Record<string, unknown>, files: Record<string, File>, confirm = false, sessionId: string | null = cardStateSession(id) ?? null): Promise<Record<string, unknown>> {
+    const policy = await worldApi.fileTransferPolicy();
+    const body = new FormData();
+    body.append('request', JSON.stringify({ arguments: args, confirm }));
+    let total = 0;
+    for (const [key, file] of Object.entries(files)) {
+      total += file.size;
+      if (total > policy.max_file_bytes) throw new Error(`Upload exceeds ${policy.max_file_bytes / 1024 / 1024} MiB: ${file.name}`);
+      body.append(key, file, file.name);
+    }
+    return request(`/nodes/${encodeURIComponent(id)}/resource/${encodeURIComponent(action)}/files`, {
+      method: 'POST', headers: stateSessionHeaders(sessionId), body,
     });
   },
 

@@ -6,7 +6,11 @@ from backend.packs.environments import PackEnvironmentManager, PythonEnvironment
 from backend.packs.executables import ExecutableEnvironmentManager, ExecutableEnvironmentSpec, ExecutableHandle
 from .context import PluginContext, PluginEnvironment
 from backend.agents.execution import (
-    RuntimeExecution, RuntimeExecutionProvider, RuntimeExecutionRequest, RuntimeProcess,
+    RuntimeExecution, RuntimeExecutionProvider, RuntimeExecutionRequest, RuntimeExecutionPolicy, RuntimeProcess,
+)
+from backend.file_transfer import (
+    MAX_FILE_BYTES, FILE_CHUNK_BYTES, INLINE_FILE_BYTES, TransferredFile,
+    receive_file, bounded_chunks, file_transfer_policy,
 )
 from backend.execution_config import ComputeTarget, EnvironmentProfile, SecretRequirement
 from backend.security.execution_folders import FolderRequirement, FileRequirement, PathRequirement
@@ -101,6 +105,8 @@ from backend.runs import InvocationContext, RuntimeInput
 from backend.world.models import Card, CardCreate, CardPatch, Edge
 
 __all__ = [
+    "RuntimeExecutionPolicy", "MAX_FILE_BYTES", "FILE_CHUNK_BYTES", "INLINE_FILE_BYTES",
+    "TransferredFile", "receive_file", "bounded_chunks", "file_transfer_policy",
     "PluginIntegrityError",
     "declarative_plugin",
     "PackEnvironmentManager",
