@@ -199,4 +199,3 @@ class FileTransferEndpoint:
 
     async def _file_download(self, operation, path, *, root='workspace', **options):
         raise RuntimeUnavailableError('This execution provider does not support streamed file reads')
-
