@@ -7,8 +7,6 @@ restarts so interrupted imports can be resumed without duplicating materials.
 """
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 import io
 import json
@@ -19,22 +17,25 @@ import tarfile
 import threading
 import uuid
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Literal
+from types import SimpleNamespace
 
 from pydantic import Field
 from sqlalchemy import Column, Integer, LargeBinary, MetaData, String, Table, Text, delete, or_, select, update
 
 from .actions import (
-    ACTIVE_JOBS, MAX_UPLOAD_BYTES, Request, _actor, _bounded, _client,
+    ACTIVE_JOBS, Request, _actor, _bounded, _client,
     _record_link, _uuid, process_sources, project_removed,
 )
 from . import projection_graph
 from .errors import KnowledgeError
 from .pipelines import PIPELINE_NAME
+from .file_io import INLINE_FILE_BYTES, file_chunk_bytes, file_limit, input_file
 
-MAX_IMPORT_BYTES = MAX_UPLOAD_BYTES
+MAX_ARCHIVE_FILE_BYTES = 32 * 1024 * 1024  # Archive expansion safety, independent of inline transport.
 MAX_EXPANDED_BYTES = 128 * 1024 * 1024
 MAX_FILES = 1000
 MAX_ARCHIVE_ENTRIES = 4000
@@ -67,6 +68,17 @@ _UPLOADS = Table(
     Column("size", Integer, nullable=False),
     Column("data", LargeBinary, nullable=False),
 )
+_STREAM_UPLOADS = Table(
+    "oaw_project_import_stream", _METADATA,
+    Column("token", String(36), primary_key=True),
+    Column("id", String(64), primary_key=True),
+    Column("relative_path", String(1024), nullable=False),
+    Column("media_type", String(200), nullable=False),
+    Column("size", Integer, nullable=False),
+    Column("sha256", String(64), nullable=False),
+    Column("object_key", String(200)),
+)
+_IMPORT_BUCKET = 'oaw-project-imports'
 
 
 def _schema(kb):
@@ -315,7 +327,8 @@ class ImportFile(Request):
     filename: str = Field(min_length=1, max_length=255)
     relative_path: str | None = Field(default=None, max_length=1024)
     media_type: str | None = Field(default=None, max_length=200)
-    content_base64: str = Field(min_length=1)
+    content_base64: str | None = Field(default=None, min_length=1)
+    file_key: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ProjectImportPreview(Request):
@@ -369,43 +382,52 @@ def _archive_path(name, *, directory=False):
     return _path(clean)
 
 
-def _expand(files):
+def _expand(files, *, max_bytes):
     expanded = []
     seen = set()
     total = 0
+    archive_total = 0
 
-    def add(path, data, media_type=None):
-        nonlocal total
+    def add(path, file, media_type=None, *, archived=False):
+        nonlocal total, archive_total
         path = _path(path)
         if path in seen:
             raise KnowledgeError(f"Import contains duplicate path: {path}")
         if len(expanded) >= MAX_FILES:
             raise KnowledgeError(f"An import may contain at most {MAX_FILES} files")
-        if len(data) > MAX_UPLOAD_BYTES:
+        if archived and file.size_bytes > MAX_ARCHIVE_FILE_BYTES:
             raise KnowledgeError("Each imported file is limited to 32 MiB")
-        total += len(data)
-        if total > MAX_EXPANDED_BYTES:
+        total += file.size_bytes
+        archive_total += file.size_bytes if archived else 0
+        if total > max_bytes:
+            raise KnowledgeError('Import exceeds the file transfer limit')
+        if archive_total > MAX_EXPANDED_BYTES:
             raise KnowledgeError("Expanded import exceeds 128 MiB")
         seen.add(path)
-        file_key = path + "\0" + hashlib.sha256(data).hexdigest()
+        file_key = path + "\0" + file.sha256
         expanded.append({"id": hashlib.sha256(file_key.encode()).hexdigest(), "relative_path": path,
                          "media_type": media_type or mimetypes.guess_type(path)[0] or "application/octet-stream",
-                         "size": len(data), "data": data})
+                         "size": file.size_bytes, "sha256": file.sha256, "file": file})
 
-    raw_size = sum(len(file["data"]) for file in files)
-    if raw_size > MAX_IMPORT_BYTES:
-        raise KnowledgeError("An import upload is limited to 32 MiB")
+    def lease(data):
+        return SimpleNamespace(stream=io.BytesIO(data), size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+
+    files = [{**file, 'file': file.get('file') or lease(file['data'])} for file in files]
+    raw_size = sum(file['file'].size_bytes for file in files)
+    if raw_size > max_bytes:
+        raise KnowledgeError("An import upload exceeds the file transfer limit")
     for file in files:
         path = _path(file.get("relative_path") or file["filename"])
         kind = _archive_kind(path)
-        data = file["data"]
+        source = file['file']
+        source.stream.seek(0)
         if not kind:
-            add(path, data, file.get("media_type"))
+            add(path, source, file.get("media_type"))
             continue
         members = []
         try:
             if kind == "zip":
-                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                with zipfile.ZipFile(source.stream) as archive:
                     infos = archive.infolist()
                     if len(infos) > MAX_ARCHIVE_ENTRIES:
                         raise KnowledgeError("Archive contains too many entries")
@@ -418,15 +440,15 @@ def _expand(files):
                             continue
                         if info.flag_bits & 1:
                             raise KnowledgeError("Encrypted archives are not supported")
-                        if info.file_size > MAX_UPLOAD_BYTES or info.file_size > max(1, info.compress_size) * MAX_EXPANSION_RATIO:
+                        if info.file_size > MAX_ARCHIVE_FILE_BYTES or info.file_size > max(1, info.compress_size) * MAX_EXPANSION_RATIO:
                             raise KnowledgeError("Archive expansion limit exceeded")
                         with archive.open(info) as content:
-                            value = content.read(MAX_UPLOAD_BYTES + 1)
+                            value = content.read(MAX_ARCHIVE_FILE_BYTES + 1)
                         members.append((member_path, value))
-                        if sum(len(value) for _, value in members) + total > MAX_EXPANDED_BYTES:
+                        if sum(len(value) for _, value in members) + archive_total > MAX_EXPANDED_BYTES:
                             raise KnowledgeError("Expanded import exceeds 128 MiB")
             else:
-                with tarfile.open(fileobj=io.BytesIO(data), mode="r|*") as archive:
+                with tarfile.open(fileobj=source.stream, mode="r|*") as archive:
                     for count, info in enumerate(archive, 1):
                         if count > MAX_ARCHIVE_ENTRIES:
                             raise KnowledgeError("Archive contains too many entries")
@@ -435,16 +457,16 @@ def _expand(files):
                             continue
                         if not info.isfile():
                             raise KnowledgeError("Archive links and special files are not allowed")
-                        if info.size > MAX_UPLOAD_BYTES:
+                        if info.size > MAX_ARCHIVE_FILE_BYTES:
                             raise KnowledgeError("Archive expansion limit exceeded")
                         content = archive.extractfile(info)
                         if content is None:
                             raise KnowledgeError("Archive file cannot be read")
                         with content:
-                            value = content.read(MAX_UPLOAD_BYTES + 1)
+                            value = content.read(MAX_ARCHIVE_FILE_BYTES + 1)
                         members.append((member_path, value))
                         expanded_size = sum(len(value) for _, value in members)
-                        if expanded_size + total > MAX_EXPANDED_BYTES or expanded_size > max(1, len(data)) * MAX_EXPANSION_RATIO:
+                        if expanded_size + archive_total > MAX_EXPANDED_BYTES or expanded_size > max(1, source.size_bytes) * MAX_EXPANSION_RATIO:
                             raise KnowledgeError("Archive expansion limit exceeded")
         except (zipfile.BadZipFile, tarfile.TarError, RuntimeError, EOFError, OSError) as error:
             raise KnowledgeError(f"Cannot read archive: {error}") from error
@@ -455,7 +477,7 @@ def _expand(files):
         parent = str(PurePosixPath(path).parent)
         for member_path, value in members:
             prefix = (parent + "/" if parent != "." else "") if rooted else _archive_stem(path) + "/"
-            add(prefix + member_path, value)
+            add(prefix + member_path, lease(value), archived=True)
     if not expanded:
         raise KnowledgeError("The import contains no files")
     return expanded
@@ -487,6 +509,22 @@ def _grouped(files, grouping, depth):
     return {"files": output, "projects": list(projects_by_key.values()), "grouping": grouping, "depth": depth}
 
 
+def _staged_files(connection, token):
+    legacy = connection.execute(select(_UPLOADS).where(_UPLOADS.c.token == token)).mappings().all()
+    streamed = connection.execute(select(_STREAM_UPLOADS).where(_STREAM_UPLOADS.c.token == token)).mappings().all()
+    return sorted([dict(file) for file in (*legacy, *streamed)], key=lambda file: file['relative_path'])
+
+
+@contextmanager
+def _staged_stream(kb, file):
+    if 'object_key' in file:
+        with kb.object_store.open(_IMPORT_BUCKET, file['object_key']) as stream:
+            yield stream
+    else:
+        with io.BytesIO(file['data']) as stream:
+            yield stream
+
+
 def _load_import(kb, context, token):
     token = str(_uuid(token, "token"))
     _schema(kb)
@@ -496,27 +534,27 @@ def _load_import(kb, context, token):
             raise KnowledgeError("Import preview was not found for this actor")
         if not row["plan"] and datetime.fromisoformat(row["created_at"]) + PREVIEW_LIFETIME < datetime.now(timezone.utc):
             raise KnowledgeError("Import preview expired; upload the files again")
-        files = connection.execute(select(_UPLOADS).where(_UPLOADS.c.token == token)
-                                   .order_by(_UPLOADS.c.relative_path)).mappings().all()
-    return dict(row), [dict(file) for file in files]
+        files = _staged_files(connection, token)
+    return dict(row), files
 
 
 def preview_files(context, files, *, grouping="top", depth=1, identity=None):
-    """Internal byte bridge for authorized conversation attachments."""
+    with _IMPORT_LOCK:
+        return _preview_files(context, files, grouping=grouping, depth=depth, identity=identity)
+
+
+def _preview_files(context, files, *, grouping="top", depth=1, identity=None):
+    """Stage caller-owned verified file handles; legacy byte callers remain bounded."""
     options = ProjectImportPreview.model_validate({"grouping": grouping, "depth": depth})
-    expanded = _expand(files)
+    expanded = _expand(files, max_bytes=file_limit(context))
     kb = _client(context)
     _schema(kb)
     token = str(uuid.uuid5(_NAMESPACE, _actor(context) + ":" + identity)) if identity else str(uuid.uuid4())
     now = datetime.now(timezone.utc)
-    with kb.oaw_engine.begin() as connection:
-        expired = select(_IMPORTS.c.token).where(
-            _IMPORTS.c.created_at < (now - PREVIEW_LIFETIME).isoformat(), _IMPORTS.c.plan.is_(None))
-        connection.execute(delete(_UPLOADS).where(_UPLOADS.c.token.in_(expired)))
-        connection.execute(delete(_IMPORTS).where(_IMPORTS.c.token.in_(expired)))
+    with kb.oaw_engine.connect() as connection:
         existing = connection.execute(select(_IMPORTS).where(_IMPORTS.c.token == token)).mappings().first()
         if existing is not None:
-            existing_files = connection.execute(select(_UPLOADS).where(_UPLOADS.c.token == token)).mappings().all()
+            existing_files = _staged_files(connection, token)
             if {file["id"] for file in expanded} != {file["id"] for file in existing_files}:
                 raise KnowledgeError("Import identity already belongs to different content")
             if existing["plan"]:
@@ -527,8 +565,39 @@ def preview_files(context, files, *, grouping="top", depth=1, identity=None):
                 result["committed"] = True
                 result["result"] = {**json.loads(existing["result"]), "reused": True}
             return _bounded(result)
-        connection.execute(_IMPORTS.insert().values(token=token, actor=_actor(context), created_at=now.isoformat()))
-        connection.execute(_UPLOADS.insert(), [{"token": token, **file} for file in expanded])
+    # Object writes use MKB's own engine and must stay outside a plugin SQL write
+    # transaction. Preview tables retain only metadata, never whole file BLOBs.
+    staged = []
+    try:
+        for file in expanded:
+            key = token + '/' + file['id']
+            file['file'].stream.seek(0)
+            staged.append(key)
+            try:
+                kb.object_store.put_stream(_IMPORT_BUCKET, key, file['file'].stream,
+                    max_bytes=file_limit(context), chunk_size=file_chunk_bytes(context),
+                    expected_size=file['size'], expected_sha256=file['sha256'])
+            except ValueError as error:
+                raise KnowledgeError('Staged file differs from its verified input') from error
+        with kb.oaw_engine.begin() as connection:
+            connection.execute(_IMPORTS.insert().values(token=token, actor=_actor(context), created_at=now.isoformat()))
+            connection.execute(_STREAM_UPLOADS.insert(), [
+                {**{key: file[key] for key in ('id', 'relative_path', 'media_type', 'size', 'sha256')},
+                 'token': token, 'object_key': token + '/' + file['id']} for file in expanded])
+    except BaseException:
+        for key in staged:
+            kb.object_store.delete(_IMPORT_BUCKET, key)
+        raise
+    with kb.oaw_engine.begin() as connection:
+        expired = select(_IMPORTS.c.token).where(
+            _IMPORTS.c.created_at < (now - PREVIEW_LIFETIME).isoformat(), _IMPORTS.c.plan.is_(None))
+        expired_keys = connection.execute(select(_STREAM_UPLOADS.c.object_key).where(_STREAM_UPLOADS.c.token.in_(expired))).scalars().all()
+        connection.execute(delete(_UPLOADS).where(_UPLOADS.c.token.in_(expired)))
+        connection.execute(delete(_STREAM_UPLOADS).where(_STREAM_UPLOADS.c.token.in_(expired)))
+        connection.execute(delete(_IMPORTS).where(_IMPORTS.c.token.in_(expired)))
+    for key in expired_keys:
+        if key:
+            kb.object_store.delete(_IMPORT_BUCKET, key)
     return _bounded({"token": token, **_grouped(expanded, options.grouping, options.depth)})
 
 
@@ -542,18 +611,15 @@ def project_import_preview(context, arguments):
             raise KnowledgeError("This import is already committed; open its projects")
         return _bounded({"token": row["token"], **_grouped(files, request.grouping, request.depth)})
     files = []
-    encoded_size = sum(len(file.content_base64) for file in request.files)
-    if encoded_size > ((MAX_IMPORT_BYTES + 2) // 3) * 4:
+    encoded_size = sum(len(file.content_base64 or '') for file in request.files)
+    if encoded_size > ((INLINE_FILE_BYTES + 2) // 3) * 4:
         raise KnowledgeError("An import upload is limited to 32 MiB")
     for file in request.files:
         if "/" in file.filename or "\\" in file.filename:
             raise KnowledgeError("filename must not contain a path separator")
-        try:
-            data = base64.b64decode(file.content_base64, validate=True)
-        except (binascii.Error, ValueError):
-            raise KnowledgeError("content_base64 is not valid base64") from None
+        lease = input_file(context, file.filename, file.content_base64, key=file.file_key or 'file')
         files.append({"filename": file.filename, "relative_path": file.relative_path,
-                      "media_type": file.media_type, "data": data})
+                      "media_type": file.media_type, "file": lease})
     return preview_files(context, files, grouping=request.grouping, depth=request.depth)
 
 
@@ -590,6 +656,8 @@ def project_import_commit(context, arguments):
         selected = [file for file in files if assignments[file["id"]]["project_key"] is not None]
         if not selected:
             raise KnowledgeError("Select at least one file to import")
+        if sum(file['size'] for file in selected) > file_limit(context):
+            raise KnowledgeError('Import exceeds the file transfer limit')
         wanted = {assignments[file["id"]]["project_key"] for file in selected}
         if wanted - groups.keys():
             raise KnowledgeError("Assignment names an unknown project")
@@ -628,13 +696,19 @@ def project_import_commit(context, arguments):
             assignment = assignments[file["id"]]
             project = created_projects[assignment["project_key"]]
             path = _path(assignment["project_relative_path"])
-            digest = hashlib.sha256(file["data"]).hexdigest()
+            digest = file['sha256'] if 'sha256' in file else hashlib.sha256(file['data']).hexdigest()
             identifier = uuid.uuid5(project.id, path + ":" + digest)
             source = kb.sources.get(identifier)
             if source is None:
-                source = kb.sources.add_bytes(project.id, file["data"], filename=PurePosixPath(path).name,
-                    media_type=file["media_type"], source_id=identifier,
-                    metadata={"relative_path": path, "uploaded_by": _actor(context)})
+                with _staged_stream(kb, file) as stream:
+                    source = kb.sources.add_stream(project.id, stream, filename=PurePosixPath(path).name,
+                        media_type=file["media_type"], source_id=identifier,
+                        max_bytes=file_limit(context), chunk_size=file_chunk_bytes(context),
+                        expected_size=file['size'], expected_sha256=digest,
+                        metadata={"relative_path": path, "uploaded_by": _actor(context)})
+            if (source.sha256 != digest or source.size != file['size'] or
+                    project.id not in source.collection_ids):
+                raise KnowledgeError('The retained source no longer matches this import')
             register_project_file(kb, project.id, source, path)
             source_ids.append(str(source.id))
         jobs = project_process(context, {"project_ids": [str(item.id) for item in created_projects.values()]})["jobs"] if request.auto_process else []
@@ -646,4 +720,8 @@ def project_import_commit(context, arguments):
             # Keep the manifest for immutable attachment identity reconciliation,
             # while releasing staged bytes as soon as their import is durable.
             connection.execute(update(_UPLOADS).where(_UPLOADS.c.token == row["token"]).values(data=b""))
+            connection.execute(update(_STREAM_UPLOADS).where(_STREAM_UPLOADS.c.token == row['token']).values(object_key=None))
+        for file in files:
+            if file.get('object_key'):
+                kb.object_store.delete(_IMPORT_BUCKET, file['object_key'])
         return result

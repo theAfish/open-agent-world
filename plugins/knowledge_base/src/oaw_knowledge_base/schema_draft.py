@@ -8,8 +8,6 @@ schema: the person reviews the draft in the editor first.
 """
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import re
 from typing import Any
@@ -19,6 +17,7 @@ from pydantic import Field
 from .actions import Request, _bounded, settings_of
 from .entry_schema import SCALARS, LISTS, is_compact
 from .errors import KnowledgeError
+from .file_io import input_file
 from .markdown import to_markdown
 
 MAX_SAMPLES = 5
@@ -31,7 +30,7 @@ KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 class SchemaSample(Request):
     filename: str = Field(min_length=1, max_length=255)
-    content_base64: str = Field(min_length=1)
+    content_base64: str | None = Field(default=None, min_length=1)
     media_type: str = Field(default="application/octet-stream", max_length=200)
 
 
@@ -40,17 +39,12 @@ def schema_sample(context, arguments):
     request = SchemaSample.model_validate(arguments)
     if "/" in request.filename or "\\" in request.filename:
         raise KnowledgeError("filename must not contain a path separator")
-    try:
-        data = base64.b64decode(request.content_base64, validate=True)
-    except (binascii.Error, ValueError):
-        raise KnowledgeError("content_base64 is not valid base64") from None
-    if not data:
-        raise KnowledgeError("The sample file is empty")
-    if len(data) > MAX_SAMPLE_BYTES:
+    file = input_file(context, request.filename, request.content_base64)
+    if file.size_bytes > MAX_SAMPLE_BYTES:
         raise KnowledgeError("Sample files are limited to 2 MiB")
     settings = settings_of(context)
     text, engine, _ = to_markdown(
-        data, request.filename, request.media_type, engine=settings["pdf_engine"],
+        file.stream, request.filename, request.media_type, engine=settings["pdf_engine"],
         mineru_base_url=settings["mineru_base_url"] or None, vision_model=settings["vision_model"],
         resolve_secret=getattr(context, "resolve_secret", None), resolve_model=getattr(context, "resolve_model", None))
     truncated = len(text) > MAX_SAMPLE_CHARS

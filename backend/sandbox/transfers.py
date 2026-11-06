@@ -10,8 +10,9 @@ from pathlib import Path
 
 from .files import parts, pinned
 from .models import SandboxSecurityError, SandboxValidationError
+from .file_policy import FILE_CHUNK_BYTES
 
-CHUNK_BYTES = 256 * 1024
+CHUNK_BYTES = FILE_CHUNK_BYTES
 MAX_ENTRIES = 10000
 
 

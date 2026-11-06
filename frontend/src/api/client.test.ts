@@ -14,6 +14,21 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it('uploads resource files as multipart and follows the host file policy', async () => {
+    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith('/files/policy')
+      ? { max_file_bytes: 10, chunk_bytes: 4 } : { saved: true }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const file = new File(['data'], 'input.xlsx');
+    await worldApi.nodeResourceFileAction('knowledge', 'ingest', { group_id: 'group' }, { file });
+    const [, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.headers as Headers).get('Content-Type')).toBeNull();
+    const body = init.body as FormData;
+    expect(JSON.parse(String(body.get('request')))).toEqual({ arguments: { group_id: 'group' }, confirm: false });
+    expect(body.get('file')).toBeInstanceOf(File);
+    await expect(worldApi.nodeResourceFileAction('knowledge', 'ingest', {}, { file: new File(['oversized data'], 'large.xlsx') })).rejects.toThrow('Upload exceeds');
+    expect(fetchMock).toHaveBeenCalledTimes(3); // second attempt read policy, never sent its file
+  });
   it('sends sandbox deletion and move paths through explicit mutation endpoints', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response('{}', { headers: { 'content-type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);

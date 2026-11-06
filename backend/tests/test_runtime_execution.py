@@ -6,8 +6,9 @@ import sys
 import pytest
 
 from backend.agents.execution import (
-    NativeRuntimeExecutionProvider, RuntimeExecutionBroker, RuntimeExecutionRequest,
+    NativeRuntimeExecutionProvider, RuntimeExecutionBroker, RuntimeExecutionPolicy, RuntimeExecutionRequest,
 )
+from backend.file_transfer import FILE_CHUNK_BYTES
 from backend.errors import ResourceValidationError, RuntimeUnavailableError
 
 
@@ -91,26 +92,120 @@ async def test_stream_cancellation_joins_file_side_effect_before_cleanup(tmp_pat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure', ['file_limit', 'chunk_limit'])
-async def test_stream_limits_abort_owned_staging_and_close_source(tmp_path, failure):
+@pytest.mark.parametrize('failure,match', [('file_limit', 'limit'), ('invalid_type', 'bytes')])
+async def test_stream_limits_abort_owned_staging_and_close_source(tmp_path, failure, match):
     host = await execution(tmp_path)
     closed = False
 
     async def content():
         nonlocal closed
         try:
-            yield b'x' * (256 * 1024 + 1) if failure == 'chunk_limit' else b'123'
+            yield b'x'
+            yield 'invalid' if failure == 'invalid_type' else b'123'
         finally:
             closed = True
 
     try:
-        with pytest.raises(ResourceValidationError, match='limit'):
+        with pytest.raises(ResourceValidationError, match=match):
             await host.write_file_stream('input/test.xlsx', content(),
-                max_bytes=512 * 1024 * 1024 if failure == 'chunk_limit' else 2)
+                max_bytes=512 * 1024 * 1024 if failure == 'invalid_type' else 2)
         assert closed
         assert not list((tmp_path / 'project').rglob('*.*'))
     finally:
         await host.close()
+
+
+@pytest.mark.asyncio
+async def test_stream_abort_failure_preserves_source_error(tmp_path, monkeypatch):
+    host = await execution(tmp_path)
+    original = host._file_upload
+    cleanup = []
+
+    async def upload(operation, *args, **kwargs):
+        result = await original(operation, *args, **kwargs)
+        if operation == 'upload_abort':
+            cleanup.append(True)
+            # The runtime applied cleanup, but its reply was lost.
+            raise RuntimeUnavailableError('private transport diagnostic')
+        return result
+
+    async def content():
+        yield b'partial input'
+        raise OSError('source stream interrupted')
+
+    monkeypatch.setattr(host, '_file_upload', upload)
+    try:
+        with pytest.raises(OSError, match='source stream interrupted') as failure:
+            await host.write_file_stream('input/test.xlsx', content())
+        assert cleanup == [True]
+        assert failure.value.__notes__ == ['File staging cleanup failed (RuntimeUnavailableError)']
+        assert not list((tmp_path / 'project').rglob('*.*'))
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('content', [b'', b'x' * (FILE_CHUNK_BYTES + 17)], ids=['empty', 'rechunked'])
+async def test_file_streams_normalize_source_chunks_and_verify_eof(tmp_path, content):
+    host = await execution(tmp_path)
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield content
+        finally:
+            closed = True
+
+    try:
+        target = await host.write_file_stream('input.bin', source())
+        chunks = [chunk async for chunk in host.read_file_stream(target)]
+        assert b''.join(chunks) == content and all(0 < len(chunk) <= FILE_CHUNK_BYTES for chunk in chunks)
+        assert closed
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_stream_read_rechecks_file_identity_after_last_yield(tmp_path):
+    host = await execution(tmp_path)
+    try:
+        target = await host.write_file('input.bin', b'original')
+        stream = host.read_file_stream(target)
+        assert await anext(stream) == b'original'
+        Path(target).write_bytes(b'changed')
+        with pytest.raises(ResourceValidationError, match='Source changed'):
+            await anext(stream)
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_stream_read_rejects_limits_traversal_and_hardlinks(tmp_path):
+    host = await execution(tmp_path)
+    try:
+        target = await host.write_file('input.bin', b'content')
+        with pytest.raises(ResourceValidationError, match='stream limit'):
+            await anext(host.read_file_stream(target, max_bytes=2))
+        with pytest.raises(ResourceValidationError, match='safe portable relative paths'):
+            await anext(host.read_file_stream('../outside'))
+        os.link(target, tmp_path / 'project/alias.bin')
+        with pytest.raises(ResourceValidationError, match='non-hardlinked'):
+            await anext(host.read_file_stream('alias.bin'))
+    finally:
+        await host.close()
+
+
+def test_runtime_policy_requires_explicit_isolation_and_is_immutable():
+    from dataclasses import FrozenInstanceError
+
+    policy = RuntimeExecutionPolicy()
+    assert policy.isolation == 'none' and policy.default_permission == 'workspace-write'
+    with pytest.raises(ValueError, match='dedicated VM'):
+        RuntimeExecutionPolicy(default_permission='environment')
+    assert RuntimeExecutionPolicy('dedicated-vm', 'environment').default_permission == 'environment'
+    with pytest.raises(FrozenInstanceError):
+        policy.isolation = 'dedicated-vm'
 
 
 @pytest.mark.asyncio

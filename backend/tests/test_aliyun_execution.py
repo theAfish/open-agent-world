@@ -1,5 +1,6 @@
 """Exercise the actual shipped relay over a local SDK transport, without cloud writes."""
 import asyncio
+from contextlib import aclosing
 from dataclasses import replace
 import inspect
 import json
@@ -28,6 +29,7 @@ class DuplexSDK(FakeSDK):
         super().__init__(root)
         self.handles={}
         self.file_uploads=[]
+        self.file_downloads=[]
         self.fail_kill=False
 
     async def create(self,**kwargs):
@@ -92,7 +94,19 @@ class DuplexSDK(FakeSDK):
             with open(path,'wb') as output:
                 output.write(data)
             sdk.file_uploads.append((path,len(data)))
-        sandbox.files=SimpleNamespace(write=write_file)
+        async def read_file(path, **options):
+            from e2b.sandbox_async.filesystem.filesystem import Filesystem
+            inspect.signature(Filesystem.read).bind(None, path, **options)
+            assert sys.platform=='linux' and options=={'format':'stream','user':'user','request_timeout':20}
+            assert path.startswith('/proc/') and '/fd/' in path
+            sdk.file_downloads.append(path)
+            async def chunks():
+                with open(path,'rb') as source:
+                    while chunk:=source.read(16384):
+                        yield chunk
+                        await asyncio.sleep(0)
+            return aclosing(chunks())
+        sandbox.files=SimpleNamespace(write=write_file,read=read_file)
         return sandbox
 
     async def kill(self,remote_id,**kwargs):
@@ -116,6 +130,8 @@ async def test_runtime_owns_private_networked_vm_and_persists_only_its_volume(tm
     try:
         assert one.environment['DEEPSEEK_API_KEY']=='approved-tool-fixture'
         assert 'OAW_ALIYUN_SANDBOX_API_KEY' not in one.environment
+        assert one.policy.isolation=='dedicated-vm'
+        assert one.policy.default_permission=='workspace-write'
         await one.write_file('result.txt',b'persistent')
         process=await one.spawn([sys.executable,'-I','-u','-c','print("ready",flush=True)'],env={})
         assert (await process.readline()).strip()==b'ready'
@@ -136,6 +152,42 @@ async def test_runtime_owns_private_networked_vm_and_persists_only_its_volume(tm
     finally:
         await two.close()
     assert not (tmp_path/'must-not-exist').exists()
+
+
+@pytest.mark.asyncio
+async def test_environment_permission_requires_an_explicit_operator_policy(tmp_path):
+    sdk=DuplexSDK(tmp_path)
+    provider=AliyunRuntimeExecutionProvider(tmp_path/'bindings',settings(),sdk=sdk,
+        default_permission='environment')
+    assert not sdk.created
+    assert provider.configuration(None)['default_permission']=='environment'
+    execution=await provider.open(request(tmp_path))
+    try:
+        assert execution.policy.isolation=='dedicated-vm'
+        assert execution.policy.default_permission=='environment'
+        assert sdk.commands[0][1]['user']=='user'
+        assert sdk.created[0]['secure'] and sdk.created[0]['network']['allow_public_traffic'] is False
+    finally:
+        await execution.close()
+    with pytest.raises(ValueError,match='permission'):
+        AliyunRuntimeExecutionProvider(tmp_path/'other',settings(),sdk=sdk,default_permission='full')
+
+
+@pytest.mark.asyncio
+async def test_fresh_vm_ownership_is_verified_before_any_execution_or_policy_claim(tmp_path):
+    class WrongOwnerSDK(DuplexSDK):
+        async def create(self,**kwargs):
+            sandbox=await super().create(**kwargs)
+            sandbox.metadata['oaw.profile']='another-profile'
+            return sandbox
+    sdk=WrongOwnerSDK(tmp_path)
+    provider=AliyunRuntimeExecutionProvider(tmp_path/'bindings',settings(),sdk=sdk,
+        default_permission='environment')
+    with pytest.raises(SandboxSecurityError,match='ownership'):
+        await provider.open(request(tmp_path))
+    assert not sdk.commands and not sdk.killed
+    binding=next((tmp_path/'bindings').glob('*/aliyun-sandbox.json'))
+    assert json.loads(binding.read_text())['state']=='uncertain'
 
 
 @pytest.mark.asyncio
@@ -160,16 +212,27 @@ async def test_streamed_file_uses_binary_sdk_and_preserves_verified_output(tmp_p
     sdk=DuplexSDK(tmp_path)
     execution=await AliyunRuntimeExecutionProvider(tmp_path/'bindings',settings(),sdk=sdk).open(request(tmp_path))
     chunk=bytes(range(256))*1024
+    count=516  # 129 MiB would exceed the stdout quota even without base64 expansion.
     async def source():
-        for _ in range(132):  # 33 MiB exceeds one Alibaba file API request's limit.
+        for _ in range(count):
             yield chunk
     try:
         target=await execution.write_file_stream('attachment.bin',source())
-        expected=hashlib.sha256(chunk*132).hexdigest()
+        expected_digest=hashlib.sha256()
+        for _ in range(count):
+            expected_digest.update(chunk)
+        expected=expected_digest.hexdigest()
         with Path(target).open('rb') as content:
             assert hashlib.file_digest(content,'sha256').hexdigest()==expected
-        assert len(sdk.file_uploads)==132
+        result_digest,size=hashlib.sha256(),0
+        async with aclosing(execution.read_file_stream('attachment.bin')) as content:
+            async for block in content:
+                result_digest.update(block)
+                size+=len(block)
+        assert size==129*1024*1024 and result_digest.hexdigest()==expected
+        assert len(sdk.file_uploads)==len(sdk.file_downloads)==count
         assert all(size==len(chunk) for _,size in sdk.file_uploads)
+        assert execution.transport.output_bytes<1024*1024
     finally:
         await execution.close()
     assert len(sdk.killed)==1 and not sdk.instances

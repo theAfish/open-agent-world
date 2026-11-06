@@ -111,3 +111,43 @@ async def test_chunk_tokens_quota_discard_and_close(tmp_path):
                 os.fstat(slot['descriptor'])
         with pytest.raises(ValueError, match='relay is closed'):
             await prepare(relay, b'x')
+
+
+@pytest.mark.asyncio
+async def test_download_leases_snapshot_only_pinned_scoped_chunks_and_release_descriptors(tmp_path):
+    from backend.errors import ResourceValidationError
+    async with receiver(tmp_path) as relay:
+        await relay.execution.write_file('result.bin', b'file-result')
+        info = await relay.execution._file_download('download_info', 'result.bin')
+        arguments = {'path': 'result.bin', 'root': 'workspace', 'expected': info['signature'], 'offset': 0}
+        slot = await relay.dispatch('prepare_file_download', arguments)
+        assert slot['size'] == 11 and slot['sha256'] == hashlib.sha256(b'file-result').hexdigest()
+        assert slot['pid'] == os.getpid() and os.read(slot['descriptor'], CHUNK_BYTES) == b'file-result'
+        assert set(slot) == {'chunk_id', 'descriptor', 'pid', 'size', 'sha256'}
+        await relay.dispatch('discard_file_chunk', {'chunk_id': slot['chunk_id']})
+        with pytest.raises(OSError):
+            os.fstat(slot['descriptor'])
+        assert not relay.file_chunks
+        (tmp_path / 'project/result.bin').write_bytes(b'replaced')
+        with pytest.raises(ResourceValidationError, match='changed'):
+            await relay.dispatch('prepare_file_download', arguments)
+        assert not relay.file_chunks
+
+
+@pytest.mark.asyncio
+async def test_download_leases_share_quota_and_cannot_be_repurposed_as_uploads(tmp_path):
+    async with receiver(tmp_path) as relay:
+        await relay.execution.write_file('result.bin', b'result')
+        info = await relay.execution._file_download('download_info', 'result.bin')
+        arguments = {'path': 'result.bin', 'root': 'workspace', 'expected': info['signature'], 'offset': 0}
+        uploads = [await prepare(relay, b'x') for _ in range(3)]
+        download = await relay.dispatch('prepare_file_download', arguments)
+        with pytest.raises(ValueError, match='limit exceeded'):
+            await prepare(relay, b'x')
+        with pytest.raises(ValueError, match='not an upload'):
+            await relay.dispatch('upload_file', {'operation': 'upload_chunk', 'path': 'input.bin',
+                'root': 'workspace', 'chunk_id': download['chunk_id']})
+        await relay.dispatch('close', {})
+        for slot in [*uploads, download]:
+            with pytest.raises(OSError):
+                os.fstat(slot['descriptor'])

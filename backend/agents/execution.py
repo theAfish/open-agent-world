@@ -7,20 +7,38 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import asyncio
-import base64
-from collections.abc import AsyncIterator, Mapping
-from contextlib import aclosing, asynccontextmanager, suppress
+from collections.abc import Mapping
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import signal
 import stat
 import subprocess
+from typing import Literal
 
 from backend.errors import ResourceValidationError, RuntimeUnavailableError
+from backend.file_transfer import (
+    INLINE_FILE_BYTES, MAX_FILE_BYTES, FileTransferEndpoint, _settle,
+)
 
-FILE_LIMIT = 32 * 1024 * 1024
-FILE_STREAM_LIMIT = 512 * 1024 * 1024
+# Compatibility names for the small byte convenience API and logical file bound.
+FILE_LIMIT = INLINE_FILE_BYTES
+FILE_STREAM_LIMIT = MAX_FILE_BYTES
+
+
+@dataclass(frozen=True)
+class RuntimeExecutionPolicy:
+    """Host-selected runtime defaults; location alone never grants isolation."""
+
+    isolation: Literal['none', 'dedicated-vm'] = 'none'
+    default_permission: Literal['workspace-write', 'environment'] = 'workspace-write'
+
+    def __post_init__(self):
+        if (self.isolation not in {'none', 'dedicated-vm'}
+                or self.default_permission not in {'workspace-write', 'environment'}
+                or self.default_permission == 'environment' and self.isolation != 'dedicated-vm'):
+            raise ValueError('Environment permissions require a dedicated VM isolation policy')
 
 
 @dataclass(frozen=True)
@@ -57,10 +75,11 @@ class RuntimeProcess(ABC):
         """Join cleanup; repeated calls may retry a failed cleanup."""
 
 
-class RuntimeExecution(ABC):
+class RuntimeExecution(FileTransferEndpoint, ABC):
     """One operation's processes, private file roots and loopback tool access."""
 
     remote: bool = False
+    policy: RuntimeExecutionPolicy = RuntimeExecutionPolicy()
     workspace: str
     home: str
     environment: Mapping[str, str]
@@ -89,48 +108,6 @@ class RuntimeExecution(ABC):
     @abstractmethod
     async def write_file(self, path: str, data: bytes, *, root: str = "workspace") -> str: ...
 
-    async def write_file_stream(self, path: str, chunks: AsyncIterator[bytes], *,
-                              root: str = 'workspace', max_bytes: int = FILE_STREAM_LIMIT) -> str:
-        """Stage bounded chunks, committing a new file only after verified EOF.
-
-        Uses the Sandbox uploader's no-follow, exclusive destination and cleanup
-        contract. Existing files are never overwritten; close the source on error.
-        """
-        from backend.sandbox.transfers import CHUNK_BYTES
-        state = None
-        committed = False
-        offset = 0
-        try:
-            async with aclosing(chunks):
-                if type(max_bytes) is not int or not 0 < max_bytes <= FILE_STREAM_LIMIT:
-                    raise ResourceValidationError('Runtime stream limit must be 1..512 MiB')
-                state, interrupted = await _settle(self._file_upload('upload_begin', path, root=root))
-                if interrupted:
-                    raise asyncio.CancelledError
-                async for chunk in chunks:
-                    if not isinstance(chunk, bytes) or len(chunk) > CHUNK_BYTES or offset + len(chunk) > max_bytes:
-                        raise ResourceValidationError('Runtime stream exceeds its file or chunk limit')
-                    result, interrupted = await _settle(self._file_upload('upload_chunk', path, root=root,
-                        staging=state['staging'], expected=state['signature'], offset=offset,
-                        data=base64.b64encode(chunk).decode('ascii')))
-                    state['signature'] = result['signature']
-                    offset += len(chunk)
-                    if interrupted:
-                        raise asyncio.CancelledError
-            result, interrupted = await _settle(self._file_upload('upload_commit', path, root=root,
-                staging=state['staging'], expected=state['signature'], offset=offset))
-            committed = True
-            if interrupted:
-                raise asyncio.CancelledError
-            return result['path']
-        finally:
-            if state is not None and not committed:
-                await _settle(self._file_upload('upload_abort', path, root=root,
-                    staging=state['staging'], expected=state['signature']))
-
-    async def _file_upload(self, operation, path, *, root='workspace', **options):
-        raise RuntimeUnavailableError('This execution provider does not support streamed file transfers')
-
     @abstractmethod
     async def forward_http(self, url: str, *, path_prefix: bool = False, stream: bool = False) -> str:
         """Make a host-issued loopback tool endpoint reachable by this execution.
@@ -151,18 +128,6 @@ class RuntimeExecutionProvider(ABC):
 
     @abstractmethod
     async def open(self, request: RuntimeExecutionRequest) -> RuntimeExecution: ...
-
-
-async def _settle(operation):
-    """Observe a side effect through cancellation before releasing its ownership."""
-    task = asyncio.ensure_future(operation)
-    interrupted = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            interrupted = True
-    return task.result(), interrupted
 
 
 class RuntimeExecutionBroker:
@@ -431,6 +396,17 @@ class NativeRuntimeExecution(RuntimeExecution):
         except (SandboxSecurityError, SandboxValidationError) as error:
             raise ResourceValidationError(str(error)) from error
         return {**result, 'path': str(target)}
+
+    async def _file_download(self, operation, path, *, root='workspace', **options):
+        from backend.sandbox.files import run_file_operation
+        from backend.sandbox.models import SandboxSecurityError, SandboxValidationError
+        from backend.sandbox.transfers import transfer
+        target = self._path(path, root)
+        try:
+            return await run_file_operation(transfer, self._root(root), operation,
+                                            path=target.relative_to(self._root(root)).as_posix(), **options)
+        except (SandboxSecurityError, SandboxValidationError) as error:
+            raise ResourceValidationError(str(error)) from error
 
     async def forward_http(self, url, *, path_prefix=False, stream=False):
         self._root("workspace")

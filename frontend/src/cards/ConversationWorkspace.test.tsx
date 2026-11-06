@@ -50,6 +50,7 @@ const historicalMessage: ConversationMessage = {
 describe("ConversationWorkspace snapshots", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(worldApi, 'fileTransferPolicy').mockResolvedValue({ max_file_bytes: 512 * 1024 * 1024, chunk_bytes: 256 * 1024 });
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),

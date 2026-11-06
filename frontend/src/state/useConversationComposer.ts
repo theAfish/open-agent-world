@@ -44,7 +44,8 @@ export function useConversationComposer({
   const transfers = useTransferQueue(conversationId);
   const intake = useFileIntake({
     disabled: !activeSession || busy || transfers.active,
-    limits: { maxEntries: Math.max(0, 20 - attachments.length), maxFileBytes: 512 * 1024 * 1024, directories: false },
+    limits: { maxEntries: Math.max(0, 20 - attachments.length), directories: false },
+    resolveFileLimit: async () => (await worldApi.fileTransferPolicy()).max_file_bytes,
     destination: () => activeSession?.id,
     onError: reason => setAttachmentError(apiErrorMessage(reason)),
     onEntries: async (entries, sessionId) => {

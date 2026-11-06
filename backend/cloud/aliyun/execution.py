@@ -12,7 +12,7 @@ import hashlib
 from pathlib import Path
 import shlex
 
-from backend.agents.execution import RuntimeExecutionProvider, RuntimeProcess
+from backend.agents.execution import RuntimeExecutionPolicy, RuntimeExecutionProvider, RuntimeProcess
 from backend.agents.execution_transport import FRAME_LIMIT, RelayRuntimeExecution, execution_worker_argv
 from backend.errors import ResourceValidationError, RuntimeUnavailableError
 from backend.sandbox.transfers import CHUNK_BYTES
@@ -132,6 +132,20 @@ class AliyunRuntimeExecution(RelayRuntimeExecution):
         self.sandbox = sandbox
         self._chunk_lock = asyncio.Lock()
 
+    def _file_chunk_target(self, slot, *, download=False):
+        fields = {'chunk_id', 'descriptor', 'pid'} | ({'size', 'sha256'} if download else set())
+        if (not isinstance(slot, dict) or set(slot) != fields
+                or type(slot['descriptor']) is not int or not 3 <= slot['descriptor'] <= 1048576
+                or type(slot['pid']) is not int or slot['pid'] != self.transport.handle.pid
+                or not isinstance(slot['chunk_id'], str) or len(slot['chunk_id']) != 32
+                or any(char not in '0123456789abcdef' for char in slot['chunk_id'])):
+            raise RuntimeUnavailableError('Invalid runtime file chunk identity')
+        if download and (type(slot['size']) is not int or not 0 <= slot['size'] <= CHUNK_BYTES
+                or not isinstance(slot['sha256'], str) or len(slot['sha256']) != 64
+                or any(char not in '0123456789abcdef' for char in slot['sha256'])):
+            raise RuntimeUnavailableError('Invalid runtime file chunk size or SHA256')
+        return f"/proc/{slot['pid']}/fd/{slot['descriptor']}"
+
     async def _file_upload(self, operation, path, *, root='workspace', **options):
         if operation != 'upload_chunk':
             return await super()._file_upload(operation, path, root=root, **options)
@@ -147,13 +161,7 @@ class AliyunRuntimeExecution(RelayRuntimeExecution):
             try:
                 # Only an anonymous FD held by this exact owned relay can be written.
                 # A pathname in the mutable workspace is never passed to the SDK.
-                if (set(slot) != {'chunk_id', 'descriptor', 'pid'}
-                        or type(slot['descriptor']) is not int or not 3 <= slot['descriptor'] <= 1048576
-                        or type(slot['pid']) is not int or slot['pid'] != self.transport.handle.pid
-                        or not isinstance(slot['chunk_id'], str) or len(slot['chunk_id']) != 32
-                        or any(char not in '0123456789abcdef' for char in slot['chunk_id'])):
-                    raise RuntimeUnavailableError('Invalid runtime file chunk identity')
-                await self.sandbox.files.write(f"/proc/{slot['pid']}/fd/{slot['descriptor']}",
+                await self.sandbox.files.write(self._file_chunk_target(slot),
                     data, user='user', request_timeout=20)
             except (Exception, asyncio.CancelledError) as error:
                 # A late SDK write must never reach a reused descriptor. Retain the
@@ -166,17 +174,54 @@ class AliyunRuntimeExecution(RelayRuntimeExecution):
             return await self.request('upload_file', operation=operation, path=path, root=root,
                 chunk_id=slot['chunk_id'], **options)
 
+    async def _file_download(self, operation, path, *, root='workspace', **options):
+        if operation != 'download_chunk':
+            return await super()._file_download(operation, path, root=root, **options)
+        async with self._chunk_lock:
+            if self.failure is not None:
+                raise self.failure
+            slot = await self.request('prepare_file_download', path=path, root=root, **options)
+            try:
+                target = self._file_chunk_target(slot, download=True)
+                data = bytearray()
+                if slot['size']:
+                    # Stream even this bounded snapshot so an in-VM mutation
+                    # cannot make the SDK allocate an arbitrarily enlarged FD.
+                    async with asyncio.timeout(20):
+                        async with await self.sandbox.files.read(target, format='stream', user='user', request_timeout=20) as stream:
+                            async for chunk in stream:
+                                if not isinstance(chunk, bytes) or len(data) + len(chunk) > slot['size']:
+                                    raise ResourceValidationError('Runtime download chunk exceeds its declared size')
+                                data.extend(chunk)
+                if len(data) != slot['size'] or hashlib.sha256(data).hexdigest() != slot['sha256']:
+                    raise ResourceValidationError('Runtime download chunk size or SHA256 did not match')
+                # The SDK has finished and its HTTP stream is closed before the
+                # relay may release/reuse this anonymous descriptor.
+                await self.request('discard_file_chunk', chunk_id=slot['chunk_id'])
+            except (Exception, asyncio.CancelledError) as error:
+                self._fail(RuntimeUnavailableError(
+                    'Alibaba file transfer outcome is uncertain; the VM must be closed before further work'))
+                if isinstance(error, asyncio.CancelledError):
+                    raise
+                raise self.failure from error
+            # The common file protocol consumes one bounded chunk. These bytes
+            # never travel over the relay's stdout/control channel.
+            return {'data': base64.b64encode(data).decode('ascii'), 'size': len(data)}
+
 
 class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
-    def __init__(self,root:Path,settings,*,sdk=None,lifetime_seconds=900):
+    def __init__(self,root:Path,settings,*,sdk=None,lifetime_seconds=900,default_permission='workspace-write'):
         self.root=Path(root)
         self.settings=replace(settings,lifetime_seconds=lifetime_seconds)
         self.sdk=sdk
+        # Operator policy, never a graph/card setting or an inference from remote.
+        self.policy=RuntimeExecutionPolicy(isolation='dedicated-vm',default_permission=default_permission)
 
     def configuration(self,runtime_id):
         ready=self.settings.workspace_store=='volume' and not self.settings.unavailable_reason
         return {'mode':'remote','configured':ready,'provider':'aliyun.agent-sandbox',
-                'max_execution_seconds':self.settings.lifetime_seconds}
+                'max_execution_seconds':self.settings.lifetime_seconds,
+                'default_permission':self.policy.default_permission}
 
     async def open(self,request):
         if not self.configuration(request.runtime_id)['configured']:
@@ -196,15 +241,22 @@ class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
             await backend._join_dispose(value)
         backend._apply_network_policy(value,{'network_enabled':True})
         transport=SandboxProcess(backend,value)
+        ownership_verified=False
         try:
             sandbox=await backend._ensure_remote(value)
+            # Fresh creates must satisfy the same ownership check as reconnects
+            # before any command or host-enforced permission claim is admitted.
+            await backend._verify_ownership(value,sandbox)
+            ownership_verified=True
             await transport.start(sandbox,request.operation_id)
             execution=AliyunRuntimeExecution(transport,sandbox)
             base='/workspace/oaw-runtimes/'+key
             try:
-                return await execution.initialize(base+'/project',base+'/home',environment={
+                await execution.initialize(base+'/project',base+'/home',environment={
                     'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':base+'/home','USER':'user','LANG':'C.UTF-8',
                     'TMPDIR':'/tmp'},variables=dict(request.variables))
+                execution.policy=self.policy
+                return execution
             except BaseException:
                 await execution.close()
                 raise
@@ -213,5 +265,11 @@ class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
             # the owned VM, retain an uncertain receipt if kill cannot be confirmed.
             if value['state']=='creating':
                 await backend._reconcile(value)
+            elif value['remote_id'] and not ownership_verified:
+                # An unexpected/unverifiable identity is not ours to execute or
+                # kill. Retain the binding for operator reconciliation and TTL.
+                value['state']='uncertain'
+                backend._write(value)
+                raise
             await transport.close()
             raise

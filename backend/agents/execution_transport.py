@@ -23,7 +23,7 @@ HTTP_RESPONSE_LIMIT = 8 * 1024 * 1024
 
 _BOOTSTRAP = '''
 import base64,importlib.abc,importlib.util,json,sys,zlib
-sources=json.loads(zlib.decompress(base64.b64decode(sys.argv[1])))
+sources=json.loads(zlib.decompress(base64.b85decode(sys.argv[1])))
 class Loader(importlib.abc.MetaPathFinder,importlib.abc.Loader):
  def find_spec(self,fullname,path=None,target=None):
   if fullname in sources:return importlib.util.spec_from_loader(fullname,self,is_package=fullname in {'backend','backend.agents','backend.sandbox'})
@@ -40,11 +40,12 @@ def execution_worker_argv(python='/usr/bin/python3'):
     """Ship reviewed stdlib source, never host imports, keys or file paths."""
     root = Path(__file__).resolve().parents[1]
     sources = {'backend':'','backend.agents':'','backend.sandbox':''}
-    for name in ['errors','agents.execution','agents.execution_worker',
+    for name in ['errors','file_transfer','agents.execution','agents.execution_worker',
             'sandbox.models','sandbox.materialization','sandbox.files','sandbox.environment',
-            'sandbox.streaming','sandbox.transfers']:
+            'sandbox.file_policy','sandbox.streaming','sandbox.transfers']:
         sources['backend.'+name] = (root/Path(*name.split('.'))).with_suffix('.py').read_text(encoding='utf-8')
-    encoded = base64.b64encode(zlib.compress(json.dumps(sources).encode())).decode()
+    # Keep the stdlib bootstrap below Windows' 32767-character argv bound.
+    encoded = base64.b85encode(zlib.compress(json.dumps(sources).encode(), level=9)).decode()
     return (python,'-I','-S','-u','-c',_BOOTSTRAP,encoded)
 
 
@@ -253,6 +254,9 @@ class RelayRuntimeExecution(RuntimeExecution):
 
     async def _file_upload(self, operation, path, *, root='workspace', **options):
         return await self.request('upload_file', operation=operation, path=path, root=root, **options)
+
+    async def _file_download(self, operation, path, *, root='workspace', **options):
+        return await self.request('download_file', operation=operation, path=path, root=root, **options)
 
     async def forward_http(self, url, *, path_prefix=False, stream=False):
         target=loopback_endpoint(url)

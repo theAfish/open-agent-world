@@ -43,7 +43,7 @@ except (SandboxError, OSError, ValueError, TypeError) as exc:
 def worker_command() -> str:
     root = Path(__file__).resolve().parents[2] / "sandbox"
     sources = {"backend": "", "backend.sandbox": ""}
-    for name in ("models", "materialization", "files", "listing", "mutations", "streaming", "transfers"):
+    for name in ("file_policy", "models", "materialization", "files", "listing", "mutations", "streaming", "transfers"):
         sources["backend.sandbox." + name] = (root / (name + ".py")).read_text(encoding="utf-8")
     encoded = base64.b64encode(zlib.compress(json.dumps(sources).encode())).decode()
     return shlex.join(("/usr/bin/python3", "-I", "-c", _WORKER, encoded))

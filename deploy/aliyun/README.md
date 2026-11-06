@@ -211,9 +211,33 @@ AgentCore 公网路由及网关配置，也未进行桌面安装包或日常 GUI
 回调通过已有鉴权连接转发至宿主 loopback，不开放 ECS 或 Sandbox 公网监听端口。
 命令仅注入批准的工具变量，不继承 ECS 进程环境或云管理凭据。
 
-DeepSeek Harness 连接包需使用接入 Plugin API 1.44 的版本。首次执行时在 Sandbox
+文件上传及结果下载共用宿主的文件策略：默认每文件 512 MiB、每片 256 KiB。
+双向文件数据均通过 SDK 文件接口访问 relay 持有的匿名描述符；控制通道仅携带身份、大小及摘要。
+每片下载校验完成且 SDK 响应关闭后才能释放描述符；结果不确定时停止执行并保留描述符至 VM 销毁。
+命令输出配额不随文件上限扩大，文件内容不经 relay 的 stdout 传输。
+
+DeepSeek Harness 0.2.3 连接包需使用 Plugin API 1.47。首次执行时在 Sandbox
 中准备固定版本的 Node/CLI，后续复用持久 home；ECS 不安装 CLI。未声明支持托管执行
 的旧 Agent 连接包拒绝启动，个人本地模式沿用原来的执行行为。
+
+运行权限默认仍为 `workspace-write`。运营方可在受信 worker 环境中显式设置
+`OAW_ALIYUN_RUNTIME_DEFAULT_PERMISSION=environment`，允许连接器的 `host-default`
+使用独立 VM 的隔离边界。该声明只在专属 Volume、VM 所有权和 relay 初始化均通过后生效；
+单纯的 `remote` 标记不代表隔离。支持的值只有 `workspace-write` 和 `environment`。
+这不是共享工具变量，不能由普通用户的卡片或模型参数设置。
+
+已有 DSH 卡片保存的 `read-only` / `workspace-write` 继续保留原有语义，不会自动放宽。
+若要采用宿主默认策略，管理员还需明确把目标卡片的 `permission_mode` 改为 `host-default`，
+并按发布流程更新模板及需要迁移的现有工作区。有效权限或隔离边界改变会使用独立 DSH 会话，
+原 project/home 和用户文件不重置。以上环境及卡片设置需随受审部署计划执行；本地测试不代表已启用线上策略。
+
+后续人工启用需一起审核四项：应用升级到 API 1.47、安装 DSH 0.2.3、在运营方 worker
+环境中设置上述 `environment` 值、仅将明确选中的现有卡片及对应模板设为 `host-default`。
+代理模板使用 `client_max_body_size 520m` 为 multipart 留出开销，应用层每文件上限仍为 512 MiB。
+这轮只修改仓库候选配置，未更改已部署 Nginx、worker 环境、用户卡片或模板。
+
+知识库依赖升级会新增分片对象存储格式：已有单块对象继续可读，新分片对象不能交给旧依赖读取。
+部署与失败恢复必须考虑该数据格式边界，不能只回退应用目录；具体兼容性及恢复要求见通用代码 PR。
 
 管理员安装复用现有 Store 和文件安装界面。需运营方在 gateway profile 与 worker 配置中
 同时启用 `pack_management`；仅登录管理员的 builder 可获得短期安装授权，普通用户只读。

@@ -14,6 +14,7 @@ _BLOCKED_PREFIXES = ("/api/desktop", "/api/settings/storage", "/api/diagnostics"
                      "/api/runtime/python/plugins", "/api/settings/sandbox", "/api/application/restart")
 _PACK_ASSET = re.compile(r"/api/packs/[^/]+/versions/[^/]+/.+")
 _NODE_ACTION = re.compile(r"/api/(?:runtime-app/workspace/)?nodes/[^/]+/(?:actions|resource)/[^/]+")
+_FILE_ACTION = re.compile(r"/api/(?:runtime-app/workspace/)?nodes/[^/]+/resource/[^/]+/files")
 # Pack actions carry uploads as base64 JSON (up to 32 MiB decoded). Their
 # handlers still enforce file limits, schemas and capability authorization.
 _ACTION_BODY_LIMIT = 48 * 1024 * 1024
@@ -64,6 +65,7 @@ class HostedPolicyMiddleware:
 
         send = secure_send
         path = scope["path"].rstrip("/")
+        scope['oaw.hosted'] = True
         method = scope.get("method", "GET")
         from .packs import authorized
         pack_admin = self.pack_config is not None and authorized(scope,self.pack_config)
@@ -84,7 +86,7 @@ class HostedPolicyMiddleware:
             return await self._deny(scope, receive, send)
         # Inspect only configuration-bearing routes. Binary attachments and user
         # conversation text stream to their ordinary bounded upload handlers.
-        inspect = (scope["type"] == "http" and method not in {"GET", "HEAD", "OPTIONS"}
+        inspect = (scope["type"] == "http" and method not in {"GET", "HEAD", "OPTIONS"} and not _FILE_ACTION.fullmatch(path)
                    and path.startswith(("/api/nodes", "/api/card-library", "/api/legions", "/api/legion-groups",
                                         "/api/runtime-app/workspace/nodes", "/api/settings/models")))
         if inspect:

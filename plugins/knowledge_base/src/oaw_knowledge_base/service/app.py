@@ -23,11 +23,13 @@ from __future__ import annotations
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from .. import __version__
 from ..errors import KnowledgeError, operator_message
 from ..operations import BY_NAME, tool_manifest
 from .store import Store
+from .uploads import action_input
 
 # Operations a plain service token may reach. Everything else in the table is either
 # an agent operation (also allowed) or gated below.
@@ -76,26 +78,25 @@ def create_app(store: Store, *, token: str | None = None, admin_token: str | Non
         return store.run("projects", {})
 
     @app.post("/v1/{operation}")
-    def run(operation: str, request: Request, response: Response,
-            arguments: dict | None = None, confirm: bool = False,
-            admin: bool = Depends(authorize)):
+    async def run(operation: str, request: Request, response: Response,
+                  confirm: bool = False, admin: bool = Depends(authorize)):
         entry = BY_NAME.get(operation)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"No such operation: {operation}")
-        arguments = arguments or {}
-        suboperation = arguments.get("operation")
-        if ((operation, str(suboperation) if suboperation is not None else None) in ADMIN_ONLY) and not admin:
-            raise HTTPException(
-                status_code=403,
-                detail="Publishing experimental records or insights needs the admin token "
-                       "(set KB_ADMIN_TOKEN on the service), or explicit publication in OAW "
-                       "or the local CLI.")
-        try:
-            result = store.run(operation, arguments,
-                               actor=request.headers.get("x-kb-actor"),
-                               confirmed=confirm and admin)
-        except Exception as error:  # the status code is the only thing decided here
-            raise _translate(error) from error
+        async with action_input(request) as (arguments, file_confirm, files):
+            suboperation = arguments.get("operation")
+            if ((operation, str(suboperation) if suboperation is not None else None) in ADMIN_ONLY) and not admin:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Publishing experimental records or insights needs the admin token "
+                           "(set KB_ADMIN_TOKEN on the service), or explicit publication in OAW "
+                           "or the local CLI.")
+            try:
+                result = await run_in_threadpool(store.run, operation, arguments,
+                                                actor=request.headers.get("x-kb-actor"),
+                                                confirmed=(confirm or file_confirm) and admin, files=files)
+            except Exception as error:  # the status code is the only thing decided here
+                raise _translate(error) from error
         if result.get("status") == "confirmation_required":
             response.status_code = 409
         return result

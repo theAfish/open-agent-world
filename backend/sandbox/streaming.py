@@ -12,8 +12,9 @@ from uuid import uuid4
 from .files import parts, pinned
 from .models import SandboxSecurityError, SandboxValidationError
 from .transfers import CHUNK_BYTES, signature
+from .file_policy import MAX_FILE_BYTES
 
-UPLOAD_LIMIT = 1024 * 1024 * 1024
+UPLOAD_LIMIT = MAX_FILE_BYTES
 
 
 def _remove_owned(target, expected, runtime_pinned_root):

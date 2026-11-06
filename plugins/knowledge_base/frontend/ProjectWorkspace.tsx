@@ -36,10 +36,6 @@ const LIVE_RUN = ["created", "running", "waiting"];
 class Stopped extends Error {}
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
-  const reader = new FileReader(); reader.onerror = () => reject(reader.error);
-  reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? ""); reader.readAsDataURL(file);
-});
 const TABLE_SCHEMA = { type: "object", properties: { records: { type: "array", items: { type: "object", properties: {
   name: { type: "string" }, value: { type: "number" }, unit: { type: "string" } }, required: ["name"] } } }, required: ["records"] };
 const statusLabel = (state: string) => ({ converted: t("Ready"), ready: t("Ready"), completed: t("Completed"),
@@ -210,9 +206,10 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
     const target = projects.find(p => p.id === intake.projectId);
     const name = (target?.name ?? intake.name).trim();
     if (!name || !intake.files.length) return;
-    const payload = await Promise.all(intake.files.map(async file => ({ filename: file.name,
-      relative_path: file.webkitRelativePath || file.name, media_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
-    const staged = await call("project_import_preview", { files: payload, grouping: "single" }) as { token: string; projects: { key: string }[] };
+    const payload = intake.files.map((file, index) => ({ filename: file.name, file_key: `file${index}`,
+      relative_path: file.webkitRelativePath || file.name, media_type: file.type || "application/octet-stream" }));
+    const staged = await host.resourceFileAction("project_import_preview", { files: payload, grouping: "single" },
+      Object.fromEntries(intake.files.map((file, index) => [`file${index}`, file]))) as { token: string; projects: { key: string }[] };
     const value = await call("project_import_commit", { token: staged.token, grouping: "single", depth: 1,
       projects: [{ key: staged.projects[0].key, name, ...(target ? { project_id: target.id } : {}) }], auto_process: true });
     const imported = value.projects as Project[];

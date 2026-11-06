@@ -10,8 +10,6 @@ sources and prepare unpublished drafts through their narrower operations.
 """
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import logging
 import re
@@ -31,7 +29,6 @@ from .pipelines import PIPELINE_NAME, RETRYABLE_STATUSES, submit_markdown_job
 logger = logging.getLogger(__name__)
 
 MAX_RESULT_BYTES = 1024 * 1024
-MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 MAX_MARKDOWN_CHARS = 200_000
 # ``vision_model`` is an OAW model reference ("oaw:model:..."), or "" for the OAW
 # default model; the OAW_VISION_* variables are the fallback when neither resolves.
@@ -752,7 +749,7 @@ def experiment_bundle_prepare(context, arguments):
 class ExperimentIngest(Request):
     bundle_id: str
     filename: str = Field(min_length=1, max_length=255)
-    content_base64: str = Field(min_length=1)
+    content_base64: str | None = Field(default=None, min_length=1)
     media_type: str = Field(default="application/octet-stream", max_length=200)
 
 
@@ -766,14 +763,8 @@ def experiment_ingest(context, arguments):
     request = ExperimentIngest.model_validate(arguments)
     if "/" in request.filename or "\\" in request.filename:
         raise KnowledgeError("filename must not contain a path separator")
-    try:
-        data = base64.b64decode(request.content_base64, validate=True)
-    except (binascii.Error, ValueError):
-        raise KnowledgeError("content_base64 is not valid base64") from None
-    if not data:
-        raise KnowledgeError("The uploaded file is empty")
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise KnowledgeError("Uploads are limited to 32 MiB")
+    from .file_io import file_chunk_bytes, file_limit, input_file
+    file = input_file(context, request.filename, request.content_base64)
 
     settings = settings_of(context)
     kb = _client(context)
@@ -781,7 +772,9 @@ def experiment_ingest(context, arguments):
     if bundle["status"] == "deleted":
         raise KnowledgeError("That experiment upload was deleted")
     group_id = _uuid(bundle["group_id"], "group_id")
-    source = kb.sources.add_bytes(group_id, data, filename=request.filename,
+    source = kb.sources.add_stream(group_id, file.stream, filename=request.filename,
+                                  max_bytes=file_limit(context), chunk_size=file_chunk_bytes(context),
+                                  expected_size=file.size_bytes, expected_sha256=file.sha256,
                                   media_type=request.media_type,
                                   metadata={"uploaded_by": _actor(context),
                                             "workflow": "experiment", "bundle_id": bundle["id"]})

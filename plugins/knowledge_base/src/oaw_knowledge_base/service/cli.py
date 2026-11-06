@@ -17,16 +17,19 @@ the service.
 from __future__ import annotations
 
 import argparse
-import base64
+import hashlib
 import json
 import mimetypes
 import os
 import signal
 import sys
 import time
+from contextlib import ExitStack
 from pathlib import Path
+from types import SimpleNamespace
 
 from ..errors import KnowledgeError, operator_message
+from ..file_io import FILE_CHUNK_BYTES, MAX_FILE_BYTES
 from .store import Store, StoreBusy, hold_lock, require_free, resolve_store
 
 ACTIVE_JOBS = {"QUEUED", "RUNNING", "PENDING", "RETRYING"}
@@ -50,8 +53,8 @@ class Local:
         require_free(path)
         self.store = Store(path)
 
-    def call(self, operation, arguments=None, *, confirm=False):
-        return self.store.run(operation, arguments or {}, confirmed=confirm)
+    def call(self, operation, arguments=None, *, confirm=False, files=None):
+        return self.store.run(operation, arguments or {}, confirmed=confirm, files=files)
 
     def close(self):
         self.store.close()
@@ -66,14 +69,20 @@ class Remote:
         self.url = url.rstrip("/")
         self.token = token
 
-    def call(self, operation, arguments=None, *, confirm=False):
+    def call(self, operation, arguments=None, *, confirm=False, files=None):
         import httpx
 
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         try:
+            payload = {'json': arguments or {}}
+            if files:
+                payload = {'data': {'request': json.dumps({'arguments': arguments or {}, 'confirm': confirm})},
+                           'files': {key: (file.name, file.stream,
+                                           getattr(file, 'media_type', None) or 'application/octet-stream')
+                                     for key, file in files.items()}}
             response = httpx.post(
                 f"{self.url}/v1/{operation}",
-                json=arguments or {}, params={"confirm": "true"} if confirm else None,
+                **payload, params={"confirm": "true"} if confirm else None,
                 headers=headers, timeout=300)
         except httpx.HTTPError as error:
             raise CliError(f"Could not reach {self.url}: {error}") from None
@@ -428,25 +437,35 @@ def cmd_import(args, backend):
     else:
         if not args.files:
             raise CliError("Pass files, a directory or an archive to import")
-        files = []
-        total = 0
-        for name in args.files:
-            root = Path(name)
-            paths = sorted(root.rglob("*")) if root.is_dir() else [root]
-            for path in paths:
-                if path.is_symlink():
-                    raise CliError(f"Symbolic links are not imported: {path}")
-                if not path.is_file():
-                    continue
-                size = path.stat().st_size
-                total += size
-                if total > 32 * 1024 * 1024 or len(files) >= 1000:
-                    raise CliError("One import is limited to 32 MiB and 1000 files")
-                relative = (root.name + "/" + path.relative_to(root).as_posix()) if root.is_dir() else path.name
-                files.append({"filename": path.name, "relative_path": relative,
-                              "content_base64": base64.b64encode(path.read_bytes()).decode(),
-                              "media_type": mimetypes.guess_type(path.name)[0]})
-        preview = backend.call("project_import_preview", {"files": files, **options})
+        files, leases, total = [], {}, 0
+        with ExitStack() as opened:
+            for name in args.files:
+                root = Path(name)
+                paths = sorted(root.rglob("*")) if root.is_dir() else [root]
+                for path in paths:
+                    if path.is_symlink():
+                        raise CliError(f"Symbolic links are not imported: {path}")
+                    if not path.is_file():
+                        continue
+                    if len(files) >= 1000:
+                        raise CliError("One import is limited to 512 MiB and 1000 files")
+                    stream = opened.enter_context(path.open('rb'))
+                    digest, size = hashlib.sha256(), 0
+                    while chunk := stream.read(FILE_CHUNK_BYTES):
+                        size += len(chunk)
+                        total += len(chunk)
+                        if total > MAX_FILE_BYTES:
+                            raise CliError("One import is limited to 512 MiB and 1000 files")
+                        digest.update(chunk)
+                    stream.seek(0)
+                    key = f'file{len(files)}'
+                    media_type = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
+                    leases[key] = SimpleNamespace(stream=stream, name=path.name, size_bytes=size,
+                                                   sha256=digest.hexdigest(), media_type=media_type)
+                    relative = (root.name + "/" + path.relative_to(root).as_posix()) if root.is_dir() else path.name
+                    files.append({"filename": path.name, "relative_path": relative,
+                                  "file_key": key, "media_type": media_type})
+            preview = backend.call("project_import_preview", {"files": files, **options}, files=leases)
         token = preview["token"]
         if not args.commit:
             show(preview)

@@ -1,11 +1,14 @@
 """Project boundaries, durable import retries, and untrusted archive handling."""
 import base64
 import io
+import hashlib
+import tempfile
 import tarfile
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,6 +39,133 @@ def commit(card, item, **kwargs):
         "token": item["token"], "grouping": item["grouping"], "depth": item["depth"],
         "auto_process": False, **kwargs,
     })
+
+
+def test_host_file_policy_controls_input_batch_and_retained_copy_chunks(card):
+    class BoundedReader(io.BytesIO):
+        def read(self, size=-1):
+            assert 0 < size <= 5
+            return super().read(size)
+
+    def lease(data):
+        return SimpleNamespace(stream=BoundedReader(data), size_bytes=len(data),
+                               sha256=hashlib.sha256(data).hexdigest())
+
+    card = replace(card, file_transfer_policy={'max_file_bytes': 16, 'chunk_bytes': 5},
+                   files={'file': lease(b'123456789012')})
+    item = preview(card, [{'filename': 'sample.bin'}])
+    with pytest.raises(KnowledgeError, match='file transfer limit'):
+        commit(replace(card, file_transfer_policy={'max_file_bytes': 8, 'chunk_bytes': 5}), item)
+    assert len(commit(card, item)['source_ids']) == 1
+    with pytest.raises(KnowledgeError, match='file transfer limit'):
+        preview(replace(card, files={'file': lease(b'x' * 17)}), [{'filename': 'too-large.bin'}])
+    with pytest.raises(KnowledgeError, match='file transfer limit'):
+        preview(card, [{'filename': 'a.bin'}, {'filename': 'b.bin'}])
+
+
+def test_large_binary_preview_retains_only_metadata_and_streams_commit(card):
+    from sqlalchemy import func, select
+    from oaw_knowledge_base.file_io import FILE_CHUNK_BYTES
+
+    kb = client.open_client(card.node_id, card.storage_path)
+    with tempfile.TemporaryFile('w+b') as stream:
+        digest = hashlib.sha256()
+        for _ in range(132):  # 33 MiB exceeds the old JSON/SQL-inline budget.
+            stream.write(b'x' * FILE_CHUNK_BYTES)
+            digest.update(b'x' * FILE_CHUNK_BYTES)
+
+        class BoundedReader:
+            def read(self, size=-1):
+                assert 0 < size <= FILE_CHUNK_BYTES
+                return stream.read(size)
+
+            def seek(self, *args):
+                return stream.seek(*args)
+
+        lease = SimpleNamespace(stream=BoundedReader(), name='large.bin',
+                                size_bytes=132 * FILE_CHUNK_BYTES, sha256=digest.hexdigest())
+        context = replace(card, files={'file': lease})
+        item = projects.project_import_preview(context, {'files': [{'filename': 'large.bin', 'file_key': 'file'}], 'grouping': 'single'})
+        with kb.oaw_engine.connect() as connection:
+            assert connection.execute(select(func.count()).select_from(projects._UPLOADS)).scalar_one() == 0
+            staged = connection.execute(select(projects._STREAM_UPLOADS)).mappings().one()
+            object_key = staged['object_key']
+            assert staged['size'] == lease.size_bytes and staged['sha256'] == lease.sha256
+        imported = commit(context, item)
+        source = kb.sources.require(imported['source_ids'][0])
+        with kb.sources.open(source.id) as retained:
+            actual = hashlib.sha256()
+            while block := retained.read(FILE_CHUNK_BYTES):
+                actual.update(block)
+        assert actual.hexdigest() == lease.sha256 and source.size == lease.size_bytes
+        assert not kb.object_store.exists(projects._IMPORT_BUCKET, object_key)
+
+
+def test_legacy_preview_blob_rows_remain_committable(card):
+    from datetime import datetime, timezone
+
+    kb = client.open_client(card.node_id, card.storage_path)
+    projects._schema(kb)
+    token, content = str(uuid.uuid4()), b'legacy source'
+    with kb.oaw_engine.begin() as connection:
+        connection.execute(projects._IMPORTS.insert().values(token=token, actor=actions._actor(card),
+            created_at=datetime.now(timezone.utc).isoformat()))
+        connection.execute(projects._UPLOADS.insert().values(token=token, id='legacy-file',
+            relative_path='legacy.txt', media_type='text/plain', size=len(content), data=content))
+    result = commit(card, {'token': token, 'grouping': 'single', 'depth': 1})
+    assert kb.sources.read_bytes(result['source_ids'][0]) == content
+
+
+def test_preview_rejects_changed_file_lease_before_publishing_metadata(card):
+    from sqlalchemy import func, select
+
+    lease = SimpleNamespace(stream=io.BytesIO(b'changed'), size_bytes=7, sha256='0' * 64)
+    with pytest.raises(KnowledgeError, match='differs from its verified input'):
+        projects.preview_files(card, [{'filename': 'changed.bin', 'file': lease}])
+    kb = client.open_client(card.node_id, card.storage_path)
+    with kb.oaw_engine.connect() as connection:
+        assert connection.execute(select(func.count()).select_from(projects._IMPORTS)).scalar_one() == 0
+    assert not list(kb.object_store.list(projects._IMPORT_BUCKET))
+
+
+def test_commit_refuses_changed_staged_object_without_persisting_source_and_can_retry(card):
+    from sqlalchemy import select
+
+    content = b'original source'
+    item = preview(card, [upload('source.bin', content)], grouping='single')
+    kb = client.open_client(card.node_id, card.storage_path)
+    with kb.oaw_engine.connect() as connection:
+        staged = connection.execute(select(projects._STREAM_UPLOADS).where(
+            projects._STREAM_UPLOADS.c.token == item['token'])).mappings().one()
+    project_id = uuid.uuid5(projects._NAMESPACE, item['token'] + ':__all__')
+    source_id = uuid.uuid5(project_id, 'source.bin:' + hashlib.sha256(content).hexdigest())
+    kb.object_store.put_stream(projects._IMPORT_BUCKET, staged['object_key'], io.BytesIO(b'tampered source'))
+    with pytest.raises(ValueError, match='checksum differs'):
+        commit(card, item)
+    assert kb.sources.get(source_id) is None
+    with kb.oaw_engine.connect() as connection:
+        assert connection.execute(select(projects._IMPORTS.c.result).where(
+            projects._IMPORTS.c.token == item['token'])).scalar_one() is None
+    kb.object_store.put_stream(projects._IMPORT_BUCKET, staged['object_key'], io.BytesIO(content))
+    assert commit(card, item)['source_ids'] == [str(source_id)]
+    with kb.sources.open(source_id) as retained:
+        assert retained.read() == content
+
+
+@pytest.mark.parametrize('mismatch', ['content', 'collection'])
+def test_commit_cannot_link_preexisting_source_that_differs_from_preview(card, mismatch):
+    content = b'expected source'
+    item = preview(card, [upload('source.bin', content)], grouping='single')
+    kb = client.open_client(card.node_id, card.storage_path)
+    project_id = uuid.uuid5(projects._NAMESPACE, item['token'] + ':__all__')
+    project = projects.ensure_project(kb, 'Target', collection_id=project_id)
+    other = projects.ensure_project(kb, 'Other') if mismatch == 'collection' else project
+    source_id = uuid.uuid5(project.id, 'source.bin:' + hashlib.sha256(content).hexdigest())
+    kb.sources.add_bytes(other.id, b'wrong bytes' if mismatch == 'content' else content,
+                         filename='source.bin', source_id=source_id)
+    with pytest.raises(KnowledgeError, match='no longer matches this import'):
+        commit(card, item)
+    assert projects.project_sources(kb, project.id) == []
 
 
 def test_folder_grouping_is_preview_only_and_reuses_upload(card):

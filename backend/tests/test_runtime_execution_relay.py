@@ -41,7 +41,7 @@ async def test_real_relay_duplex_process_and_scoped_files(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_real_relay_streams_large_files_and_discards_failed_transfers(tmp_path):
+async def test_real_relay_streams_large_files_and_discards_failed_transfers(tmp_path, monkeypatch):
     import hashlib
 
     chunk = b'x' * (256 * 1024)
@@ -59,6 +59,26 @@ async def test_real_relay_streams_large_files_and_discards_failed_transfers(tmp_
             expected.update(chunk)
         with path.open('rb') as source:
             assert hashlib.file_digest(source, 'sha256').hexdigest() == expected.hexdigest()
+        original = host.request
+        replies = []
+
+        async def request(method, **params):
+            result = await original(method, **params)
+            if method == 'download_file':
+                replies.append((params['operation'], len(result.get('data', ''))))
+            else:
+                assert method != 'read_file', 'Large output must never use the unary bytes path'
+            return result
+
+        monkeypatch.setattr(host, 'request', request)
+        returned = hashlib.sha256()
+        async for block in host.read_file_stream(target):
+            assert len(block) <= len(chunk)
+            returned.update(block)
+        assert returned.hexdigest() == expected.hexdigest()
+        assert replies[0] == ('download_info', 0) and replies[-1] == ('download_chunk', 0)
+        assert max(size for _, size in replies) <= 4 * ((len(chunk) + 2) // 3)
+        monkeypatch.setattr(host, 'request', original)
 
         async def revoked():
             yield b'partial'

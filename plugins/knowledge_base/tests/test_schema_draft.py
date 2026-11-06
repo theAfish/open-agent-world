@@ -1,6 +1,8 @@
 """Drafting a schema from a conversation: sample conversion, prompt and draft validation."""
 import base64
 import json
+import hashlib
+import io
 from types import SimpleNamespace
 
 import pytest
@@ -41,6 +43,18 @@ def test_messages_carry_samples_as_data_and_the_current_schema_for_follow_ups():
     assert [m["role"] for m in messages[1:]] == ["user", "assistant", "user"]
     with pytest.raises(KnowledgeError):
         schema_draft.build_messages([{"role": "assistant", "content": "hi"}])
+
+
+def test_binary_sample_uses_borrowed_stream_and_keeps_its_parser_budget():
+    data = b'batch,yield\nA1,76.1\n'
+    file = SimpleNamespace(stream=io.BytesIO(data), size_bytes=len(data),
+                           sha256=hashlib.sha256(data).hexdigest())
+    context = SimpleNamespace(state=None, files={'file': file})
+    result = schema_draft.schema_sample(context, {'filename': 'sample.csv', 'media_type': 'text/csv'})
+    assert 'A1' in result['markdown'] and not file.stream.closed
+    file.size_bytes = schema_draft.MAX_SAMPLE_BYTES + 1
+    with pytest.raises(KnowledgeError, match='2 MiB'):
+        schema_draft.schema_sample(context, {'filename': 'sample.csv'})
 
 
 def test_a_valid_answer_yields_a_clean_draft_and_a_question_has_no_draft():

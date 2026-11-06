@@ -155,7 +155,7 @@ async def _wait_jobs(context, capability, arguments):
 
 
 class KnowledgeBasePlugin:
-    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.40",
+    descriptor = PluginDescriptor(id=PREFIX, version="0.2.1", plugin_api_version="1.47",
         name="Knowledge base",
         description="Project materials to readable Markdown, reusable Space projections, and experiment records with evidence-linked insights.")
 

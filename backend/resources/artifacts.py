@@ -15,8 +15,9 @@ from uuid import UUID, uuid4
 from backend.errors import ConflictError, NotFoundError, PermissionDeniedError, ResourceValidationError
 from backend.sandbox.files import parts, pinned, run_file_operation
 from backend.sandbox.transfers import CHUNK_BYTES
+from backend.file_transfer import MAX_FILE_BYTES
 
-MAX_CONVERSATION_UPLOAD_BYTES = 512 * 1024 * 1024
+MAX_CONVERSATION_UPLOAD_BYTES = MAX_FILE_BYTES
 
 
 def now():
@@ -210,6 +211,8 @@ class ArtifactStore:
             async with self.workspace(services, request.sandbox_id, agent_id, reserved=True):
                 backend = services._require_sandbox_backend()
                 manifest = await backend.file_operation(request.sandbox_id, 'capture_manifest', paths=request.paths)
+                if any(item['size'] > MAX_FILE_BYTES for item in manifest):
+                    raise ResourceValidationError('File exceeds the 512 MiB transfer limit')
                 size = sum(item['size'] for item in manifest)
                 async with self._lock:
                     if size > self.max_version_bytes:
@@ -477,6 +480,8 @@ class ArtifactStore:
             entry = next((e for e in record['manifest'] if e['path'] == path and not e['directory']), None)
             if entry is None:
                 raise NotFoundError('File is not in this artifact manifest')
+            if entry['size'] > MAX_FILE_BYTES:
+                raise ResourceValidationError('File exceeds the 512 MiB transfer limit')
             target = self.path(version_id).joinpath(*parts(path))
             with pinned(target) as fd:
                 if os.fstat(fd).st_size != entry['size']:

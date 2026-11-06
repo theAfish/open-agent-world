@@ -21,7 +21,7 @@ class ResourceActionRequest(BaseModel):
     confirm: bool = False
 
 
-async def invoke_resource_action(services, node_id, action, request, *, capability=None, data_reader=None, data_relationship=None, execution_reader=None):
+async def invoke_resource_action(services, node_id, action, request, *, capability=None, data_reader=None, data_relationship=None, execution_reader=None, files=None):
     # Hold this lock until the worker has stopped, including cancellation. An
     # edge revocation or deletion can never overtake a running resource write.
     async with services._node_mutation():
@@ -77,7 +77,7 @@ async def invoke_resource_action(services, node_id, action, request, *, capabili
             state=services.card_state.bind(node_id),
             resolve_secret=resource_secret_resolver(services, node),
             resolve_model=resource_model_resolver(services, node), open_execution=open_execution,
-            execution_configuration=lambda:services.runtime_execution_configuration(node_id))
+            execution_configuration=lambda:services.runtime_execution_configuration(node_id), files=files or {})
         async def invoke():
             if inspect.iscoroutinefunction(operation.handler):
                 return await operation.handler(context, request.arguments)

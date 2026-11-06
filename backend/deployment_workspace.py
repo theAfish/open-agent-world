@@ -310,6 +310,25 @@ def workspace_router(manifest):
         result = await invoke_resource_action(services, node_id, action, request)
         return public_value(result if "*" in actions[action] else {key: value for key, value in result.items() if key in actions[action]})
 
+    @router.get("/files/policy")
+    async def file_policy():
+        from backend.file_transfer import file_transfer_policy
+        return file_transfer_policy()
+
+    @router.post("/nodes/{node_id}/resource/{action}/files")
+    async def resource_file_action(node_id: str, action: str, request: Request, services=Depends(get_services)):
+        from backend.resource_files import resource_files
+        from backend.hosting.policy import unsafe_host_configuration
+        actions = business_access(manifest, services, node_id).get("resource_actions", {})
+        if action not in actions:
+            raise HTTPException(404, "This operation is not published")
+        async with resource_files(request) as (metadata, files):
+            if unsafe_host_configuration(metadata.arguments):
+                raise HTTPException(403, "Host configuration is managed by the operator")
+            scope.validate_references(metadata.arguments, services)
+            result = await invoke_resource_action(services, node_id, action, metadata, files=files)
+            return public_value(result if "*" in actions[action] else {key: value for key, value in result.items() if key in actions[action]})
+
     @router.post("/knowledge/{node_id}/project-space")
     async def knowledge_project_space(node_id: str, request: ProjectSpaceRequest, services=Depends(get_services)):
         actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})

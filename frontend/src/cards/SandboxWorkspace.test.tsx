@@ -40,6 +40,7 @@ describe("Sandbox workspace interaction", () => {
       socketState: "closed", toasts: [], undoStack: [], redoStack: [], activityOpen: false,
     });
     previewFile = async path => ({ state: "text", text: `Contents of ${path}` });
+    vi.spyOn(worldApi, "fileTransferPolicy").mockResolvedValue({ max_file_bytes: 512 * 1024 * 1024, chunk_bytes: 256 * 1024 });
     vi.spyOn(worldApi, "getSandbox").mockResolvedValue(info);
     vi.spyOn(worldApi, "getSandboxRuntimes").mockResolvedValue({
       default_runtime: "wsl:Ubuntu",

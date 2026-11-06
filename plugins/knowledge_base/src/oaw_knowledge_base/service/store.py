@@ -116,14 +116,14 @@ class Store:
         """Materialize the database now so a caller sees a bad store immediately."""
         return open_client(self.key, self.path)
 
-    def context(self, *, actor=None, confirmed=False):
+    def context(self, *, actor=None, confirmed=False, files=None):
         return KnowledgeContext(node_id=self.key, storage_path=self.path, state=self._settings,
-                                actor_id=actor, confirmed=confirmed)
+                                actor_id=actor, confirmed=confirmed, files=files or {})
 
-    def run(self, operation, arguments, *, actor=None, confirmed=False):
+    def run(self, operation, arguments, *, actor=None, confirmed=False, files=None):
         """Run one named operation, one at a time, against this knowledge base."""
         handler = BY_NAME[operation].handler
-        context = self.context(actor=actor, confirmed=confirmed)
+        context = self.context(actor=actor, confirmed=confirmed, files=files)
         with self._mutation:
             return handler(context, arguments or {})
 

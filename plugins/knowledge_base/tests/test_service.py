@@ -86,6 +86,63 @@ def test_the_manifest_lists_the_agent_operations_only(client):
     assert "knowledge_project_import_preview" not in tools  # raw bytes stay off the agent surface
 
 
+def test_multipart_import_retains_binary_data_and_closes_borrowed_handles(client, store, monkeypatch):
+    received = []
+    original = store.run
+
+    def run(*args, **kwargs):
+        received.extend(file.stream for file in kwargs.get('files', {}).values())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(store, 'run', run)
+    response = client.post('/v1/project_import_preview',
+        data={'request': json.dumps({'arguments': {'files': [{'filename': 'raw.bin', 'file_key': 'file0'}]}})},
+        files={'file0': ('raw.bin', b'\x00\xffsource\x00', 'application/octet-stream')})
+    assert response.status_code == 200, response.text
+    assert received and all(stream.closed for stream in received)
+    imported = call(client, 'project_import_commit', token=response.json()['token'], auto_process=False)
+    assert imported.status_code == 200, imported.text
+    with store.open().sources.open(imported.json()['source_ids'][0]) as stream:
+        assert stream.read() == b'\x00\xffsource\x00'
+
+
+@pytest.mark.parametrize('files,status', [
+    (None, 400),
+    ([('file', ('../escape.txt', b'abc'))], 422),
+    ([('file', ('a.txt', b'abc')), ('file', ('b.txt', b'abc'))], 422),
+    ([('a', ('a.txt', b'123456789')), ('b', ('b.txt', b'12345678'))], 413),
+])
+def test_multipart_rejection_never_calls_action_and_closes_spools(client, store, monkeypatch, files, status):
+    from oaw_knowledge_base.service import uploads
+
+    parsers = []
+    original = uploads.MultiPartParser
+
+    class Parser(original):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            parsers.append(self)
+
+    monkeypatch.setattr(uploads, 'MultiPartParser', Parser)
+    monkeypatch.setattr(uploads, 'MAX_FILE_BYTES', 16)
+    monkeypatch.setattr(store, 'run', lambda *a, **k: pytest.fail('Rejected input reached the action'))
+    if files is None:
+        response = client.post('/v1/project_import_preview', content=b'broken boundary',
+                               headers={'content-type': 'multipart/form-data; boundary=missing'})
+    else:
+        response = client.post('/v1/project_import_preview',
+                               data={'request': json.dumps({'arguments': {}})}, files=files)
+    assert response.status_code == status, response.text
+    assert parsers and all(file.closed for file in parsers[0]._files_to_close_on_error)
+
+
+def test_multipart_confirm_cannot_grant_publication_authority(client):
+    response = client.post('/v1/insight_review',
+        data={'request': json.dumps({'arguments': {'operation': 'publish'}, 'confirm': True})},
+        files={'file': ('note.txt', b'note', 'text/plain')})
+    assert response.status_code == 403
+
+
 def test_mcp_enforces_the_read_contract_even_without_an_actor_label(store):
     from oaw_knowledge_base.service import mcp
 

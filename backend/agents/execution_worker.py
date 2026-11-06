@@ -18,7 +18,7 @@ from uuid import uuid4
 from urllib.parse import urlsplit
 
 from backend.agents.execution import FILE_LIMIT, NativeRuntimeExecutionProvider, RuntimeExecutionRequest
-from backend.sandbox.transfers import CHUNK_BYTES
+from backend.file_transfer import FILE_CHUNK_BYTES as CHUNK_BYTES
 
 FRAME_LIMIT = 48 * 1024 * 1024
 HTTP_REQUEST_LIMIT = 1024 * 1024
@@ -36,7 +36,7 @@ class ExecutionRelay:
         self.file_chunks = {}
 
     def close_file_chunks(self):
-        for file, _, _ in self.file_chunks.values():
+        for file, _, _, _ in self.file_chunks.values():
             file.close()
         self.file_chunks.clear()
 
@@ -170,6 +170,10 @@ class ExecutionRelay:
         if method == 'write_file':
             path = await self.execution.write_file(args['path'],base64.b64decode(args['data'],validate=True),root=args['root'])
             return {'path':path}
+        if method == 'download_file':
+            if args.get('operation') not in {'download_info', 'download_chunk'}:
+                raise ValueError('Unknown streamed file read operation')
+            return await self.execution._file_download(**args)
         if method == 'prepare_file_chunk':
             if self.execution.closed:
                 raise ValueError('Execution relay is closed')
@@ -182,13 +186,41 @@ class ExecutionRelay:
                 raise ValueError('Runtime file chunk limit exceeded')
             file = tempfile.TemporaryFile()
             chunk_id = uuid4().hex
-            self.file_chunks[chunk_id] = (file, size, checksum)
+            self.file_chunks[chunk_id] = (file, size, checksum, 'upload')
             return {'chunk_id': chunk_id, 'descriptor': file.fileno(), 'pid': os.getpid()}
+        if method == 'prepare_file_download':
+            if self.execution.closed:
+                raise ValueError('Execution relay is closed')
+            if set(args) != {'path', 'root', 'expected', 'offset'}:
+                raise ValueError('Invalid file download metadata')
+            if len(self.file_chunks) >= 4:
+                raise ValueError('Runtime file chunk limit exceeded')
+            # Resolve through the same pinned, no-follow source boundary as the
+            # ordinary streamed download. Only its bounded snapshot is exported.
+            result = await self.execution._file_download('download_chunk', **args)
+            content = base64.b64decode(result['data'], validate=True)
+            if len(content) > CHUNK_BYTES or result['size'] != len(content):
+                raise ValueError('Invalid file download chunk size')
+            if len(self.file_chunks) >= 4:
+                raise ValueError('Runtime file chunk limit exceeded')
+            checksum = hashlib.sha256(content).hexdigest()
+            file = tempfile.TemporaryFile()
+            try:
+                file.write(content)
+                file.flush()
+                file.seek(0)
+                chunk_id = uuid4().hex
+                self.file_chunks[chunk_id] = (file, len(content), checksum, 'download')
+                return {'chunk_id': chunk_id, 'descriptor': file.fileno(), 'pid': os.getpid(),
+                        'size': len(content), 'sha256': checksum}
+            except BaseException:
+                file.close()
+                raise
         if method == 'discard_file_chunk':
             chunk_id = args.get('chunk_id')
             if set(args) != {'chunk_id'} or not isinstance(chunk_id, str) or chunk_id not in self.file_chunks:
                 raise ValueError('Unknown file chunk identity')
-            file, _, _ = self.file_chunks.pop(chunk_id)
+            file, _, _, _ = self.file_chunks.pop(chunk_id)
             file.close()
             return {'discarded': True}
         if method == 'upload_file':
@@ -201,8 +233,10 @@ class ExecutionRelay:
                     raise ValueError('File chunk identities require upload_chunk without inline data')
                 if not isinstance(chunk_id, str) or chunk_id not in self.file_chunks:
                     raise ValueError('Unknown file chunk identity')
-                file, size, checksum = self.file_chunks.pop(chunk_id)
+                file, size, checksum, direction = self.file_chunks.pop(chunk_id)
                 try:
+                    if direction != 'upload':
+                        raise ValueError('File chunk identity is not an upload')
                     file.seek(0)
                     content = file.read(CHUNK_BYTES + 1)
                     if len(content) != size or hashlib.sha256(content).hexdigest() != checksum:

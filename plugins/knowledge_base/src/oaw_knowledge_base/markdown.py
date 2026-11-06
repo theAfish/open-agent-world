@@ -24,9 +24,11 @@ import sys
 import tempfile
 import zipfile
 from importlib.util import find_spec
+from itertools import islice
 from pathlib import Path
 
 from .errors import KnowledgeError
+from .file_io import FILE_CHUNK_BYTES, INLINE_FILE_BYTES
 
 TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".rst"}
 FENCED_SUFFIXES = {".json": "json", ".yaml": "yaml", ".yml": "yaml"}
@@ -132,7 +134,10 @@ def _vision_markdown(data, filename, media_type, *, vision_model="", resolve_mod
     import httpx
 
     image_media_type = _image_media_type(filename, media_type) or "image/png"
-    encoded = base64.b64encode(data).decode("ascii")
+    raw = _source(data).read(INLINE_FILE_BYTES + 1)
+    if len(raw) > INLINE_FILE_BYTES:
+        raise KnowledgeError('Vision model input is limited to 32 MiB; the original file is retained')
+    encoded = base64.b64encode(raw).decode("ascii")
     root = base_url.rstrip("/")
     auth_scheme = "Bear" + "er "
     headers = {"Content-Type": "application/json"}
@@ -180,7 +185,7 @@ def _escape_cell(value):
 
 
 def _rows_to_markdown_table(rows):
-    rows = list(rows)[:MAX_TABULAR_ROWS]
+    rows = list(islice(rows, MAX_TABULAR_ROWS))
     if not rows:
         return "*(empty)*"
     width = max(len(row) for row in rows)
@@ -194,20 +199,38 @@ def _rows_to_markdown_table(rows):
     return "\n".join(lines)
 
 
+def _source(data):
+    stream = data if hasattr(data, 'read') else io.BytesIO(data)
+    stream.seek(0)
+    return stream
+
+
+def _copy_source(data, output):
+    stream = _source(data)
+    while block := stream.read(FILE_CHUNK_BYTES):
+        output.write(block)
+
+
 def _csv_markdown(data, delimiter):
+    text = io.TextIOWrapper(_source(data), encoding='utf-8', errors='replace', newline='')
     try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        text = data.decode("utf-8", errors="replace")
-    rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
-    return _rows_to_markdown_table(rows)
+        return _rows_to_markdown_table(csv.reader(text, delimiter=delimiter))
+    finally:
+        text.detach()  # The retained-source handle remains owned by its caller.
 
 
 def _native_markdown(kind, data):
     # Native PDF/NumPy initialization can block Windows thread creation. Keep
     # it outside the host, including when another import submits a new job.
-    request = json.dumps({'kind': kind, 'paths': sys.path,
-                          'data': base64.b64encode(data).decode('ascii')}).encode()
+    with tempfile.TemporaryDirectory(prefix='oaw-kb-convert-') as directory:
+        path = Path(directory) / ('input.' + kind)
+        with path.open('wb') as output:
+            _copy_source(data, output)
+        return _run_native(kind, path)
+
+
+def _run_native(kind, path):
+    request = json.dumps({'kind': kind, 'paths': sys.path, 'path': str(path)}).encode()
     allowed = {'PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'HOME',
                'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'LANG', 'LC_ALL',
                'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'OMP_NUM_THREADS'}
@@ -243,7 +266,8 @@ def _xlsx_markdown_local(data):
         raise KnowledgeError(
             "Reading .xlsx files needs openpyxl installed in the backend environment") from error
     try:
-        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        workbook = load_workbook(str(data) if isinstance(data, (str, Path)) else _source(data),
+                                 read_only=True, data_only=True)
     except Exception as error:
         raise KnowledgeError(f"Could not read this file as an Excel workbook: {error}") from None
     try:
@@ -256,10 +280,7 @@ def _xlsx_markdown_local(data):
 
 def _text_markdown(data, filename):
     suffix = Path(filename).suffix.lower()
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        text = data.decode("utf-8", errors="replace")
+    text = _source(data).read(MAX_MARKDOWN_BYTES + 1).decode('utf-8', errors='replace')
     if suffix in {".md", ".markdown"}:
         return text
     language = FENCED_SUFFIXES.get(suffix)
@@ -280,9 +301,12 @@ def _pymupdf_markdown(data):
 def _pymupdf_markdown_local(data):
     import pymupdf4llm
 
+    if isinstance(data, (str, Path)):
+        return pymupdf4llm.to_markdown(str(data))
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "input.pdf"
-        path.write_bytes(data)
+        with path.open('wb') as output:
+            _copy_source(data, output)
         return pymupdf4llm.to_markdown(str(path))
 
 
@@ -309,7 +333,8 @@ def _mineru_markdown(data, filename, base_url, timeout=600, *, token=None):
         batch_id, urls = payload.get("batch_id"), payload.get("file_urls") or []
         if not batch_id or not urls:
             raise KnowledgeError("MinerU did not return an upload URL")
-        uploaded = client.put(urls[0], content=data)
+        stream = _source(data)
+        uploaded = client.put(urls[0], content=iter(lambda: stream.read(FILE_CHUNK_BYTES), b''))
         if uploaded.status_code not in (200, 201, 204):
             raise KnowledgeError(f"MinerU upload failed (HTTP {uploaded.status_code})")
 

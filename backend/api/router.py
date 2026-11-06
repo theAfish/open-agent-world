@@ -35,6 +35,12 @@ from backend.services import ApplicationServices
 api_router = APIRouter(prefix="/api")
 
 
+@api_router.get("/files/policy", tags=["system"])
+async def file_policy():
+    from backend.file_transfer import file_transfer_policy
+    return file_transfer_policy()
+
+
 @api_router.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
     return {"status": "ok"}

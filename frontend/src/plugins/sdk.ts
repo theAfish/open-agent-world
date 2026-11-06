@@ -214,6 +214,8 @@ export interface PluginViewProps {
     documentAction(action: string, arguments_: Record<string, unknown>, expectedRevision?: number, nodeId?:string): Promise<{ value: unknown; revision: number }>;
     delegationAction(action: 'collect' | 'wait' | 'inspect' | 'stop' | 'cancel_defer', arguments_: Record<string, unknown>): Promise<Record<string, unknown>>;
     resourceAction(action: string, arguments_: Record<string, unknown>, confirm?: boolean): Promise<Record<string, unknown>>;
+    /** Binary files use host-owned streaming leases, outside resource-action JSON. */
+    resourceFileAction(action: string, arguments_: Record<string, unknown>, files: Record<string, File>, confirm?: boolean): Promise<Record<string, unknown>>;
     listCards(traits?: string[]): Promise<WorldCard[]>;
     readDocument(nodeId?: string): Promise<{ value: unknown; revision: number }>;
     transform(operation: string, request: Record<string, unknown>): Promise<Record<string, unknown>>;

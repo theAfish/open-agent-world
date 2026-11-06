@@ -30,11 +30,24 @@ def transfer(client):
         if "during_write" in handoff:
             handoff["during_write"]()
         context.storage_path.mkdir(parents=True, exist_ok=True)
+        if context.files:
+            import shutil
+            file = context.files['input']
+            with (context.storage_path / 'imported.bin').open('wb') as output:
+                shutil.copyfileobj(file.stream, output, 256 * 1024)
+            return {'size_bytes': file.size_bytes, 'sha256': file.sha256}
         data = arguments["data"]
         (context.storage_path / "imported.bin").write_bytes(data)
         return {"size_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
     async def handler(context, capability, arguments):
+        if handoff.get('streamed'):
+            async with context.open_artifact_file(capability, arguments['collection_id'],
+                    arguments['version_id'], arguments['path']) as file:
+                received.append(file)
+                if 'before_write' in handoff:
+                    await handoff['before_write']()
+                return await context.node_resource_action(capability, 'save', {}, files={'input': file})
         data = await context.read_artifact_file(capability, arguments["collection_id"],
             arguments["version_id"], arguments["path"], max_bytes=arguments.get("max_bytes", 32 * 1024 * 1024))
         received.append(data)
@@ -98,6 +111,25 @@ def transfer(client):
         base=base, attachment=attachment, data=data, received=received, invoke=invoke, send=send,
         handoff=handoff, imported=services.resources.node_storage_path(destination["id"]) / "imported.bin",
         source_edge=source_edge, destination_edge=destination_edge, evidence_edge=evidence_edge)
+
+
+@pytest.mark.parametrize('revoked', [False, True])
+def test_seekable_artifact_lease_uses_the_same_persistence_authority(transfer, revoked):
+    state = transfer
+    state['send']()
+    state['handoff']['streamed'] = True
+    if revoked:
+        async def revoke():
+            await state['services'].delete_edge(state['source_edge']['id'])
+        state['handoff']['before_write'] = revoke
+        with pytest.raises(PermissionDeniedError):
+            state['client'].portal.call(state['invoke'])
+        assert not state['imported'].exists()
+    else:
+        result = state['client'].portal.call(state['invoke'])
+        assert result['sha256'] == hashlib.sha256(state['data']).hexdigest()
+        assert state['imported'].read_bytes() == state['data']
+    assert state['received'][0].stream.closed
 
 
 @pytest.mark.parametrize("source", ["conversation", "collection"])
