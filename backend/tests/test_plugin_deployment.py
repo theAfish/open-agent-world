@@ -74,7 +74,7 @@ def test_file_actions_require_publication_and_filter_results_like_json_actions(m
     monkeypatch.setattr('backend.deployment_workspace.invoke_resource_action', resource)
     access = DeploymentSurface(resource_actions={'query': {'answer'}}).model_dump(mode='json')
     app = FastAPI()
-    app.dependency_overrides[get_services] = lambda: publication_services()
+    app.dependency_overrides[get_services] = lambda: None
     app.include_router(workspace_router({'permissions': {'plugin': []}, 'plugin_access': {'plugin': access}}))
     with TestClient(app) as client:
         path = '/workspace/nodes/plugin/resource/query/files'

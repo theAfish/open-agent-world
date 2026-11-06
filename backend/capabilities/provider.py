@@ -230,16 +230,14 @@ class _CapabilityContext:
             async with self.services.resources.artifacts.workspace(self.services, sandbox_id, capability.agent_id, allow_running=True):
                 async with self.services._node_mutation():
                     transfer.authorize()
-                    await ensure_directory(self.services, sandbox_id, capability.agent_id)
-                    target = task_path(self.services, sandbox_id, path, capability.agent_id)
-                await transfer.write_file_stream(target, chunks, max_bytes=max_bytes)
+                await transfer.write_file_stream(path, chunks, max_bytes=max_bytes)
                 return {**transfer.result, 'path': path}
 
     async def stream_sandbox_workspace_file(self, capability, sandbox_id, path, *, max_bytes=MAX_FILE_BYTES):
         transfer = self._sandbox_file_transfer(capability, sandbox_id)
         async with self.services.resources.artifacts.workspace(self.services, sandbox_id, capability.agent_id, allow_running=True):
             async with aclosing(transfer.read_file_stream(
-                    task_path(self.services, sandbox_id, path, capability.agent_id), max_bytes=max_bytes)) as stream:
+                    path, max_bytes=max_bytes)) as stream:
                 async for chunk in stream:
                     yield chunk
             async with self.services._node_mutation(read_only=True):
