@@ -834,9 +834,11 @@ export const worldApi = {
   },
 
   runAgent(nodeId: string, prompt: string, freshContext = false): Promise<Record<string, unknown>> {
+    const enqueue = isHosted();
     return request<Record<string, unknown>>(`/agents/${encodeURIComponent(nodeId)}/run`, {
       method: "POST",
-      body: JSON.stringify({ prompt, ...(freshContext ? { fresh_context: true } : {}) }),
+      ...(enqueue ? { headers: { "Idempotency-Key": crypto.randomUUID() } } : {}),
+      body: JSON.stringify({ prompt, ...(freshContext ? { fresh_context: true } : {}), ...(enqueue ? { enqueue: true } : {}) }),
     });
   },
 

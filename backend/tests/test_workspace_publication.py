@@ -180,8 +180,12 @@ def test_conversation_run_details_reuse_archives_without_exposing_unpublished_ru
         for run in (hidden, unrelated):
             assert client.get(ROOT + "/runs/" + run.run_id + "/activity").status_code == 404
             assert client.get(ROOT + "/runs/" + run.run_id + "/invocations/tools").status_code == 404
-        for path in ("/invocations/models", "/invocations/models/any", "/invocations/unknown", "/cancel", ""):
+            assert client.post(ROOT + "/runs/" + run.run_id + "/cancel").status_code == 404
+        for path in ("/invocations/models", "/invocations/models/any", "/invocations/unknown", ""):
             assert client.get(base + path).status_code == 404
+        # Direct submissions have a POST-only cancel route; publishing a
+        # Conversation's activity does not grant cancellation of its Runs.
+        assert client.get(base + "/cancel").status_code == 405
         assert client.post(base + "/cancel").status_code == 404
         assert client.get(ROOT + "/runs").status_code == 404
         assert client.get(ROOT + "/runs/missing/activity").status_code == 404

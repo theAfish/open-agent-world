@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as hostedAuth from "../auth/hostedSession";
 import {
+  configureWorkspaceApi,
   normalizeCard,
   normalizeEdge,
   normalizeLegionInstantiation,
@@ -10,6 +12,8 @@ import {
 } from "./client";
 
 afterEach(() => {
+  configureWorkspaceApi(false);
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -104,6 +108,54 @@ describe("API normalization boundary", () => {
     expect(error).toMatchObject({ status: 0, retryable: false });
     expect(error.requestId).toBe(fetchMock.mock.calls[0][1].headers.get("X-Request-ID"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("queues published hosted Runs with a new key per intentional submission", async () => {
+    vi.spyOn(hostedAuth, "isHosted").mockReturnValue(true);
+    configureWorkspaceApi(true);
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(
+      JSON.stringify({ accepted: true, run_id: "run-id" }),
+      { status: 202, headers: { "content-type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await worldApi.runAgent("agent one", "Run the analysis", true)).toMatchObject({ run_id: "run-id" });
+    await worldApi.runAgent("agent one", "Run the analysis", true);
+
+    const [[url, first], [, second]] = fetchMock.mock.calls;
+    expect(url).toBe("/api/runtime-app/workspace/agents/agent%20one/run");
+    expect(first.method).toBe("POST");
+    expect(JSON.parse(String(first.body))).toEqual({ prompt: "Run the analysis", fresh_context: true, enqueue: true });
+    expect(second.body).toBe(first.body);
+    const keys = [first, second].map(init => new Headers(init.headers).get("Idempotency-Key"));
+    expect(keys[0]).toMatch(/^[\da-f-]{36}$/);
+    expect(keys[1]).toMatch(/^[\da-f-]{36}$/);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+  it("preserves immediate Run submission outside hosted mode", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response("{}", {
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await worldApi.runAgent("agent", "Run locally");
+    configureWorkspaceApi(true);
+    await worldApi.runAgent("agent", "Run in a standalone published app");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/agents/agent/run", "/api/runtime-app/workspace/agents/agent/run",
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(JSON.parse(String(init.body))).not.toHaveProperty("enqueue");
+      expect(new Headers(init.headers).has("Idempotency-Key")).toBe(false);
+    }
+  });
+  it("reports a lost or rejected hosted Run response without issuing another mutation", async () => {
+    vi.spyOn(hostedAuth, "isHosted").mockReturnValue(true);
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(new Response("{}", { status: 422, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(worldApi.runAgent("agent", "Run once")).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(worldApi.runAgent("agent", "Run once")).rejects.toMatchObject({ status: 422 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
   it('loads and restores the same finish, defaulting old cards to normal', async () => {
     const card = normalizeCard({ id: 'printed', type: 'text', finish: 'starlight' });

@@ -2,7 +2,7 @@
 
 The mutation and its response commit together. Callbacks must use this same
 Database and must not perform I/O, await, or emit events. This is deliberately
-not a general mechanism for provider calls, runs, or reliable event delivery.
+not a general mechanism for provider calls, Run execution, or reliable event delivery.
 Records have no automatic expiry: deleting one would allow its key to execute
 again and must be an explicit retention policy decision.
 """
