@@ -8,7 +8,8 @@ map $http_upgrade $oaw_connection_upgrade {
 server {
     listen 8080;
     server_name _;
-    client_max_body_size 512m;
+    # 512 MiB file policy plus bounded multipart metadata/framing overhead.
+    client_max_body_size 520m;
     location / {
         # Fixed operator-selected upstream; never a request/query parameter.
         proxy_pass ${OAW_AGENTCORE_ORIGIN};

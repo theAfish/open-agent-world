@@ -10,6 +10,7 @@ server {
     server_name REPLACE_APPROVED_PREVIEW_HOSTNAME;
     ssl_certificate /etc/ssl/oaw-preview/REPLACE_FULLCHAIN.pem;
     ssl_certificate_key /etc/ssl/oaw-preview/REPLACE_PRIVATE_KEY.pem;
+    client_max_body_size 520m;
 
     add_header X-OAW-Environment preview always;
     add_header X-OAW-Source-Commit REPLACE_ROOT_RECEIPT_SOURCE_COMMIT always;
