@@ -115,6 +115,23 @@ def configure(monkeypatch, profile):
         monkeypatch.setenv(name, value)
 
 
+@pytest.mark.parametrize('configured,expected', [(None, 3600), ('900', 900)])
+def test_hosted_runtime_budget_uses_default_or_explicit_operator_override(tmp_path, monkeypatch, configured, expected):
+    profile = str(uuid4())
+    configure(monkeypatch, profile)
+    monkeypatch.delenv('OAW_ALIYUN_RUNTIME_LIFETIME', raising=False)
+    if configured is not None:
+        monkeypatch.setenv('OAW_ALIYUN_RUNTIME_LIFETIME', configured)
+    monkeypatch.setattr(hosted, 'approved_plugins', lambda *args, **kwargs: None)
+    monkeypatch.setattr(hosted, 'create_services', lambda *args, **kwargs:
+        SimpleNamespace(world=SimpleNamespace(list_cards=lambda: []),
+                        runtime=kwargs['runtime_execution_provider']))
+    settings = replace(Settings.for_data_root(tmp_path),
+                       tenant_scope=hosted_scope(str(uuid4()), 'canvas', profile))
+    services = hosted.create_hosted_services(settings)
+    assert services.runtime.configuration(None)['max_execution_seconds'] == expected
+
+
 def test_hosted_composition_exposes_only_unavailable_cloud_runtime_until_verified(tmp_path, monkeypatch):
     profile, user = str(uuid4()), str(uuid4())
     configure(monkeypatch, profile)

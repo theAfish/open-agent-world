@@ -11,6 +11,7 @@ from dataclasses import replace
 import hashlib
 from pathlib import Path
 import shlex
+import time
 
 from backend.agents.execution import RuntimeExecutionPolicy, RuntimeExecutionProvider, RuntimeProcess
 from backend.agents.execution_transport import FRAME_LIMIT, RelayRuntimeExecution, execution_worker_argv
@@ -19,6 +20,8 @@ from backend.sandbox.transfers import CHUNK_BYTES
 from .sandbox import AliyunSandboxBackend
 
 OUTPUT_QUOTA = 128*1024*1024
+# Match OAW's default one-hour run budget; the early POC used 15 minutes.
+DEFAULT_RUNTIME_LIFETIME = 3600
 
 
 class _Channel:
@@ -46,6 +49,7 @@ class SandboxProcess(RuntimeProcess):
         self.handle,self.monitor = None,None
         self.closed = False
         self.output_bytes = 0
+        self.started_at = None
         self.write_lock,self.close_lock = asyncio.Lock(),asyncio.Lock()
 
     def output(self, channel, text):
@@ -58,6 +62,7 @@ class SandboxProcess(RuntimeProcess):
     async def start(self, sandbox, operation_id):
         self.value.update(state='running',command={'id':operation_id,'state':'admitted'})
         self.backend._write(self.value)
+        self.started_at = time.monotonic()
         self.handle = await sandbox.commands.run('exec '+shlex.join(execution_worker_argv()),
             background=True,stdin=True,user='user',cwd='/',timeout=self.backend.settings.lifetime_seconds-5,
             on_stdout=lambda text:self.output(self.stdout,text),on_stderr=lambda text:self.output(self.stderr,text))
@@ -74,8 +79,16 @@ class SandboxProcess(RuntimeProcess):
                 return result.exit_code
             except CommandExitException as error:
                 return error.exit_code
-        except Exception:
-            error=RuntimeUnavailableError(f'Alibaba runtime transport failed or reached its {self.backend.settings.lifetime_seconds}s session limit; the command was not replayed')
+        except Exception as cause:
+            elapsed = time.monotonic() - self.started_at
+            lifetime = self.backend.settings.lifetime_seconds
+            if elapsed >= lifetime - 5:
+                message = f'Alibaba runtime reached its configured {lifetime}s session limit'
+            else:
+                # SDK messages can contain authenticated URLs or remote output.
+                # Keep the useful error category without exposing their contents.
+                message = f'Alibaba runtime transport failed after {elapsed:.0f}s ({type(cause).__name__})'
+            error=RuntimeUnavailableError(message + '; the command was not replayed')
             self.stdout.reader.set_exception(error)
             self.stderr.reader.set_exception(error)
             raise error from None
@@ -210,7 +223,7 @@ class AliyunRuntimeExecution(RelayRuntimeExecution):
 
 
 class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
-    def __init__(self,root:Path,settings,*,sdk=None,lifetime_seconds=900,default_permission='workspace-write'):
+    def __init__(self,root:Path,settings,*,sdk=None,lifetime_seconds=DEFAULT_RUNTIME_LIFETIME,default_permission='workspace-write'):
         self.root=Path(root)
         self.settings=replace(settings,lifetime_seconds=lifetime_seconds)
         self.sdk=sdk

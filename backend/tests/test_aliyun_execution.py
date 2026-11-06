@@ -14,7 +14,9 @@ from e2b.sandbox_async.commands.command import Commands
 
 from backend.agents.environment import subprocess_environment
 from backend.agents.execution import NativeRuntimeProcess, RuntimeExecutionRequest
-from backend.cloud.aliyun.execution import AliyunRuntimeExecutionProvider
+from backend.cloud.aliyun import execution as aliyun_execution
+from backend.cloud.aliyun.execution import AliyunRuntimeExecutionProvider, SandboxProcess
+from backend.errors import RuntimeUnavailableError
 from backend.sandbox.models import SandboxSecurityError
 from backend.tests.test_aliyun_sandbox import FakeSDK
 from backend.cloud.aliyun.sandbox import AliyunSandboxSettings
@@ -125,6 +127,7 @@ async def test_runtime_owns_private_networked_vm_and_persists_only_its_volume(tm
     sdk=DuplexSDK(tmp_path)
     provider=AliyunRuntimeExecutionProvider(tmp_path/'bindings',settings(),sdk=sdk)
     assert provider.configuration('any.harness')['configured']
+    assert provider.configuration('any.harness')['max_execution_seconds']==3600
     assert not sdk.created
     one=await provider.open(request(tmp_path))
     try:
@@ -144,6 +147,8 @@ async def test_runtime_owns_private_networked_vm_and_persists_only_its_volume(tm
         assert await two.read_file('result.txt')==b'persistent'
         assert len(sdk.created)==2
         created=sdk.created[-1]
+        assert created['timeout']==3600
+        assert sdk.commands[-1][1]['timeout']==3595
         assert created['allow_internet_access'] and created['secure']
         assert created['network']['allow_public_traffic'] is False
         assert '169.254.0.0/16' in created['network']['deny_out']
@@ -152,6 +157,34 @@ async def test_runtime_owns_private_networked_vm_and_persists_only_its_volume(tm
     finally:
         await two.close()
     assert not (tmp_path/'must-not-exist').exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('elapsed', [20, 895])
+async def test_runtime_transport_failure_reports_elapsed_budget_without_leaking_or_replaying(monkeypatch, elapsed):
+    process=SandboxProcess(SimpleNamespace(settings=replace(settings(),lifetime_seconds=900)),{})
+    process.started_at=100
+    monkeypatch.setattr(aliyun_execution,'time',SimpleNamespace(monotonic=lambda:100+elapsed))
+    calls=[]
+    async def wait():
+        calls.append('wait')
+        raise ConnectionError('private-api-key-do-not-leak')
+    process.handle=SimpleNamespace(wait=wait)
+
+    with pytest.raises(RuntimeUnavailableError) as failure:
+        await process._wait()
+    message=str(failure.value)
+    assert 'private-api-key-do-not-leak' not in message
+    assert 'not replayed' in message
+    if elapsed==895:
+        assert '900s session limit' in message
+    else:
+        assert 'transport' in message and 'ConnectionError' in message and '20s' in message
+        assert 'session limit' not in message
+    assert calls==['wait']
+    for channel in (process.stdout,process.stderr):
+        assert channel.reader.exception() is failure.value
+        assert channel.reader.at_eof()
 
 
 @pytest.mark.asyncio
