@@ -65,6 +65,30 @@ def test_large_upload_and_download_use_bounded_chunks(runtime_client, monkeypatc
     assert not list(record.workspace.glob('.oaw-upload-*'))
 
 
+def test_browser_download_uses_global_file_policy_and_checks_header_identity(runtime_client, monkeypatch):
+    client, backend, _ = runtime_client
+    node = create_node(client, 'sandbox')
+    base = f"/api/sandboxes/{node['id']}/files"
+    assert client.post(base, params={'path': 'data.bin'}, content=b'data').status_code == 201
+    from backend import file_transfer
+    monkeypatch.setattr(file_transfer, 'MAX_FILE_BYTES', 3)
+    assert client.get(base, params={'operation': 'download', 'path': 'data.bin'}).status_code == 413
+    monkeypatch.setattr(file_transfer, 'MAX_FILE_BYTES', 512 * 1024 * 1024)
+    original = backend.file_operation
+    reads = 0
+    async def change(sandbox_id, operation, **options):
+        nonlocal reads
+        if operation == 'download_info':
+            reads += 1
+            if reads == 2:
+                record = await backend._record(node['id'])
+                (record.workspace / 'data.bin').write_bytes(b'new data')
+        return await original(sandbox_id, operation, **options)
+    monkeypatch.setattr(backend, 'file_operation', change)
+    response = client.get(base, params={'operation': 'download', 'path': 'data.bin'})
+    assert response.status_code == 422 and 'changed before download' in response.text
+
+
 def test_disconnect_cleans_staging_and_releases_binding_lease(runtime_client):
     from backend.api.runtime import upload_sandbox_file
     from starlette.requests import ClientDisconnect

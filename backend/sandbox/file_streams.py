@@ -6,6 +6,7 @@ class SandboxFileTransfer(FileTransferEndpoint):
     def __init__(self, services, sandbox_id, authorize):
         self.services, self.sandbox_id, self.authorize = services, sandbox_id, authorize
         self.result = None
+        self.read_info = None
 
     async def _operation(self, operation, path, *, root='workspace', **options):
         # Abort addresses only our owned staging receipt. Revoked admission must
@@ -17,6 +18,8 @@ class SandboxFileTransfer(FileTransferEndpoint):
                 self.sandbox_id, operation, root=root, path=path, **options)
             if operation == 'upload_commit':
                 self.result = {**result, 'path': path}
+            elif operation == 'download_info':
+                self.read_info = result
             return {**result, 'path': path}
 
     _file_upload = _operation

@@ -432,7 +432,6 @@ async def sandbox_cancel(sandbox_id: str, command_id: str | None = None, service
 
 @router.get("/sandboxes/{sandbox_id}/files")
 async def sandbox_files(sandbox_id: str, operation: str = "roots", root: str = "workspace", path: str = "", services=Depends(get_services), cursor: str = '', query: str = ''):
-    import base64
     if operation not in {"roots", "list", "preview", "download"}:
         raise SandboxValidationError("Unsupported read operation")
     async with services._node_mutation(read_only=True):
@@ -448,19 +447,28 @@ async def sandbox_files(sandbox_id: str, operation: str = "roots", root: str = "
         except (PermissionError, OSError):
             return {"state": "permission_denied", "message": "Access denied or path is not a regular file/directory"}
     if operation == 'download':
+        from contextlib import aclosing
         from fastapi.responses import StreamingResponse
         from urllib.parse import quote
+        from backend.file_transfer import MAX_FILE_BYTES
+        from backend.sandbox.file_streams import SandboxFileTransfer
+        if result['size'] > MAX_FILE_BYTES:
+            raise HTTPException(413, 'File exceeds the 512 MiB transfer limit')
+        transfer = SandboxFileTransfer(services, sandbox_id,
+            lambda: services._require_card_type(sandbox_id, 'sandbox'))
+        stream = transfer.read_file_stream(path, root=root, max_bytes=MAX_FILE_BYTES)
+        try:
+            first = await anext(stream, b'')
+            if transfer.read_info['signature'] != result['signature']:
+                raise SandboxValidationError('File changed before download')
+        except BaseException:
+            await stream.aclose()
+            raise
         async def body():
-            offset = 0
-            while offset < result['size']:
-                async with services._node_mutation(read_only=True):
-                    services._require_card_type(sandbox_id, 'sandbox')
-                    chunk = await backend.file_operation(sandbox_id, 'download_chunk', root=root, path=path,
-                        expected=result['signature'], offset=offset)
-                if not chunk['size']:
-                    raise SandboxValidationError('File changed during download')
-                offset += chunk['size']
-                yield base64.b64decode(chunk['data'])
+            async with aclosing(stream):
+                yield first
+                async for chunk in stream:
+                    yield chunk
         return StreamingResponse(body(), media_type='application/octet-stream', headers={
             'Content-Length': str(result['size']), 'Content-Disposition': f"attachment; filename*=UTF-8''{quote(result['name'], safe='')}",
             'X-Content-Type-Options': 'nosniff'})
