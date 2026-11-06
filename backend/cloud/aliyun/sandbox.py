@@ -223,18 +223,21 @@ class AliyunSandboxBackend(SandboxBackend):
         from e2b import NotFoundException
         try:
             sandbox = await self.sdk.connect(value["remote_id"], **self.settings.connection)
-            info = await sandbox.get_info()
+            await self._verify_ownership(value, sandbox)
         except NotFoundException:
             # Only a confirmed expired idle VM can be replaced. _start rejects
             # every unfinished command before reaching this branch.
             value.update(remote_id=None, state="stopped")
             self._write(value)
             return None
+        await sandbox.set_timeout(self.settings.lifetime_seconds)
+        return sandbox
+
+    async def _verify_ownership(self, value, sandbox):
+        info = await sandbox.get_info()
         if (info.metadata.get("oaw.profile") != self.settings.profile_id
                 or info.metadata.get("oaw.request") != value["request_key"]):
             raise SandboxSecurityError("Remote Sandbox ownership metadata does not match its binding")
-        await sandbox.set_timeout(self.settings.lifetime_seconds)
-        return sandbox
 
     async def _reconcile(self, value):
         from e2b import SandboxQuery

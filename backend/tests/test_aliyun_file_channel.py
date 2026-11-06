@@ -16,13 +16,14 @@ from backend.sandbox.transfers import CHUNK_BYTES
 
 
 class ControlProcess(RuntimeProcess):
-    def __init__(self, slot_overrides=None):
+    def __init__(self, slot_overrides=None, download_content=b'fixture'):
         self.handle = SimpleNamespace(pid=4321)
         self.slot_overrides = slot_overrides or {}
         self.frames, self.leases = [], {}
         self.replies = asyncio.Queue()
         self.stopped = asyncio.Event()
         self.close_calls = 0
+        self.download_content, self.download_chunks = download_content, {}
 
     async def write(self, data):
         message = json.loads(data)
@@ -31,6 +32,19 @@ class ControlProcess(RuntimeProcess):
         if method == 'prepare_file_chunk':
             result = {'chunk_id': uuid4().hex, 'descriptor': 17, 'pid': self.handle.pid, **self.slot_overrides}
             self.leases[result['chunk_id']] = result
+        elif method == 'download_file':
+            assert options['operation'] == 'download_info'
+            result = {'size': len(self.download_content), 'signature': [1, 2, len(self.download_content), 3, 4]}
+        elif method == 'prepare_file_download':
+            chunk = self.download_content[options['offset']:options['offset'] + CHUNK_BYTES]
+            result = {'chunk_id': uuid4().hex, 'descriptor': 17, 'pid': self.handle.pid,
+                'size': len(chunk), 'sha256': hashlib.sha256(chunk).hexdigest(), **self.slot_overrides}
+            self.leases[result['chunk_id']] = result
+            self.download_chunks[result['chunk_id']] = chunk
+        elif method == 'discard_file_chunk':
+            self.leases.pop(options['chunk_id'])
+            self.download_chunks.pop(options['chunk_id'], None)
+            result = {'discarded': True}
         elif method == 'upload_file':
             operation = options['operation']
             if operation == 'upload_begin':
@@ -65,20 +79,38 @@ class ControlProcess(RuntimeProcess):
     async def close(self):
         self.close_calls += 1
         self.leases.clear()  # This boundary represents confirmed owned VM destruction.
+        self.download_chunks.clear()
         self.stopped.set()
         await self.replies.put(b'')
 
 
 @asynccontextmanager
-async def channel(*, slot_overrides=None, sdk_write=None):
-    transport, writes = ControlProcess(slot_overrides), []
+async def channel(*, slot_overrides=None, sdk_write=None, sdk_read=None, download_content=b'fixture'):
+    transport, writes = ControlProcess(slot_overrides, download_content), []
+    transport.reads, transport.closed_reads = [], []
 
     async def write(path, data, **options):
         writes.append((path, data, options))
         if sdk_write is not None:
             await sdk_write()
 
-    execution = AliyunRuntimeExecution(transport, SimpleNamespace(files=SimpleNamespace(write=write)))
+    async def read(path, **options):
+        transport.reads.append((path, options))
+        content = next(iter(transport.download_chunks.values()))
+        async def chunks():
+            if sdk_read is not None:
+                await sdk_read()
+            for offset in range(0, len(content), 16384):
+                yield content[offset:offset + 16384]
+        @asynccontextmanager
+        async def stream():
+            try:
+                yield chunks()
+            finally:
+                transport.closed_reads.append(True)
+        return stream()
+
+    execution = AliyunRuntimeExecution(transport, SimpleNamespace(files=SimpleNamespace(write=write, read=read)))
     try:
         yield execution, transport, writes
     finally:
@@ -153,3 +185,67 @@ async def test_binary_channel_rejects_oversized_chunk_before_allocating_remote_s
             await execution._file_upload('upload_chunk', 'input.bin',
                                          data=base64.b64encode(b'x' * (CHUNK_BYTES + 1)).decode())
         assert not transport.frames and not writes
+
+
+@pytest.mark.asyncio
+async def test_downloaded_file_chunks_use_sdk_owned_fds_and_release_only_after_reads_close():
+    content = bytes(range(256)) * 2048 + b'tail'
+    async with channel(download_content=content) as (execution, transport, writes):
+        received = bytearray()
+        async for chunk in execution.read_file_stream('result.bin'):
+            assert len(chunk) <= CHUNK_BYTES
+            received.extend(chunk)
+        assert received == content and not writes
+        assert len(transport.reads) == len(transport.closed_reads) == 3
+        assert all(path == '/proc/4321/fd/17' and options == {
+            'format': 'stream', 'user': 'user', 'request_timeout': 20} for path, options in transport.reads)
+        assert all('data' not in frame['params'] and len(json.dumps(frame)) < 1024 for frame in transport.frames)
+        assert not transport.leases
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('slot_overrides', [
+    {'pid': 9999}, {'descriptor': 2}, {'size': CHUNK_BYTES + 1}, {'size': True},
+    {'sha256': '../invalid'}, {'chunk_id': '../invalid'},
+])
+async def test_invalid_download_identity_cannot_select_a_sdk_read_target(slot_overrides):
+    async with channel(slot_overrides=slot_overrides) as (execution, transport, writes):
+        with pytest.raises(RuntimeUnavailableError, match='outcome is uncertain'):
+            await execution._file_download('download_chunk', 'result.bin', expected=[1, 2, 7, 3, 4], offset=0)
+        assert not transport.reads and not writes and transport.leases
+        assert [frame['method'] for frame in transport.frames] == ['prepare_file_download']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('slot_overrides', [{'sha256': '0' * 64}, {'size': 1}])
+async def test_changed_sdk_download_data_is_rejected_and_never_releases_a_reusable_fd(slot_overrides):
+    async with channel(slot_overrides=slot_overrides) as (execution, transport, writes):
+        with pytest.raises(RuntimeUnavailableError, match='outcome is uncertain'):
+            await execution._file_download('download_chunk', 'result.bin', expected=[1, 2, 7, 3, 4], offset=0)
+        assert len(transport.reads) == 1 and transport.closed_reads == [True]
+        assert transport.leases and not writes
+        assert [frame['method'] for frame in transport.frames] == ['prepare_file_download']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('error_type', [TimeoutError, asyncio.CancelledError])
+async def test_uncertain_download_retains_fd_blocks_following_work_and_closes_sdk_stream(error_type):
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def interrupted_read():
+        entered.set()
+        await release.wait()
+        raise error_type()
+    async with channel(sdk_read=interrupted_read) as (execution, transport, writes):
+        first = asyncio.create_task(execution._file_download('download_chunk', 'result.bin', expected=[1, 2, 7, 3, 4], offset=0))
+        await asyncio.wait_for(entered.wait(), 2)
+        queued = asyncio.create_task(execution._file_upload('upload_chunk', 'other.bin', data='eA=='))
+        await asyncio.sleep(0)
+        assert not queued.done()
+        release.set()
+        first_error, queued_error = await asyncio.gather(first, queued, return_exceptions=True)
+        assert isinstance(first_error, asyncio.CancelledError if error_type is asyncio.CancelledError else RuntimeUnavailableError)
+        assert queued_error is execution.failure
+        assert transport.closed_reads == [True] and transport.leases
+        assert len(transport.reads) == 1 and not writes
+        assert [frame['method'] for frame in transport.frames] == ['prepare_file_download']
+    assert not transport.leases and execution.closed

@@ -52,7 +52,8 @@ def create_hosted_services(settings):
     services = create_services(settings, plugins=approved_plugins(settings.data_root, pack_settings=settings),
                                sandbox_registry_factory=registry_factory(remote),
                                runtime_execution_provider=AliyunRuntimeExecutionProvider(settings.data_root/'runtime-executions',remote,
-                                   lifetime_seconds=int(os.environ.get('OAW_ALIYUN_RUNTIME_LIFETIME','900'))))
+                                   lifetime_seconds=int(os.environ.get('OAW_ALIYUN_RUNTIME_LIFETIME','900')),
+                                   default_permission=os.environ.get('OAW_ALIYUN_RUNTIME_DEFAULT_PERMISSION','workspace-write')))
     if any(unsafe_host_configuration({"type": card.type, "config": card.config})
            for card in services.world.list_cards()):
         services.close()
