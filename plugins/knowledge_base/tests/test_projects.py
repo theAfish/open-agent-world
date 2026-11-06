@@ -128,6 +128,46 @@ def test_preview_rejects_changed_file_lease_before_publishing_metadata(card):
     assert not list(kb.object_store.list(projects._IMPORT_BUCKET))
 
 
+def test_commit_refuses_changed_staged_object_without_persisting_source_and_can_retry(card):
+    from sqlalchemy import select
+
+    content = b'original source'
+    item = preview(card, [upload('source.bin', content)], grouping='single')
+    kb = client.open_client(card.node_id, card.storage_path)
+    with kb.oaw_engine.connect() as connection:
+        staged = connection.execute(select(projects._STREAM_UPLOADS).where(
+            projects._STREAM_UPLOADS.c.token == item['token'])).mappings().one()
+    project_id = uuid.uuid5(projects._NAMESPACE, item['token'] + ':__all__')
+    source_id = uuid.uuid5(project_id, 'source.bin:' + hashlib.sha256(content).hexdigest())
+    kb.object_store.put_stream(projects._IMPORT_BUCKET, staged['object_key'], io.BytesIO(b'tampered source'))
+    with pytest.raises(ValueError, match='checksum differs'):
+        commit(card, item)
+    assert kb.sources.get(source_id) is None
+    with kb.oaw_engine.connect() as connection:
+        assert connection.execute(select(projects._IMPORTS.c.result).where(
+            projects._IMPORTS.c.token == item['token'])).scalar_one() is None
+    kb.object_store.put_stream(projects._IMPORT_BUCKET, staged['object_key'], io.BytesIO(content))
+    assert commit(card, item)['source_ids'] == [str(source_id)]
+    with kb.sources.open(source_id) as retained:
+        assert retained.read() == content
+
+
+@pytest.mark.parametrize('mismatch', ['content', 'collection'])
+def test_commit_cannot_link_preexisting_source_that_differs_from_preview(card, mismatch):
+    content = b'expected source'
+    item = preview(card, [upload('source.bin', content)], grouping='single')
+    kb = client.open_client(card.node_id, card.storage_path)
+    project_id = uuid.uuid5(projects._NAMESPACE, item['token'] + ':__all__')
+    project = projects.ensure_project(kb, 'Target', collection_id=project_id)
+    other = projects.ensure_project(kb, 'Other') if mismatch == 'collection' else project
+    source_id = uuid.uuid5(project.id, 'source.bin:' + hashlib.sha256(content).hexdigest())
+    kb.sources.add_bytes(other.id, b'wrong bytes' if mismatch == 'content' else content,
+                         filename='source.bin', source_id=source_id)
+    with pytest.raises(KnowledgeError, match='no longer matches this import'):
+        commit(card, item)
+    assert projects.project_sources(kb, project.id) == []
+
+
 def test_folder_grouping_is_preview_only_and_reuses_upload(card):
     item = preview(card, [upload("batch/A/paper.md"), upload("batch/A/SI/table.csv"), upload("batch/B/report.md")],
                    grouping="depth", depth=2)

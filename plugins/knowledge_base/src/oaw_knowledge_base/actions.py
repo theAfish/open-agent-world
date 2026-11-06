@@ -774,6 +774,7 @@ def experiment_ingest(context, arguments):
     group_id = _uuid(bundle["group_id"], "group_id")
     source = kb.sources.add_stream(group_id, file.stream, filename=request.filename,
                                   max_bytes=file_limit(context), chunk_size=file_chunk_bytes(context),
+                                  expected_size=file.size_bytes, expected_sha256=file.sha256,
                                   media_type=request.media_type,
                                   metadata={"uploaded_by": _actor(context),
                                             "workflow": "experiment", "bundle_id": bundle["id"]})

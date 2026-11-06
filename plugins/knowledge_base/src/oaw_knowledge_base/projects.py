@@ -573,10 +573,12 @@ def _preview_files(context, files, *, grouping="top", depth=1, identity=None):
             key = token + '/' + file['id']
             file['file'].stream.seek(0)
             staged.append(key)
-            info = kb.object_store.put_stream(_IMPORT_BUCKET, key, file['file'].stream,
-                max_bytes=file_limit(context), chunk_size=file_chunk_bytes(context))
-            if info.size != file['size'] or info.sha256 != file['sha256']:
-                raise KnowledgeError('Staged file differs from its verified input')
+            try:
+                kb.object_store.put_stream(_IMPORT_BUCKET, key, file['file'].stream,
+                    max_bytes=file_limit(context), chunk_size=file_chunk_bytes(context),
+                    expected_size=file['size'], expected_sha256=file['sha256'])
+            except ValueError as error:
+                raise KnowledgeError('Staged file differs from its verified input') from error
         with kb.oaw_engine.begin() as connection:
             connection.execute(_IMPORTS.insert().values(token=token, actor=_actor(context), created_at=now.isoformat()))
             connection.execute(_STREAM_UPLOADS.insert(), [
@@ -702,9 +704,11 @@ def project_import_commit(context, arguments):
                     source = kb.sources.add_stream(project.id, stream, filename=PurePosixPath(path).name,
                         media_type=file["media_type"], source_id=identifier,
                         max_bytes=file_limit(context), chunk_size=file_chunk_bytes(context),
+                        expected_size=file['size'], expected_sha256=digest,
                         metadata={"relative_path": path, "uploaded_by": _actor(context)})
-                if source.sha256 != digest:
-                    raise KnowledgeError('Staged file checksum changed before commit')
+            if (source.sha256 != digest or source.size != file['size'] or
+                    project.id not in source.collection_ids):
+                raise KnowledgeError('The retained source no longer matches this import')
             register_project_file(kb, project.id, source, path)
             source_ids.append(str(source.id))
         jobs = project_process(context, {"project_ids": [str(item.id) for item in created_projects.values()]})["jobs"] if request.auto_process else []

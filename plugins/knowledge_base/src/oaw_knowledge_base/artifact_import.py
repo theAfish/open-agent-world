@@ -100,12 +100,14 @@ def store_import(context, arguments):
     if source is None:
         source = kb.sources.add_stream(group_id, file.stream, source_id=source_id,
             max_bytes=file_limit(context), chunk_size=file_chunk_bytes(context),
+            expected_size=file.size_bytes, expected_sha256=digest,
             filename=filename, media_type=mimetypes.guess_type(filename)[0] or "application/octet-stream",
             metadata={"uploaded_by": actions._actor(context), "relative_path": relative_path,
                 "origin": {"collection_id": request.source_collection_id,
                     "version_id": str(request.version_id), "path": request.path},
                 **({"workflow": "experiment", "bundle_id": bundle_id} if bundle_id else {})})
-    elif source.sha256 != digest or group_id not in source.collection_ids:
+    elif (source.sha256 != digest or source.size != file.size_bytes or
+          group_id not in source.collection_ids):
         raise KnowledgeError("The previously imported attachment no longer matches this source")
 
     if bundle_id:
