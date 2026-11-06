@@ -50,7 +50,7 @@ jobs:
           - runner: windows-2022
             platform: windows-x64
             extension: exe
-          - runner: macos-14
+          - runner: macos-15
             platform: macos-arm64
             extension: dmg
           - runner: macos-15-intel

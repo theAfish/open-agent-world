@@ -144,20 +144,34 @@ class RelayRuntimeExecution(RuntimeExecution):
             raise RuntimeUnavailableError('Runtime execution request limit exceeded')
         request_id = uuid4().hex
         future = asyncio.get_running_loop().create_future()
+        future.add_done_callback(lambda value: value.exception() if not value.cancelled() else None)
         line = json.dumps({'id':request_id,'method':method,'params':params},ensure_ascii=True).encode()+b'\n'
         if len(line)>FRAME_LIMIT:
             raise ResourceValidationError('Runtime execution request exceeds its frame limit')
         self.pending[request_id] = future
         try:
             async with self._write_lock:
-                await self.transport.write(line)
+                if self.failure is not None:
+                    raise self.failure
+                try:
+                    await self.transport.write(line)
+                except (Exception, asyncio.CancelledError) as error:
+                    # A partial JSON frame cannot be followed by another request,
+                    # including an upload abort. Only owned transport cleanup is safe.
+                    self._fail(RuntimeUnavailableError(
+                        'Runtime transport write failed; request outcome is uncertain and was not resubmitted'))
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    raise self.failure from error
             return await asyncio.wait_for(future,30)
         except TimeoutError as error:
             raise RuntimeUnavailableError('Runtime request outcome is uncertain; it was not resubmitted') from error
         finally:
             self.pending.pop(request_id,None)
+            if not future.done():future.cancel()
 
     def _fail(self, error):
+        if self.failure is not None:return
         self.failure = error
         for future in self.pending.values():
             if not future.done():future.set_exception(error)

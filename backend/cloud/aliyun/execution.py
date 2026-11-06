@@ -6,6 +6,7 @@ share one bounded VM lifetime. Only the profile's dedicated Volume persists.
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import replace
 import hashlib
 from pathlib import Path
@@ -13,7 +14,8 @@ import shlex
 
 from backend.agents.execution import RuntimeExecutionProvider, RuntimeProcess
 from backend.agents.execution_transport import FRAME_LIMIT, RelayRuntimeExecution, execution_worker_argv
-from backend.errors import RuntimeUnavailableError
+from backend.errors import ResourceValidationError, RuntimeUnavailableError
+from backend.sandbox.transfers import CHUNK_BYTES
 from .sandbox import AliyunSandboxBackend
 
 OUTPUT_QUOTA = 128*1024*1024
@@ -56,7 +58,7 @@ class SandboxProcess(RuntimeProcess):
     async def start(self, sandbox, operation_id):
         self.value.update(state='running',command={'id':operation_id,'state':'admitted'})
         self.backend._write(self.value)
-        self.handle = await sandbox.commands.run(shlex.join(execution_worker_argv()),
+        self.handle = await sandbox.commands.run('exec '+shlex.join(execution_worker_argv()),
             background=True,stdin=True,user='user',cwd='/',timeout=self.backend.settings.lifetime_seconds-5,
             on_stdout=lambda text:self.output(self.stdout,text),on_stderr=lambda text:self.output(self.stderr,text))
         self.value['command'].update(pid=self.handle.pid,state='running')
@@ -122,6 +124,49 @@ class SandboxProcess(RuntimeProcess):
             self.stderr.reader.feed_eof()
 
 
+class AliyunRuntimeExecution(RelayRuntimeExecution):
+    """Binary file chunks use the SDK; stdin carries only control messages."""
+
+    def __init__(self, transport, sandbox):
+        super().__init__(transport)
+        self.sandbox = sandbox
+        self._chunk_lock = asyncio.Lock()
+
+    async def _file_upload(self, operation, path, *, root='workspace', **options):
+        if operation != 'upload_chunk':
+            return await super()._file_upload(operation, path, root=root, **options)
+        data = base64.b64decode(options.pop('data'), validate=True)
+        if len(data) > CHUNK_BYTES:
+            raise ResourceValidationError('Runtime file chunk exceeds its limit')
+        if not data:
+            return await super()._file_upload(operation, path, root=root, data='', **options)
+        async with self._chunk_lock:
+            if self.failure is not None:
+                raise self.failure
+            slot = await self.request('prepare_file_chunk', size=len(data), sha256=hashlib.sha256(data).hexdigest())
+            try:
+                # Only an anonymous FD held by this exact owned relay can be written.
+                # A pathname in the mutable workspace is never passed to the SDK.
+                if (set(slot) != {'chunk_id', 'descriptor', 'pid'}
+                        or type(slot['descriptor']) is not int or not 3 <= slot['descriptor'] <= 1048576
+                        or type(slot['pid']) is not int or slot['pid'] != self.transport.handle.pid
+                        or not isinstance(slot['chunk_id'], str) or len(slot['chunk_id']) != 32
+                        or any(char not in '0123456789abcdef' for char in slot['chunk_id'])):
+                    raise RuntimeUnavailableError('Invalid runtime file chunk identity')
+                await self.sandbox.files.write(f"/proc/{slot['pid']}/fd/{slot['descriptor']}",
+                    data, user='user', request_timeout=20)
+            except (Exception, asyncio.CancelledError) as error:
+                # A late SDK write must never reach a reused descriptor. Retain the
+                # uncertain slot and admit no more work until owned VM teardown.
+                self._fail(RuntimeUnavailableError(
+                    'Alibaba file transfer outcome is uncertain; the VM must be closed before further work'))
+                if isinstance(error, asyncio.CancelledError):
+                    raise
+                raise self.failure from error
+            return await self.request('upload_file', operation=operation, path=path, root=root,
+                chunk_id=slot['chunk_id'], **options)
+
+
 class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
     def __init__(self,root:Path,settings,*,sdk=None,lifetime_seconds=900):
         self.root=Path(root)
@@ -154,7 +199,7 @@ class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
         try:
             sandbox=await backend._ensure_remote(value)
             await transport.start(sandbox,request.operation_id)
-            execution=RelayRuntimeExecution(transport)
+            execution=AliyunRuntimeExecution(transport,sandbox)
             base='/workspace/oaw-runtimes/'+key
             try:
                 return await execution.initialize(base+'/project',base+'/home',environment={
