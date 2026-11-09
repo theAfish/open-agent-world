@@ -77,7 +77,8 @@ async def invoke_resource_action(services, node_id, action, request, *, capabili
             state=services.card_state.bind(node_id),
             resolve_secret=resource_secret_resolver(services, node),
             resolve_model=resource_model_resolver(services, node), open_execution=open_execution,
-            execution_configuration=lambda:services.runtime_execution_configuration(node_id), files=files or {})
+            execution_configuration=lambda:services.runtime_execution_configuration(node_id), files=files or {},
+            run_id=current.run_id if capability and current and current.agent_id == capability.agent_id else None)
         async def invoke():
             if inspect.iscoroutinefunction(operation.handler):
                 return await operation.handler(context, request.arguments)

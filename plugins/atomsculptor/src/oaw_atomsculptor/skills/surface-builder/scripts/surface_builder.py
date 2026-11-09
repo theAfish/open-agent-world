@@ -77,8 +77,8 @@ def build_surface(
 
     Parameters:
     - miller_indices: 3-list of integers (the surface Miller indices).
-    - layers: number of atomic layers in the slab.
-    - vacuum: vacuum thickness in Å added above the slab.
+    - layers: number of equivalent layers used by ase.build.surface, not individual atomic planes.
+    - vacuum: vacuum thickness in Å added on each side of the slab.
     - need_conventional: if True, convert to the conventional standard cell first.
     """
     try:

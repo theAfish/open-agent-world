@@ -271,11 +271,19 @@ class ExecutableEnvironmentManager:
             return {"status": "missing", "management": "managed", "operation_id": None}
 
     def prepare(self, spec):
+        from .lifecycle import ManagedResourceLedger, managed_environment_stages
         root = self.root / "environments" / spec.fingerprint
-        with installation_lock(self.root / "locks" / (spec.fingerprint + ".lock")):
+        with managed_environment_stages(self.root, spec.fingerprint) as track_stage, installation_lock(self.root / "locks" / (spec.fingerprint + ".lock")):
+            try:
+                previous = json.loads(self._operation(spec).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                previous = {}
             try:
                 handle = self.read(spec)
                 self._probe(spec, handle.executable)
+                if re.fullmatch(r'[a-f0-9]{32}', previous.get('stage', '')):
+                    _json_write(self._operation(spec), {**previous, 'status': 'ready', 'recovery_stage': None})
+                    track_stage(self.root / 'staging' / previous['stage'])
                 return self._register(handle)
             except (RuntimeError, OSError, subprocess.SubprocessError):
                 pass
@@ -285,17 +293,16 @@ class ExecutableEnvironmentManager:
                 except (RuntimeError, OSError, subprocess.SubprocessError):
                     pass
             artifact = spec.artifact()
-            try:
-                previous = json.loads(self._operation(spec).read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                previous = {}
             operation_id = previous.get("operation_id") or uuid4().hex
             operation = {"status": "preparing", "provider": "executable", "management": "managed",
                          "operation_id": operation_id, "fingerprint": spec.fingerprint,
                          "owner_id": spec.owner_id, "environment_id": spec.environment_id}
             previous_stage = previous.get('stage', '')
+            recovery = None
             if re.fullmatch(r'[a-f0-9]{32}', previous_stage):
                 stage = self.root / 'staging' / previous_stage
+                recovery = stage
+                track_stage(recovery)
                 payload = stage / 'payload'
                 try:
                     staged = self.read(spec, root=payload)
@@ -305,12 +312,15 @@ class ExecutableEnvironmentManager:
                 else:
                     root.parent.mkdir(parents=True, exist_ok=True)
                     if root.exists():
+                        ManagedResourceLedger(self.root.parent).require_idle('environment:' + spec.fingerprint)
                         root.rename(stage / ('previous-invalid-' + uuid4().hex))
                     payload.rename(root)
                     _json_write(self._operation(spec), {**operation, 'stage': previous_stage, 'status': 'ready'})
                     return self._register(self.read(spec))
             stage = self.root / "staging" / uuid4().hex
             operation["stage"] = stage.name
+            operation['recovery_stage'] = recovery.name if recovery is not None else None
+            track_stage(stage)
             _json_write(self._operation(spec), operation)
             stage.mkdir(parents=True)
             try:
@@ -342,10 +352,14 @@ class ExecutableEnvironmentManager:
                 _json_write(payload / "ready.json", {**operation, "status": "ready", "executable": artifact.executable, "files": files})
                 root.parent.mkdir(parents=True, exist_ok=True)
                 if root.exists():
+                    ManagedResourceLedger(self.root.parent).require_idle('environment:' + spec.fingerprint)
                     root.rename(stage / "previous-invalid")
                 payload.rename(root)
-                _json_write(self._operation(spec), {**operation, "status": "ready"})
+                _json_write(self._operation(spec), {**operation, "status": "ready", 'recovery_stage': None})
                 return self._register(self.read(spec))
             except BaseException as exc:
+                if not (stage / 'payload/ready.json').is_file():
+                    if recovery is not None and recovery.exists():
+                        operation['stage'] = recovery.name
                 _json_write(self._operation(spec), {**operation, "status": "failed", "error": type(exc).__name__})
                 raise

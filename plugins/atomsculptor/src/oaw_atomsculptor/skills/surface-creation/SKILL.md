@@ -1,5 +1,5 @@
 ---
-name: surface-creation
+name: surface_creation
 description: Workflow and pitfalls for generating crystal surfaces (slabs) from bulk structures.
 when_to_use: Use when the user asks for a surface, slab, Miller-indexed face, or surface termination. Read this BEFORE invoking any surface-building tool.
 ---
@@ -8,14 +8,14 @@ when_to_use: Use when the user asks for a surface, slab, Miller-indexed face, or
 
 Instruction-only skill (no entry script). Use it to plan a
 surface-generation task. Read from a connected OAW Skill card. Execute the
-separate `surface-builder` Skill through `run_skill_script` and an authorized
+separate `surface_builder` Skill through `run_skill_script` and an authorized
 Sandbox. If the slab should replace the open Atom Structure, use the
 file-backed conversion/import path with a freshly inspected revision.
 Do not treat this instruction-only Skill as a runnable builder.
 
 For deeper material-specific notes, drill down via:
 
-- [references/lpscl_and_sio2.md](references/lpscl_and_sio2.md) — worked examples
+- [references/lpscl_and_sio2.md](references/lpscl_and_sio2.md) — input and provenance notes
   for LPSCl (Li6PS5Cl) and α-SiO2 surfaces.
 - [references/checklist.md](references/checklist.md) — validation checklist and
   PBC / vacuum / layer-count rules of thumb.
@@ -24,22 +24,27 @@ For deeper material-specific notes, drill down via:
 
 1. **Obtain bulk crystal structure**
    - Materials Project search (preferred for real materials), or
-   - Manual creation via `crystal-builder` skill / pymatgen / ASE.
+   - Manual creation via `crystal_builder` skill / pymatgen / ASE.
 
 2. **Choose an appropriate cell setting (often conventional for FCC)**
    - MP often returns primitive cells (60° angles for FCC).
-   - For the packaged surface-builder script, use the conventional cell when
-     the selected orientation or input setting requires it. It accepts
-     `need_conventional=True`.
-   - Never hand-roll cell transformations — use proper tools.
+   - The packaged surface_builder script uses ASE's conventional-cell surface
+     convention and accepts `need_conventional=True`. Record the chosen setting
+     because Miller indices refer to that basis.
+   - Use established cell transformations rather than guessing a new basis.
 
-3. **Generate surface using SlabGenerator**
-   - Specify Miller indices.
-   - Layers: 4–8 (5 is a good default for DFT).
-   - Vacuum: ≥ 10–15 Å.
+3. **Generate surface using the packaged ASE surface builder**
+   - Specify Miller indices in the selected input cell's basis.
+   - `layers` counts ASE equivalent layers, not individual atomic planes.
+   - `vacuum` is padding on each side of the slab. For example, 15 Å means
+     approximately 15 Å per side. Choose thickness and vacuum by the requested
+     accuracy and convergence tests, not a fixed universal layer count.
+   - pymatgen `SlabGenerator` is an alternative for separately implemented
+     termination/thickness workflows; it is not the backend of this script.
 
 4. **Build supercell for desired adsorbate coverage**
-   - Periodic images of any adsorbate must be > 10 Å apart.
+   - Measure actual adsorbate-image separation. A trial 10 Å clearance can be a
+     starting hypothesis; converge it for the chosen chemistry and calculation.
 
 5. **Validate** (Miller indices, termination, surface coordination, intended PBC,
    structural-unit integrity).
@@ -68,7 +73,7 @@ For deeper material-specific notes, drill down via:
 |--------------------------------------|------------------------------------------------------|
 | Primitive vs. conventional cell      | Inspect and convert when the chosen surface method needs it. |
 | Wrong surface termination            | Check all terminations, pick one preserving units.   |
-| Insufficient vacuum                  | Increase to ≥ 10 Å.                                  |
-| Too many layers for DFT              | Reduce to 5; verify properties hold.                 |
-| Adsorbate periodic images < 10 Å     | Enlarge supercell.                                   |
-| Broken structural units (PS4, dimers)| Test all terminations; see lpscl_and_sio2 reference. |
+| Insufficient vacuum                  | Increase and verify convergence for the intended calculation. |
+| Excessive slab cost                  | Test fewer layers while checking convergence of the target properties. |
+| Interacting adsorbate images          | Enlarge the in-plane cell and test image separation. |
+| Unexpected broken structural units   | Compare terminations with the selected input and requested surface chemistry. |

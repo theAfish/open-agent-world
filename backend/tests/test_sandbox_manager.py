@@ -91,6 +91,74 @@ def make_manager(tmp_path, *, available=True):
 
 
 @pytest.mark.asyncio
+async def test_failed_pack_bootstrap_blocks_python_before_dispatch_and_native_retry_recovers(tmp_path):
+    from backend.plugins.bootstrap import PluginEnvironmentBootstrap
+    from backend.capabilities.provider import _python_environment_summary
+    from backend.sandbox.models import SandboxPreparationError
+    from backend.tests.test_shared_python_runtime import plugin_registry
+    manager, backend = make_manager(tmp_path)
+    failed = True
+
+    async def prepare(requirements, bootstrap_key=None):
+        if failed:
+            raise RuntimeError("dependency wheel download timed out")
+        return {"ready": True}
+
+    async def status():
+        return {"ready": True, "package_versions": {}}
+
+    backend.prepare_python, backend.python_status = prepare, status
+    bootstrap = PluginEnvironmentBootstrap(tmp_path, plugin_registry(), manager)
+    manager.pack_requirements, manager.pack_python_status = bootstrap.requirements, bootstrap.status
+    await manager.create("box")
+    await manager.start("box")
+    await bootstrap.run()
+    summary = _python_environment_summary(await manager.python_status("box"))
+    assert summary["interpreter_ready"] and not summary["ready"]
+    assert summary["dependencies"]["state"] == "failed"
+    assert "download timed out" in summary["dependencies"]["error"]
+    started = []
+    async def on_start():
+        started.append(True)
+    with pytest.raises(SandboxPreparationError, match="No command started"):
+        await manager.execute("box", ["python3", "build.py"], on_command_start=on_start)
+    assert not backend.commands and not started
+    # A ready receipt from a different platform cannot admit this platform.
+    bootstrap.update("test.runtime", "environment_ready", completed={"other": bootstrap.records()[0]["digest"]})
+    assert bootstrap.status("test-linux")["state"] == "not_ready"
+    manager._python_warmup_errors["test-linux"] = "previous failed warmup"
+    failed = False
+    bootstrap.enqueue()
+    await bootstrap.shutdown()
+    assert _python_environment_summary(await manager.python_status("box"))["ready"]
+    assert "test-linux" not in manager._python_warmup_errors
+    await manager.execute("box", ["python3", "build.py"], on_command_start=on_start)
+    assert backend.commands == [["python3", "build.py"]] and started == [True]
+
+
+@pytest.mark.asyncio
+async def test_private_profile_does_not_require_unrelated_shared_pack_dependencies(tmp_path):
+    from backend.sandbox.materialization import RuntimeBundle, RuntimeMount
+    from backend.sandbox.models import SandboxPreparationError
+    manager, backend = make_manager(tmp_path)
+    manager.pack_python_status = lambda _: {"ready": False, "state": "failed", "owners": ["unrelated"], "error": "failed install"}
+    captured = []
+    async def execute(sandbox_id, argv, **options):
+        captured.append(options)
+        return CommandResult(sandbox_id, tuple(argv), 0, "ok", "", .01)
+    backend.execute = execute
+    await manager.create("box")
+    await manager.start("box")
+    argv = ["python3", "-I", "-S", "_oaw_profile/runner.py"]
+    mount = RuntimeMount(RuntimeBundle("profile", (("_oaw_profile/recipe.json", b'{"mode":"command"}'),)), 3)
+    assert (await manager.execute("box", argv, runtime_mount=mount)).exit_code == 0
+    shared = RuntimeMount(RuntimeBundle("profile", (("_oaw_profile/recipe.json", b'{"management":"legacy-shared"}'),)), 3)
+    with pytest.raises(SandboxPreparationError):
+        await manager.execute("box", argv, runtime_mount=shared)
+    assert len(captured) == 1
+
+
+@pytest.mark.asyncio
 async def test_optional_python_environment_dispatch(tmp_path):
     manager, backend = make_manager(tmp_path)
     backend.supports_optional_python_runtime = True
@@ -325,16 +393,33 @@ async def test_commands_prepare_sandbox_without_a_separate_start(tmp_path):
 
 @pytest.mark.asyncio
 async def test_python_install_prepares_sandbox_without_a_separate_start(tmp_path, monkeypatch):
+    from backend.plugins import create_builtin_registry
+    from backend.plugins.registry import PluginDefinition, PluginDescriptor
+    from backend.sandbox.models import SandboxPreparationError
     manager, backend = make_manager(tmp_path)
-    async def install(sandbox_id, requirements):
-        assert (await manager.get(sandbox_id)).state == SandboxState.READY
+    failed = True
+    async def prepare(requirements, bootstrap_key=None):
+        if failed:
+            raise SandboxPreparationError('previous download timeout')
         return {'requirements': requirements}
-    monkeypatch.setattr(manager, 'install_python_packages', install)
-    services = create_services(Settings.for_data_root(manager.root), sandbox_backend=manager)
+    async def status():
+        return {'ready': True}
+    monkeypatch.setattr(backend, 'prepare_python', prepare, raising=False)
+    monkeypatch.setattr(backend, 'python_status', status, raising=False)
+    plugins = create_builtin_registry()
+    plugins.install(PluginDefinition(PluginDescriptor(id='test.runtime', version='1', plugin_api_version='1.0',
+        python_requirements=('sample==1',)), lambda r: None))
+    services = create_services(Settings.for_data_root(manager.root), sandbox_backend=manager, plugins=plugins)
     try:
+        await services.plugin_bootstrap.run()
+        assert services.plugin_bootstrap.status('test-linux')['state'] == 'failed'
+        failed = False
         card = await services.create_card(CardCreate(type='sandbox'))
         result = await services.install_python_packages(card.id, ['example'])
-        assert result['requirements'] == ['example']
+        assert result['requirements'] == ['example', 'sample==1']
+        assert result['python_environment']['ready']
+        assert services.plugin_bootstrap.status('test-linux')['state'] == 'ready'
+        assert (await manager.get(card.id)).state == SandboxState.READY
     finally:
         await services.shutdown()
         services.close()
@@ -421,7 +506,7 @@ def test_global_sandbox_location_migrates_existing_cards_and_persists(tmp_path):
         folder.mkdir()
     services = create_services(settings, sandbox_backend=manager)
     with TestClient(create_app(settings, services=services)) as client:
-        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto", "backup_paths": [], "environment_variables": {}, "secret_bindings": {}, "folder_bindings": {}}
+        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto", "backup_paths": [], "environment_variables": {}, "secret_bindings": {}, "folder_bindings": {}, "binding_errors": {}}
         old = client.post("/api/nodes", json={"type": "sandbox"}).json()
         response = client.put("/api/settings/sandbox", json={"workspace_root": str(root), "runtime": "test-linux"})
         assert response.status_code == 200, response.text
@@ -476,7 +561,7 @@ def test_invalid_sandbox_defaults_do_not_replace_saved_settings(tmp_path):
             response = client.put("/api/settings/sandbox", json={"workspace_root": root})
             assert response.status_code == 422, response.text
         assert client.put("/api/settings/sandbox", json={"runtime": "unknown"}).status_code == 422
-        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto", "backup_paths": [], "environment_variables": {}, "secret_bindings": {}, "folder_bindings": {}}
+        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto", "backup_paths": [], "environment_variables": {}, "secret_bindings": {}, "folder_bindings": {}, "binding_errors": {}}
     services.close()
 
 

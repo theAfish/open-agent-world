@@ -10,6 +10,7 @@ ase = pytest.importorskip("ase")
 np = pytest.importorskip("numpy")
 from ase.io import read, write
 from test_geometry_validation import SCRIPTS, finite_tube
+from skill_materialization import skill_scripts
 
 
 def cli(tmp_path, *args):
@@ -17,6 +18,44 @@ def cli(tmp_path, *args):
                             cwd=tmp_path, text=True, capture_output=True, timeout=30)
     assert result.stdout, result.stderr
     return result.returncode, json.loads(result.stdout)
+
+
+def test_invalid_distance_mode_is_rejected_before_reading_a_structure(tmp_path):
+    result = subprocess.run([sys.executable, str(SCRIPTS / 'structure_inspect.py'), 'validate_structure',
+        '--folder', '.', '--file-name', 'not-present.extxyz', '--distance-mode', 'minimum_image'],
+        cwd=tmp_path, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 2 and not result.stdout
+    assert 'invalid choice' in result.stderr and 'periodic' in result.stderr
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("n,m,finite", [(5, 5, True), (7, 7, True), (10, 0, True),
+                                       (4, 2, True), (5, 5, False)])
+def test_bundled_cnt_builder_and_inspector_agree_on_boundary_modes(tmp_path, n, m, finite):
+    script = skill_scripts("nanotube_builder") / "nanotube_builder.py"
+    args = ["build_nanotube", "--n", str(n), "--m", str(m), "--length", "4",
+            "--vacuum", "15", "--output-file", "tube.extxyz"]
+    if finite:
+        args += ["--pbc-z", "false"]
+    built = subprocess.run([sys.executable, str(script), *args], cwd=tmp_path,
+                           text=True, capture_output=True, timeout=30)
+    assert built.returncode == 0, built.stderr
+    generated = json.loads(built.stdout)
+    atoms = read(tmp_path / "tube.extxyz")
+    assert atoms.pbc.tolist() == [False, False, not finite]
+    if finite:
+        code, report = cli(tmp_path, "validate_nanotube", "--folder", ".", "--file-name", "tube.extxyz",
+                           "--n", str(n), "--m", str(m), "--axial-repeats", "4", "--min-vacuum", "8")
+        assert report["repeat_window_atom_counts"] == [generated["n_atoms"] // 4] * 4
+    else:
+        # Omitting --pbc-z keeps the periodic generator default. Its periodic
+        # cell uses the translation period, even if occupied atoms span less.
+        from ase.build import nanotube
+        assert atoms.cell[2, 2] == pytest.approx(nanotube(n, m, length=4).cell[2, 2])
+        code, report = cli(tmp_path, "validate_structure", "--folder", ".", "--file-name", "tube.extxyz",
+                           "--expected-count", str(generated["n_atoms"]), "--distance-mode", "auto")
+    assert code == 0 and report["passed"], report
+    assert report["atom_count"] == generated["n_atoms"]
 
 
 def test_saved_labels_survive_reordering_translation(tmp_path):

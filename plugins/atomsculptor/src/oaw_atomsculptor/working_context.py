@@ -1,84 +1,89 @@
-"""Focus a specialist's working request; native Run archives remain complete.
+"""Read-progress feedback from native request views; no separate history budget.
 
-Only entire, settled, unsigned exchanges can leave the working window. This is
-host evidence selection, not a fabricated transcript or a model summary call.
+The native RequestWindow owns projection and compaction. This observer keeps
+only page identities/ranges and never removes history, runs tools or decides
+scientific acceptance.
 """
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 
 
-def focus_history(evidence, request, bindings):
-    contents = request.contents
-    if len(contents) < 4 or any(getattr(p, "thought_signature", None)
-                               for c in contents for p in (c.parts or [])):
-        return  # Provider-signed history cannot be edited/reordered.
-    had_checkpoint = any(c.role == "user" and len(c.parts or []) == 1 and
-                         c.parts[0].text in evidence._working_context_texts for c in contents)
-    original = list(contents)
-    contents = [c for c in contents if not (c.role == "user" and len(c.parts or []) == 1
-                and c.parts[0].text in evidence._working_context_texts)]
-    # The initial delegation, the current HOST stable frame and the freshly
-    # replaced HOST turn frame are retained; only settled history is focused.
-    stable = [c for c in contents if c.role == "user" and len(c.parts or []) == 1
-              and c.parts[0].text in evidence._host_static_texts]
-    flowing = [c for c in contents if c not in stable]
-    first, middle, frame = flowing[0], flowing[1:-1], flowing[-1]
-    units, current, pending = [], [], []
-    for content in middle:
-        current.append(content)
-        for part in content.parts or []:
-            call = getattr(part, "function_call", None)
-            response = getattr(part, "function_response", None)
-            if call:
-                pending.append((call.id, call.name))
-            if response:
-                match = next((i for i, (identity, name) in enumerate(pending)
-                              if (response.id and identity == response.id) or
-                              (not response.id and name == response.name)), None)
-                if match is None:
-                    return  # Leave malformed input to the existing exchange repair.
-                pending.pop(match)
-        if not pending:
-            units.append(current)
-            current = []
-    if current:
-        units.append(current)  # An unresolved suffix is always retained intact.
-    def size(items):
-        return sum(len(c.model_dump_json(exclude_none=True)) for c in items)
-    if size(middle) <= evidence.limits.working_history_chars and not had_checkpoint:
-        return
-    retained, used = [], 0
-    for unit in reversed(units):
-        amount = size(unit)
-        if retained and used + amount > evidence.limits.working_history_chars:
-            break
-        retained.insert(0, unit)
-        used += amount
-    tail = [c for unit in retained for c in unit]
-    if len(tail) >= len(middle) and not had_checkpoint:
-        return
-    # Saved files remain authoritative. Never refill the working window with
-    # complete source that the settled history just removed.
-    current_source = evidence._current_source_head("structure_builder") if hasattr(evidence, "_current_source_head") else None
-    checkpoint = {"source": "HOST working-context checkpoint, not a tool result",
-                  "removed_complete_history_contents": len(middle) - len(tail),
-                  "source_snapshot": {k: current_source[k] for k in ("sandbox", "path", "version", "source_chars")} if current_source else None,
-                  "instruction": "Full exchanges remain in native Run invocation logs. The final HOST frame holds "
-                    "the original request, plan/checks and recent real execution evidence. "
-                    "Script metadata here is historical; the final HOST frame owns the current source version and bounded excerpts. "
-                    "Use the final frame's working_decision for the pending subtask and rejected methods. Use artifact_handoffs for "
-                    "frames and producer receipts; do not reuse an invalid candidate merely because its objective is smaller. "
-                    "Read any other required file through authorized Sandbox tools; do not reconstruct it from guesses."}
-    text = json.dumps(checkpoint, ensure_ascii=False)
-    candidate = [first, *stable, bindings.types.Content(role="user", parts=[
-        bindings.types.Part.from_text(text=text)]), *tail, frame]
-    # A focus pass must buy runway, including its checkpoint and all pinned
-    # frames. If the new summary is larger, retain the existing window intact.
-    if size(candidate) >= size(original):
-        return
-    evidence._working_context_texts.add(text)
-    request.contents[:] = candidate
-    evidence.notice("structure_builder", "Focused working context on recent settled exchanges and saved source",
-                    workflow_event="working_context", removed_contents=len(middle) - len(tail),
-                    retained_history_chars=used)
+def _merged(ranges):
+    merged = []
+    for start, end in sorted(ranges):
+        if end <= start:
+            continue
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _key(page):
+    return page['tool'], json.dumps(page['source'], sort_keys=True)
+
+
+class RetrievalProgress:
+    def __init__(self):
+        self.state = None
+        self.seen = set()
+        self.feedback = None
+        self.feedback_calls = set()
+
+    def snapshot(self):
+        return deepcopy(self.feedback)
+
+    def observe(self, evidence, request, window):
+        pages = window.read_pages(request)
+        state = (window.scope, evidence.workflow.plan_revision, evidence.workflow.current,
+                 evidence.execution_sequence, len(evidence.experiment_records),
+                 json.dumps(evidence.workflow.pending_experiment, sort_keys=True),
+                 json.dumps(evidence.workflow.review_request, sort_keys=True),
+                 json.dumps(evidence.environment_revisions, sort_keys=True),
+                 json.dumps(evidence.imports, sort_keys=True), json.dumps(evidence.confirmed, sort_keys=True))
+        if state != self.state:
+            self.state, self.seen = state, {p['call_id'] for p in pages}
+            self.feedback, self.feedback_calls = None, set()
+            return
+        fresh = [p for p in pages if p['call_id'] not in self.seen]
+        self.seen.update(p['call_id'] for p in pages)
+        if (evidence.pending or evidence.executions or evidence.inline_pending or evidence.skill_operations):
+            self.feedback, self.feedback_calls = None, set()
+            return  # Waiting for native work is not a retrieval loop.
+        if not fresh:
+            return  # Re-preparing a request or retrying transport is not a new read.
+        visible = {}
+        for page in window.visible_reads:
+            visible.setdefault(_key(page), []).append((page['offset'], page['end']))
+        incoming = {}
+        for page in fresh:
+            incoming.setdefault(_key(page), []).append((page['offset'], page['end']))
+        new_chars = 0
+        for key, ranges in incoming.items():
+            prior = _merged(visible.get(key, []))
+            for start, end in _merged(ranges):
+                covered = sum(max(0, min(end, right) - max(start, left)) for left, right in prior)
+                new_chars += end - start - covered
+        if new_chars or any(_key(page) not in visible for page in fresh):
+            self.feedback, self.feedback_calls = None, set()
+            return  # New pages, changed versions and context restoration are valid.
+        # An additional duplicate after the nudge was actually present in a
+        # prepared request is a stronger signal. It is advisory, never an
+        # automatic failure or a forced change of scientific method.
+        offered = self.feedback_calls <= {p['call_id'] for p in window.visible_reads} if self.feedback_calls else False
+        status = 'needs_plan_review' if self.feedback and offered else 'repeated_visible_read'
+        self.feedback = {
+            'status': status, 'new_visible_chars': 0,
+            'scope': 'Same saved source/result version and unchanged execution/plan evidence',
+            'reads': [{k: p[k] for k in ('tool', 'call_id', 'source', 'offset', 'end')} for p in fresh[-8:]],
+            'instruction': (
+                'These ranges were already visible in the preceding prepared model request; rereading them added no information. '
+                'Use the available evidence for the pending action, or locate a specific missing region with query/symbol/start_line. '
+                'If the method is blocked, explain the missing fact or request plan review. '
+                'This signal does not fail the task, prohibit justified reads, or change scientific acceptance.')}
+        self.feedback_calls = {p['call_id'] for p in fresh}
+        evidence.notice(evidence._context_role, 'Repeated reads added no visible information',
+                        workflow_event='retrieval_progress', retrieval_status=status, new_visible_chars=0)

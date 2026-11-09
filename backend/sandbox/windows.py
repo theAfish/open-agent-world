@@ -84,6 +84,7 @@ class WindowsSandboxBackend(SandboxBackend):
     or path-only fallback.
     """
 
+    supports_workspace_scopes = True
     supports_invocation_environment = True
     supports_folder_mounts = True
     supports_execution_policy = True
@@ -179,12 +180,11 @@ class WindowsSandboxBackend(SandboxBackend):
                 return self._info(record)
             # Reassert the native ACL so external ACL removal cannot turn into
             # silent partial functionality after an application restart.
-            await asyncio.to_thread(
-                self._native.grant_path,
-                record.root / "workspace",
-                record.profile.sid,
-                read_only=False,
-            )
+            interrupted = await self._security_mutation(
+                lambda item: self._native.grant_workspace(
+                    item.root / "workspace", item.profile.sid, read_only=False), record)
+            if interrupted:
+                raise asyncio.CancelledError
             if record.workspace_path is not None:
                 interrupted = await self._security_mutation(self._grant_workspace, record)
                 if interrupted:
@@ -198,7 +198,7 @@ class WindowsSandboxBackend(SandboxBackend):
             except BaseException:
                 record.state = SandboxState.STOPPED
                 if record.workspace_path is not None:
-                    await asyncio.to_thread(self._revoke_workspace, record)
+                    await self._security_mutation(self._revoke_workspace, record)
                 raise
         await self._emit_state(record)
         return self._info(record)
@@ -245,7 +245,7 @@ class WindowsSandboxBackend(SandboxBackend):
         from uuid import uuid4
         owner = await self._record(sandbox_id)
         command_id = execution_command_id.get() or uuid4().hex
-        exclusive = options.get("runtime_mount") is not None or bool(options.get("folder_mounts")) or bool((options.get("execution_policy") or {}).get("network_enabled"))
+        exclusive = options.get("workspace_write_directory") is not None or options.get("runtime_mount") is not None or bool(options.get("folder_mounts")) or bool((options.get("execution_policy") or {}).get("network_enabled"))
         if self.python_runtime is not None:
             await self.python_runtime.prepare()
         async with owner.lock:
@@ -327,7 +327,9 @@ class WindowsSandboxBackend(SandboxBackend):
         runtime_mount: RuntimeMount | None = None,
         folder_mounts=(),
         execution_policy: Mapping[str, Any] | None = None,
+        working_directory: str = "", workspace_write_directory: str | None = None,
     ) -> CommandResult:
+        from .files import working_path
         policy = execution_policy or {}
         network_enabled = policy.get("network_enabled", False)
         if type(network_enabled) is not bool:
@@ -364,6 +366,10 @@ class WindowsSandboxBackend(SandboxBackend):
             environment = minimal_windows_environment(
                 record.workspace, env, storage_directory=storage, invocation_env=invocation_env
             )
+            if workspace_write_directory:
+                allowed = working_path(record.workspace, workspace_write_directory)
+                environment.update(TEMP=str(allowed / '.tmp'), TMP=str(allowed / '.tmp'), LOCALAPPDATA=str(allowed))
+                (allowed / '.tmp').mkdir(exist_ok=True)
             if self.python_runtime is not None:
                 self.python_runtime.environment(environment)
             mount_root = None
@@ -422,10 +428,10 @@ class WindowsSandboxBackend(SandboxBackend):
         try:
             (storage / ".tmp").mkdir(exist_ok=True)
             native_task = asyncio.create_task(asyncio.to_thread(
-                self._run_with_folder_mounts,
+                self._run_with_workspace_access,
                 record, mount_root,
-                command, folder_mounts,
-                cwd=record.workspace,
+                command, folder_mounts, workspace_write_directory,
+                cwd=working_path(record.workspace, working_directory),
                 environment=environment,
                 limits=limits,
                 network_enabled=network_enabled,
@@ -764,6 +770,23 @@ class WindowsSandboxBackend(SandboxBackend):
                 workspace_authorized=True, workspace_identity=tuple(entry["identity"]), workspace_handle=None)
             self._revoke_workspace(cleanup)
         journal.unlink()
+
+    def _run_with_workspace_access(self, record, mount_root, command, folders, directory, **options):
+        if directory is None:
+            return self._run_with_folder_mounts(record, mount_root, command, folders, **options)
+        from .workspace_access import writable_path
+        allowed = writable_path(record.workspace, directory) if directory else None
+        # Scope ACLs use the existing exclusive admission. Never change a shared
+        # SID's grants while another command can still hold a writable handle.
+        try:
+            self._native.grant_workspace(record.workspace, record.profile.sid, read_only=True,
+                root_handle=record.workspace_handle)
+            if allowed is not None and record.workspace_access != ResourceAccess.READ_ONLY:
+                self._native.grant_workspace(allowed, record.profile.sid, read_only=False)
+            return self._run_with_folder_mounts(record, mount_root, command, folders, **options)
+        finally:
+            self._native.grant_workspace(record.workspace, record.profile.sid,
+                read_only=record.workspace_access == ResourceAccess.READ_ONLY, root_handle=record.workspace_handle)
 
     def _run_with_folder_mounts(self, record, mount_root, command, folders, **options):
         if not folders:

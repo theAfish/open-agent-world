@@ -82,6 +82,10 @@ card to your deck and place it. Open it to inspect the saved configuration. This
 Python-only card has a read-only fallback; the editor comes in step 4. Stop the
 launcher with Ctrl+C before changing Python code or adding build dependencies.
 Setup prepares dependencies; normal `dev` startup does not install them.
+For several projects, repeat `--plugin-path` on Linux/macOS or pass an array to
+`-PluginPath` in PowerShell. Paths may contain spaces. These paths are added to
+any directories explicitly configured in `OPEN_AGENT_WORLD_PLUGIN_DIRS` for
+the launched development processes.
 
 ## 2. Understand behavior and data
 

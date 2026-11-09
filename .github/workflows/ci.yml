@@ -96,6 +96,16 @@ jobs:
           uv pip install --python .venv/bin/python "${install_args[@]}"
       - name: Strict optional plugin activation
         run: backend/.venv/bin/python -c "from backend.plugins.loader import load_plugin_registry; load_plugin_registry(strict=True)"
+      - name: Prepare declared Report rendering test dependencies
+        run: |
+          backend/.venv/bin/python - <<'PY'
+          import subprocess
+          import tomllib
+          from pathlib import Path
+          spec = tomllib.loads(Path('plugins/atomsculptor/oaw.pack.toml').read_text())
+          subprocess.run(['uv', 'pip', 'install', '--python', 'backend/.venv/bin/python',
+                          *spec['environments']['log-review']['python']], check=True)
+          PY
       - name: Run backend and public SDK test suites
         run: >-
           backend/.venv/bin/python .github/run-backend-tests.py tests backend/tests packs/codex/tests

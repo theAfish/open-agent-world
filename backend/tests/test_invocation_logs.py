@@ -254,7 +254,20 @@ def test_sdk_serialization_recursion_is_explicit_without_privileged_repr():
     assert 'private credentials' not in json.dumps(safe)
 
 
-def test_invocation_api_run_scope_pagination_and_lazy_body(client):
+@pytest.fixture
+def invocation_client(data_root):
+    from fastapi.testclient import TestClient
+    from backend.config import Settings
+    from backend.main import create_app
+    from backend.services import create_services
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings, plugins=create_builtin_registry())
+    with TestClient(create_app(settings, services=services)) as client:
+        yield client
+
+
+def test_invocation_api_run_scope_pagination_and_lazy_body(invocation_client):
+    client = invocation_client
     services = client.app.state.services
     run = RunStore(services.database).create(agent_id='a', runtime_provider_id='test', caller_kind='user')
     archive = RunInvocationLogs(services.state, run.run_id)
@@ -352,6 +365,27 @@ async def test_error_callback_replacement_is_saved_as_the_returned_result(native
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('replace', [False, True])
+async def test_name_resolution_error_before_tool_callback_is_archived(native, replace):
+    *_, checkpoints = native
+    trace = ModelTrace(asyncio.Queue(), checkpoint_store=checkpoints)
+    denial = {'ok': False, 'error': {'code': 'disallowed_tool', 'command_dispatched': False}}
+    async def recover(**kwargs):
+        return denial if replace else None
+    callbacks = archived_tool_callbacks(trace, 'builder', {'on_tool_error_callback': recover})
+    result = await callbacks['on_tool_error_callback'](
+        NS(name='absent_tool'), {'question': 'original argument'}, NS(function_call_id='unknown'), ValueError('Tool not found'))
+    row = checkpoints.invocations.records('tools')['tool-call:0:builder:unknown']
+    assert row['arguments'] == {'question': 'original argument'}
+    assert row['state'] == ('returned' if replace else 'failed')
+    if replace:
+        assert row['response'] == result == denial and row['response_complete']
+        assert row['overridden'] is True
+    else:
+        assert result is None and row['error_type'] == 'ValueError'
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [RuntimeError, asyncio.CancelledError])
 async def test_error_callback_failure_settles_archive_and_propagates(native, failure):
     _, _, _, _, checkpoints = native
@@ -366,3 +400,75 @@ async def test_error_callback_failure_settles_archive_and_propagates(native, fai
     row = checkpoints.invocations.records('tools')['tool-call:0:builder:observer-failed']
     assert row['state'] != 'started'
     assert row['error_type'] == failure.__name__
+
+
+@pytest.mark.asyncio
+async def test_success_stream_timings_reuse_native_archive_and_lifecycle(native):
+    from backend.runs.activity import activity_update
+    trace = ModelTrace(asyncio.Queue(), checkpoint_store=native[-1])
+    req = request()
+    trace.begin('builder', req)
+    class Provider:
+        model = 'offline'
+        async def generate_content_async(self, submitted, stream=False):
+            yield LlmResponse(partial=True)  # Adapter heartbeat, not content.
+            yield LlmResponse(partial=True, content=types.Content(role='model', parts=[types.Part(text='thinking', thought=True)]))
+            yield response()
+    results = [row async for row in recover_request(Provider(), req, trace, 'builder', stream=True)]
+    await trace.callbacks('builder')['after_model_callback'](None, results[0])
+    archived = next(iter(trace.invocations.records('models').values()))
+    metrics = archived['stream_metrics']
+    assert metrics['stream_requested'] is True
+    assert metrics['observed_response_chunks'] == 3
+    assert metrics['received_content_chunks'] == 2 and metrics['empty_response_chunks'] == 1
+    assert metrics['content_chunks_by_kind'] == {'reasoning': 2, 'tool_call': 1}
+    assert metrics['observation_scope'] == 'adapter_responses'
+    assert not metrics['transport_observation_available'] and not metrics['generation_resume_used']
+    assert 0 <= metrics['first_response_seconds'] <= metrics['first_content_seconds'] <= metrics['elapsed_seconds']
+    lifecycle = {}
+    while not trace.queue.empty():
+        payload = trace.queue.get_nowait()[1]
+        lifecycle.update(activity_update(lifecycle, 'agent_progress', payload, 'event', 'time'))
+    assert lifecycle['model_requests'][0]['stream_metrics'] == metrics
+    assert 'builder' not in trace.request_stream_metrics
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cancel', [False, True])
+async def test_interrupted_stream_metrics_survive_native_archive_reopen(native, cancel):
+    db, state, run, scope, checkpoints = native
+    trace = ModelTrace(asyncio.Queue(), checkpoint_store=checkpoints)
+    req = request()
+    trace.begin('builder', req)
+    ready = asyncio.Event()
+    class Provider:
+        model = 'offline'
+        async def generate_content_async(self, submitted, stream=False):
+            if cancel:
+                ready.set()
+                await asyncio.Event().wait()
+            else:
+                yield LlmResponse(partial=True, content=types.Content(role='model', parts=[
+                    types.Part(text='received thought', thought=True)]))
+                raise ConnectionResetError('private provider response')
+            yield response()
+    async def consume():
+        return [row async for row in recover_request(Provider(), req, trace, 'builder', retries=0)]
+    if cancel:
+        task = asyncio.create_task(consume())
+        await ready.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        from backend.agents.request_recovery import RequestRecoveryExhausted
+        with pytest.raises(RequestRecoveryExhausted):
+            await consume()
+    reopened = RunInvocationLogs(state, run.run_id)
+    row = next(iter(reopened.records('models').values()))
+    metrics = row['stream_metrics']
+    assert row['interrupted_at'] and metrics['generation_resume_used'] is False
+    assert metrics['observed_activity'] == ('no_adapter_response' if cancel else 'content_received')
+    assert metrics['content_chunks_by_kind'] == ({} if cancel else {'reasoning': 1})
+    assert metrics['transport_observation_available'] is False
+    assert 'private provider response' not in str(row)

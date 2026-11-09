@@ -60,6 +60,32 @@ async def test_competing_submissions_replay_before_capacity_and_check_all_input(
 
 
 @pytest.mark.asyncio
+async def test_queued_run_keeps_selected_session_and_rejects_unconnected_context(tmp_path):
+    from backend.conversations import ConversationSessionCreate
+    from backend.world.models import EdgeCreate
+
+    provider = RecordingProvider()
+    async with api(tmp_path, provider) as (services, client):
+        agent = await services.create_card(CardCreate(type='agent', name='Atlas'))
+        room = await services.create_card(CardCreate(type='conversation'))
+        await services.create_edge(EdgeCreate(source=agent.id, target=room.id, relationship='participate'))
+        session = services.conversations.create_session(room.id, ConversationSessionCreate(title='Chosen'))
+        url = f'/api/agents/{agent.id}/run'
+        response = await client.post(url, headers={'X-OAW-State-Session': session.id},
+                                     json={'prompt': 'work in this session', 'enqueue': True})
+        assert response.status_code == 202, response.text
+        run = await asyncio.wait_for(services.run_manager.wait_settled(response.json()['run_id']), timeout=2)
+        assert run.context_id == session.id
+        assert run.lifecycle['task_workspace']['mode'] == 'workspace'
+        other = await services.create_card(CardCreate(type='conversation'))
+        unrelated = services.conversations.create_session(other.id, ConversationSessionCreate(title='Unrelated'))
+        refused = await client.post(url, headers={'X-OAW-State-Session': unrelated.id},
+                                   json={'prompt': 'wrong session', 'enqueue': True})
+        assert refused.status_code == 422, refused.text
+        assert len(provider.contexts) == 1
+
+
+@pytest.mark.asyncio
 async def test_finished_submission_replays_and_new_key_starts_fresh_context(tmp_path):
     provider = RecordingProvider()
     async with api(tmp_path, provider) as (services, client):

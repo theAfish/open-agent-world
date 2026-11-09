@@ -7,7 +7,7 @@ from pydantic import BaseModel, ValidationError
 
 from backend.card_library import KEY, CardLibraryStore, LibraryEdit
 from backend.config import Settings
-from backend.errors import GraphValidationError, RevisionConflictError
+from backend.errors import GraphValidationError, RevisionConflictError, NotFoundError
 from backend.main import create_app
 from backend.persistence.database import Database
 from backend.plugins import PackDefinition, PluginDefinition, PluginDescriptor, create_builtin_registry
@@ -153,6 +153,75 @@ def test_legacy_surface_snapshots_migrate_on_application_startup(tmp_path):
     with pytest.raises(ValidationError):
         store.read()
     db.close()
+
+
+@pytest.mark.parametrize("aliases", [False, True])
+def test_legacy_workspace_follower_snapshot_migrates_on_application_startup(tmp_path, aliases):
+    settings = Settings.for_data_root(tmp_path)
+    db = Database(settings.database_path)
+    registry = create_builtin_registry()
+    install(registry)
+    store = CardLibraryStore(db, registry)
+    edit(store, "open_pack", id="example.default")
+    expected = edit(store, "update_deck", id="starter", entries=[{"id": "example.card"}])
+    payload = expected.model_dump(mode="json", by_alias=aliases)
+    scopes_key = "supportedScopes" if aliases else "supported_scopes"
+    payload["card_definitions"]["example.card"]["state"] = {
+        "mode": "scoped", scopes_key: ["session", "group"],
+        "defaultScope" if aliases else "default_scope": "session",
+        "followWorkspace" if aliases else "follow_workspace": True,
+    }
+    with db.transaction(immediate=True) as connection:
+        connection.execute("UPDATE application_settings SET value_json=? WHERE key=?", (json.dumps(payload), KEY))
+    db.close()
+    # Full startup must also preserve metadata for an absent plugin, rather
+    # than depending on the current registry replacing the cached definition.
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/application").status_code == 200
+        assert client.get("/api/world").status_code == 200
+        restored = client.get("/api/card-library").json()
+        assert restored["decks"] == payload["decks"]
+        assert restored["collection"] == payload["collection"]
+        assert restored["active_deck_id"] == payload["active_deck_id"]
+        assert restored["packs"]["example.default"] == payload["packs"]["example.default"]
+        assert restored["plugins"]["example"]["enabled"] == payload["plugins"]["example"]["enabled"]
+    db = Database(settings.database_path)
+    try:
+        store = CardLibraryStore(db, create_builtin_registry())
+        state = store.read()
+        policy = state.card_definitions["example.card"].state
+        assert policy.supported_scopes == ("shared", "session", "group")
+        assert policy.default_scope == "session" and policy.follow_workspace
+        assert store.read().revision == state.revision
+        with db.locked() as connection:
+            saved = json.loads(connection.execute("SELECT value_json FROM application_settings WHERE key=?", (KEY,)).fetchone()[0])
+        assert saved["card_definitions"]["example.card"]["state"]["supported_scopes"] == ["shared", "session", "group"]
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("scopes,default", [
+    (["session"], "session"),
+    (["session", "group", "group"], "session"),
+    (["session", "group"], "shared"),
+])
+def test_workspace_snapshot_upgrade_does_not_accept_invalid_policies(tmp_path, scopes, default):
+    db = Database(tmp_path / "world.db")
+    try:
+        store = CardLibraryStore(db, create_builtin_registry())
+        payload = store.read().model_dump(mode="json")
+        payload["card_definitions"]["text"]["state"] = {
+            "mode": "scoped", "supportedScopes": scopes, "defaultScope": default, "followWorkspace": True,
+        }
+        raw = json.dumps(payload)
+        with db.transaction(immediate=True) as connection:
+            connection.execute("UPDATE application_settings SET value_json=? WHERE key=?", (raw, KEY))
+        with pytest.raises(ValidationError):
+            store.read()
+        with db.locked() as connection:
+            assert connection.execute("SELECT value_json FROM application_settings WHERE key=?", (KEY,)).fetchone()[0] == raw
+    finally:
+        db.close()
 
 
 def test_new_install_open_deck_remove_restart(tmp_path):
@@ -384,6 +453,8 @@ def test_revision_conflicts_and_deck_validation(tmp_path):
         edit(store, "delete_deck", id="starter")
     with pytest.raises(GraphValidationError, match="Only collected"):
         edit(store, "update_deck", id="starter", entries=[{"id": "legion"}])
+    with pytest.raises(NotFoundError, match="Legion no longer exists"):
+        edit(store, "move_entry", id="starter", entry={"kind": "legion_instance", "id": "missing"})
     db.close()
 
 

@@ -8,6 +8,7 @@ document contract rather than on the retired AtomSculptor Sandbox APIs.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 import json
 from typing import Literal
 from uuid import uuid4
@@ -27,6 +28,7 @@ from open_agent_world.plugin_api import (
     PackDefinition,
     PluginDescriptor,
     RelationshipDefinition,
+    ScopedStateSpec,
 )
 from open_agent_world.skill_packages import register_skill_package
 
@@ -305,15 +307,17 @@ class AtomSculptorPlugin:
     descriptor = PluginDescriptor(
         id="atomsculptor",
         version="0.1.0",
-        plugin_api_version="1.35",
+        plugin_api_version="1.41",
         name="AtomSculptor",
         description="Agent-assisted atomistic structure modelling.",
-        # Ordinary runtime commands and Skill scripts use the same declared
-        # private Sandbox profile, prepared on use inside that Sandbox.
+        # Ordinary commands and core Skills use OAW's shared Sandbox Python;
+        # the Pack declaration feeds its existing host bootstrap.
         sandbox_environments=("modelling",),
     )
 
     def register(self, registration) -> None:
+        from .review_agent import register_log_review
+        register_log_review(registration)
         registration.register_runtime_provider(
             "atomsculptor.adk-team",
             AtomSculptorRuntime,
@@ -422,6 +426,7 @@ class AtomSculptorPlugin:
         registration.register_node_type(
             NodeTypeDefinition(
                 id="atomsculptor.structure",
+                state=ScopedStateSpec(supported_scopes=('shared', 'session', 'group'), default_scope='session', follow_workspace=True),
                 label="Atom Structure",
                 description="A versioned atomistic structure with stable atom identities and layers.",
                 icon="atom",
@@ -484,6 +489,11 @@ class AtomSculptorPlugin:
                 templateable=True,
             )
         )
+        # Equipment ownership and catalog visibility are separate. Keep both
+        # auto-equipped toolbox types internal using the native catalog flag.
+        for toolbox_type in ("atomsculptor.skills", "atomsculptor.review-skills"):
+            registration.nodes[toolbox_type] = replace(
+                registration.nodes[toolbox_type], user_creatable=False)
         registration.register_pack(
             PackDefinition(
                 id="atomsculptor.default",

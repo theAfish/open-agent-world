@@ -54,6 +54,10 @@ async def search_frames(run, result):
                 meta = c.get('metadata') or {}
                 if meta.get('structure_available') == 'false' and not c.get('cifs'):
                     return None, None
+                from .managed_library import stored_structure
+                stored = stored_structure(snapshot, c)
+                if stored:
+                    return stored['text'], None
                 cod = meta.get('reference_code', '')
                 library = meta.get('library_node_id')
                 if (library in library_ids and c['node_id'] == f'{library}:{cod}'

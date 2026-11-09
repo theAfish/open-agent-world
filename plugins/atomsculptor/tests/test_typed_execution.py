@@ -112,6 +112,30 @@ async def test_missing_payload_correction_then_real_patch_and_saved_search():
 
 
 @pytest.mark.asyncio
+async def test_finished_step_inherits_full_fields_and_schema_matches_actual_patch_dispatch():
+    from oaw_atomsculptor.execution_steps import step_field_defaults
+    e, files, calls, invoke = await native_sdk_fixture()
+    question = 'Measured question ' * 100
+    assert (await invoke('run_modelling_step', dict(COMMON, source='print(1)', question=question)))['ok']
+    assert e.workflow.pending_experiment is None
+    assert e.working_decision()['current_subtask']['question'] == question[:600]
+    sdk = [FunctionTool(f) for f in typed_step_functions(e, [], None, asyncio.Event())]
+    req = request(); req.config.tools = [types.Tool(function_declarations=[s._get_declaration() for s in sdk])]
+    prepare(e, req)
+    schema = next(d.parameters_json_schema for t in req.config.tools for d in t.function_declarations if d.name == 'patch_modelling_step')
+    args = {'sandbox': 'box', 'script_path': 'probe.py', 'edits': [{'old': '1', 'new': '2'}],
+            'previous_assessment': {k: v for k, v in prior(e).items() if k not in {'command_id', 'sandbox', 'script_path'}}}
+    Draft202012Validator(schema).validate(args)
+    result = await invoke('patch_modelling_step', args)
+    assert result['ok'] and result['step']['question'] == question and files['probe.py'] == 'print(2)'
+    assert len(calls) == 4
+    assert step_field_defaults(e, 'other.py', 'box') == {}
+    assert step_field_defaults(e, 'probe.py', 'other-box') == {}
+    e.workflow.plan_revision += 1
+    assert step_field_defaults(e, 'probe.py', 'box') == {}
+
+
+@pytest.mark.asyncio
 async def test_correct_arguments_clear_old_issue_even_if_native_write_is_rejected():
     e, files, calls, invoke = await native_sdk_fixture(write_error=True)
     assert (await invoke("run_modelling_step", dict(COMMON)))["error"]["code"] == "step_arguments"

@@ -24,6 +24,42 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.51 adds `CapabilityContext.node_run_action(capability, action, arguments)`
+for a capability whose target node declares trait `ui.direct-run.v1`. `start` accepts
+only `{"config": {...}}`, merges it through the normal node update, and starts a
+detached Run owned by the calling Agent; `stop` and `read` take no arguments. The host
+re-checks the caller's live grant on every call, and the plugin remains responsible for
+validating the config patch. XRD uses this for `xrd_run_stage`, `xrd_run_stop` and
+`xrd_run_status`, and requires `1.51`.
+
+Plugin API 1.50 adds the explicit target in frontend `host.updateConfig(patch, nodeId?)`
+and managed Python host-worker lockfiles through `PythonEnvironmentSpec.lockfile`
+and the environment manifest's `lock` field. Packs requiring either feature must
+declare `1.50` in both their descriptor and manifest: older hosts can silently
+ignore the configuration target or reject the lockfile argument. XRD requires
+both features; MatCreator requires the lockfile support.
+
+It also adds the optional `RuntimeProvider.delete_context(agent_id, context_id)`
+hook for releasing idle provider sessions. The host closes admission and checks
+execution and cleanup before calling it; implementations must be safe to retry.
+Providers without retained context resources can keep the default no-op. Packs
+that require this disposal guarantee must declare `1.50`.
+
+Plugin API 1.49 adds the frontend skin-mod SDK: `registerSkinMod`, `useSkinCatalog`,
+`parseSkinMod`, and their exported types, defaults and validation constants.
+Packs requiring these exports must declare `plugin_api_version="1.49"` and
+`[compatibility].plugin_api = "1.49"`; earlier hosts do not provide them.
+Registrations accept declarative palettes/backgrounds and return owner-managed
+cleanup. See [skin mods](plugin-frontend.md#skin-mods) for schema and lifetime rules.
+
+Plugin API 1.48 exposes the existing Agent admission receipt through frontend
+`host.runAgent()` and propagates launch request errors to the plugin caller.
+It also adds trusted `NodeResourceContext.run_id` for Agent resource calls.
+A receipt identifies an accepted Run; it does not grant observation access or
+indicate execution/business completion. The existing optional `freshContext`
+argument is preserved. See [trusted Run identity](plugin-documents.md#trusted-run-identity-api-148)
+and the [frontend SDK guide](../../frontend/pack-sdk/README.md).
+
 Plugin API 1.47 unifies referenced file transfers at 512 MiB per file and
 256 KiB per chunk. The host publishes its policy at `/api/files/policy` (also
 under the published Workspace API); browser clients do not carry separate size

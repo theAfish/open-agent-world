@@ -39,9 +39,11 @@ async def read_file(services, viewer_id: str, reference: FileReference):
     if reference.kind == "sandbox":
         if not services.plugins.has_trait(source.type, "core.sandbox"):
             raise ResourceValidationError("File source is not a Sandbox")
+        from backend.sandbox.task_workspace import task_path
+        file_path = task_path(services, source.id, reference.path, viewer_id) if reference.root == "workspace" else reference.path
         try:
             result = await services._require_sandbox_backend().file_operation(
-                source.id, "download", root=reference.root, path=reference.path)
+                source.id, "download", root=reference.root, path=file_path)
         except FileNotFoundError as exc:
             raise ResourceValidationError("File no longer exists") from exc
         except PermissionError as exc:

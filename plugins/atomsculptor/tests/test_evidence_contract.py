@@ -67,6 +67,20 @@ def test_errors_are_field_specific_and_never_reuse_an_old_pass(bad, field):
     assert parsed is None and any(field in i["field"] for i in issues)
 
 
+@pytest.mark.parametrize("encoding", ["json", "marked"])
+def test_trailing_diagnostics_cannot_hide_the_last_measurement_or_its_error(encoding):
+    good = record(values={"count": 3}, constraints=[{"name": "measured_check", "passed": False}])
+    if encoding == "marked":
+        good = "OAW_MEASUREMENTS " + good
+    tail = "\n" + "detail line\n" * 90
+    parsed, issues = parse_measurements(good + tail)
+    assert not issues and parsed["values"]["count"] == 3
+    assert parsed["constraints"][0]["passed"] is False
+    bad = 'OAW_MEASUREMENTS {"oaw_measurements":{"coverage":{"atoms":"three"}}}'
+    parsed, issues = parse_measurements(good + tail + bad + tail)
+    assert parsed is None and issues[0]["field"] == "oaw_measurements.coverage.atoms"
+
+
 def test_conflicting_envelope_cannot_hide_a_failed_constraint():
     value = {"constraints":[{"name":"test","passed":False}]}
     assert parse_measurements('OAW_MEASUREMENTS '+json.dumps({"oaw_measurements":value, **value}))[0] == value
@@ -79,11 +93,9 @@ async def test_protocol_repair_does_not_consume_scientific_review_and_resumes_af
     outputs = iter([record(coverage={"region":{"nested":3}}), record(kind="diagnostic",coverage={"region":3})])
     e, calls, run = await setup(stdout=lambda: next(outputs))
     await run()
-    assessment = prior(e); assessment["outcome"] = "needs_plan_review"
+    assessment = prior(e)
     assert e.workflow.assess_previous(e, assessment)["observation"]["outcome"] == "continue"
     assert e.workflow.advance(e,"probe","box","step.py")["error"]["code"]=="measurement_contract"
-    rejected = await tool(e,"finish_task",{"result":{"status":"needs_plan_review","reason":"Cannot parse output"}},"Task completed.")
-    assert rejected["error"]["code"] == "execution_repair_required"
     assert not e.workflow.review_history and not e.workflow.review_request
     changed = await run(script_path="unrelated.py")
     assert changed["error"]["code"] == "measurement_repair_required" and len(calls)==2
@@ -97,7 +109,7 @@ async def test_protocol_repair_does_not_consume_scientific_review_and_resumes_af
 async def test_scientific_contradiction_can_still_review_with_a_separate_protocol_issue():
     e, _, run = await setup(stdout=record(coverage={"region":{"nested":3}}))
     await run()
-    assessment = prior(e); assessment["assumption_invalid"] = True
+    assessment = prior(e); assessment.update(assumption_invalid=True, outcome="needs_plan_review")
     assert e.workflow.assess_previous(e,assessment)["observation"]["outcome"] == "needs_plan_review"
     assert await tool(e,"finish_task",{"result":{"status":"needs_plan_review","reason":"Measured geometry contradicts method"}},"Task completed.") == "Task completed."
     assert len(e.workflow.review_history)==1
@@ -200,7 +212,8 @@ async def test_diagnostic_can_discover_a_failed_requirement_without_becoming_a_f
     await execute(e,"first.py",record(**values)); assert assess(e)["ok"]
     assert e.workflow._invalid_candidates == 0 and e.workflow.host_signal is None
     await execute(e,"still-diagnostic.py",record(**values))
-    assert assess(e)["observation"]["outcome"]=="needs_plan_review"
+    assert assess(e)["observation"]["outcome"] == "continue"
+    assert e.workflow.host_signal["advisory"] is True
     assert e.workflow._invalid_candidates == 0
 
 

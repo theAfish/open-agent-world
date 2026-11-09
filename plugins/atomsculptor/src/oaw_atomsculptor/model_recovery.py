@@ -51,11 +51,12 @@ def bounded_output_model(model: Any, trace: Any, role: str, evidence: Any,
             while True:
                 responses = []
                 action_mode = evidence.actions.enabled(evidence, role)
-                # Recovery use is a Run budget, not a mode for all future calls.
-                # Completing an action ends this request's recovery. A retry
-                # must also have at least the ordinary reasoning allowance.
-                seconds = (max(evidence.limits.model_action_seconds, evidence.limits.action_recovery_seconds)
-                           if recovering_action else evidence.limits.model_action_seconds) if action_mode else None
+                # Recovery allowance applies only to this request, never later
+                # actions. A retry retains at least the ordinary reasoning time.
+                # The cumulative action recovery count is telemetry, not a fuse.
+                seconds = evidence.limits.model_action_seconds if action_mode else None
+                if seconds is not None and recovering_action:
+                    seconds = max(seconds, evidence.limits.action_recovery_seconds or seconds)
                 deadline = asyncio.timeout(seconds)
                 timed_out = False
                 try:
@@ -97,38 +98,49 @@ def bounded_output_model(model: Any, trace: Any, role: str, evidence: Any,
                 calls = any(getattr(p, "function_call", None) is not None for p in parts)
                 usable = calls or any(not getattr(p, "thought", False) and bool(getattr(p, "text", None)) for p in parts)
                 if action_mode:
-                    disallowed = calls and evidence.actions.allowed is not None and any(
-                        evidence.semantic_tool(p.function_call.name) not in evidence.actions.allowed
-                        for p in parts if getattr(p, "function_call", None))
-                    dependent_batch = evidence.actions.dependent_batch(evidence, parts)
                     provider_error = any(getattr(r, "error_code", None) for r in responses)
                     # Output exhaustion uses its own recovery below. It is not
                     # a permission/action error or a stream timeout.
-                    action_failure = timed_out or (not truncated and not provider_error and (not calls or disallowed or dependent_batch))
+                    action_failure = timed_out or (not truncated and not provider_error and not calls)
                     if action_failure:
                         for response in responses:
                             evidence.after_model(response)
                             if not timed_out:
                                 await trace.callbacks(role)["after_model_callback"](None, response)
-                        if evidence.actions.recoveries:
-                            evidence.stop("Builder made no permitted executable action (" +
-                                          ("request_deadline" if timed_out else "dependent_tool_batch" if dependent_batch else "disallowed_tool" if disallowed else "no_tool_action") +
-                                          ") after the bounded action recovery; "
-                                          "current stage=" + evidence.workflow.current)
-                        evidence.actions.recoveries = 1
+                        reason = "request_deadline" if timed_out else "no_tool_action"
+                        messages = {
+                            "request_deadline": "The model response exceeded this request's hard ceiling; no calls were dispatched.",
+                            "no_tool_action": "This stage needs an authorized tool action or an actual blocker reported through finish_task.",
+                        }
+                        rejected = evidence.workflow.error(reason, messages[reason])
+                        proposed = [p.function_call for p in parts if getattr(p, "function_call", None)]
+                        rejected["error"]["calls"] = [{"call_id": c.id, "tool": c.name} for c in proposed]
+                        if timed_out:
+                            if recovering_action:
+                                evidence.stop("Builder made no permitted executable action (request_deadline) "
+                                              "after the bounded action recovery; current stage=" + evidence.workflow.current)
+                        else:
+                            # Reuse the native unchanged-rejection detector. Call IDs
+                            # change on retries; tool semantics/arguments and host facts
+                            # identify the action that has actually received feedback.
+                            evidence.record_rejection(role, "model_response", {"calls": [
+                                {"tool": evidence.semantic_tool(c.name), "arguments": c.args} for c in proposed]}, rejected)
+                            if evidence.block_reason:
+                                evidence.stop(evidence.block_reason)
+                        evidence.actions.recoveries += 1
                         recovering_action = True
-                        if truncated:
-                            evidence.output_recoveries[role] = 1
-                        evidence.notice(role, "Correcting the next executable action once; no tools replayed",
+                        evidence.notice(role, "Correcting the rejected response; no tools dispatched or replayed",
                             recovery_event="model_action_recovery", recovery_scope="model_response", retrying=True,
-                            reason="deadline" if timed_out else "dependent_tool_batch" if dependent_batch else "disallowed_tool" if disallowed else "no_tool_action")
+                            reason=reason, error=rejected["error"])
                         request.contents.append(bindings.types.Content(role="user", parts=[
-                            bindings.types.Part.from_text(text=evidence.actions.recovery_instruction())]))
+                            bindings.types.Part.from_text(text=evidence.actions.recovery_instruction(rejected["error"]))]))
                         evidence.before_model(role, request, bindings, output_limit)
                         await trace.callbacks(role)["before_model_callback"](None, request)
                         continue
                 if not truncated and usable:
                     parts = [p for r in responses for p in getattr(getattr(r, "content", None), "parts", None) or ()]
+                    if action_mode:
+                        evidence.actions.prepare_response(evidence, parts, request, role)
                     try:
                         route_error = evidence.workflow.accept_delegations(evidence, role, parts)
                     except AgentRuntimeError:

@@ -1,0 +1,63 @@
+{
+  "title": "Modelling task review",
+  "summary": "Describe what was actually delivered and the remaining limitations.",
+  "nodes": [
+    {
+      "id": "step-1",
+      "title": "Build the first candidate",
+      "run_id": "KEEP_PREFILLED_NATIVE_RUN_ID",
+      "tool_id": "KEEP_PREFILLED_NATIVE_TOOL_ID",
+      "parents": [],
+      "outcome": "Explain command exit code and reported/independent checks separately.",
+      "structures": [
+        {
+          "path": "sandbox files/SANDBOX_ID/workspace/outputs/candidate.extxyz",
+          "provenance": "collection_snapshot",
+          "relation": "output",
+          "note": "Present at collection; do not claim an earlier version without a preserved snapshot."
+        }
+      ],
+      "attachments": [
+        {
+          "path": "sandbox files/SANDBOX_ID/workspace/outputs/summary.json",
+          "provenance": "collection_snapshot",
+          "note": "Data attachment; no atom preview."
+        }
+      ]
+    },
+    {
+      "id": "step-2",
+      "title": "Earlier overwritten intermediate",
+      "run_id": "KEEP_PREFILLED_NATIVE_RUN_ID",
+      "tool_id": "KEEP_PREFILLED_NATIVE_TOOL_ID",
+      "parents": [
+        "step-1"
+      ],
+      "outcome": "Native logs report execution but the original structure version is unavailable.",
+      "structures": [
+        {
+          "provenance": "missing",
+          "relation": "output",
+          "note": "Overwritten; not regenerated."
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "run_id": "KEEP_PREFILLED_NATIVE_RUN_ID",
+      "tool_id": "KEEP_PREFILLED_NATIVE_TOOL_ID",
+      "purpose": "Explain the purpose of this specific read, edit, execution or stage decision.",
+      "finding": "Summarize only information actually returned; include read errors or pagination gaps.",
+      "follow_up": "Name subsequent observed actions and whether use of this information is established or unknown.",
+      "basis": "inferred",
+      "evidence": [
+        {
+          "run_id": "KEEP_PREFILLED_NATIVE_RUN_ID",
+          "kind": "tool",
+          "id": "KEEP_PREFILLED_NATIVE_TOOL_ID"
+        }
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import type { WorldCard, WorldEdge } from "../types/world";
 import { useWorldStore } from "./worldStore";
-import { useFileViewer, useOpenFiles } from "./openFiles";
+import { FileWorkspaceContext, useFileViewer, useOpenFiles } from "./openFiles";
 
 const source = (id: string) => ({ id, name: id, type: "sandbox" }) as WorldCard;
 const link = (target: string) => ({ id: target, source: "viewer", target, relationship: "core.file-preview", direction: "forward" }) as WorldEdge;
@@ -13,6 +13,24 @@ beforeEach(() => {
   useWorldStore.setState({ cards: [source("a"), source("b")], edges: [] });
 });
 afterEach(cleanup);
+
+it('restores each workspace selection and pin without leaking another scope', () => {
+  useWorldStore.setState({ edges: [link('a')] });
+  useOpenFiles.getState().open({ kind: 'sandbox', source_id: 'a', root: 'workspace', path: 'sessions/one/a.xyz' }, 'Session A', { workspaceKey: 'one' });
+  useOpenFiles.getState().open({ kind: 'sandbox', source_id: 'a', root: 'workspace', path: 'groups/two/b.xyz' }, 'Group B', { workspaceKey: 'two' });
+  let scope = 'one';
+  const { result, rerender } = renderHook(() => useFileViewer('viewer'), {
+    wrapper: ({ children }) => <FileWorkspaceContext.Provider value={scope}>{children}</FileWorkspaceContext.Provider>,
+  });
+  expect(result.current.file?.name).toBe('Session A');
+  act(() => result.current.setPinned(true));
+  scope = 'two'; rerender();
+  expect(result.current.file?.name).toBe('Group B');
+  expect(result.current.pinned).toBe(false);
+  scope = 'one'; rerender();
+  expect(result.current.file?.name).toBe('Session A');
+  expect(result.current.pinned).toBe(true);
+});
 
 it('follows moved folder paths in pinned previews and clears only deleted descendants', () => {
   open('a', 'folder/child.txt');

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as hostedAuth from "../auth/hostedSession";
+import { useWorldStore } from "../state/worldStore";
+import { useConversationView } from "../state/conversationView";
+import { TEST_CATALOG } from "../state/catalog.fixture";
 import {
   configureWorkspaceApi,
   normalizeCard,
@@ -18,6 +21,33 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it.each([undefined, false, true])('returns the Agent admission receipt with freshContext=%s', async freshContext => {
+    const receipt = { accepted: true, agent_id: 'agent one', run_id: 'run-1' };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(receipt), {
+      status: 202, headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await worldApi.runAgent('agent one', 'Analyze the assigned articles', freshContext)).toEqual(receipt);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/agents/agent%20one/run');
+    expect(init.method).toBe('POST');
+    expect(init.headers.get('X-OAW-State-Session')).toBe('default');
+    expect(JSON.parse(init.body)).toEqual({ prompt: 'Analyze the assigned articles',
+      ...(freshContext ? { fresh_context: true } : {}) });
+  });
+
+  it('rejects a refused Agent launch without retrying or replacing its diagnostics', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: {
+      code: 'conflict', message: 'Agent is busy', request_id: 'launch-refused', retryable: false,
+    } }), { status: 409, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(worldApi.runAgent('agent', 'Analyze')).rejects.toMatchObject({
+      status: 409, message: 'Agent is busy', requestId: 'launch-refused',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('uploads resource files as multipart and follows the host file policy', async () => {
     const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith('/files/policy')
       ? { max_file_bytes: 10, chunk_bytes: 4 } : { saved: true }), { headers: { 'content-type': 'application/json' } }));
@@ -49,12 +79,40 @@ describe("API normalization boundary", () => {
     const file = new File(['abc'], 'data.txt');
     await worldApi.uploadSandboxEntry('sandbox one', 'folder/data.txt', file);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/sandboxes/sandbox%20one/files?path=folder%2Fdata.txt&directory=false');
+    expect(url).toBe('/api/sandboxes/sandbox%20one/files?path=folder%2Fdata.txt&directory=false&state_session=default');
     expect(init.body).toBe(file);
     expect(init.headers.get('Content-Type')).toBe('application/octet-stream');
     await worldApi.uploadSandboxEntry('sandbox one', 'folder/empty');
     expect(fetchMock.mock.calls[1][0]).toContain('directory=true');
     expect(fetchMock.mock.calls[1][1].body).toBe('');
+  });
+  it('carries the selected native session on file mutations and direct Agent execution', async () => {
+    const world = useWorldStore.getState();
+    const view = useConversationView.getState();
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    useWorldStore.setState({ cards: ['box', 'agent', 'room'].map(id => normalizeCard({ id, type: id === 'room' ? 'conversation' : id === 'box' ? 'sandbox' : 'agent' })),
+      catalog: TEST_CATALOG, edges: [
+        normalizeEdge({ id: 'execute', source: 'agent', target: 'box', relationship: 'execute' }),
+        normalizeEdge({ id: 'join', source: 'agent', target: 'room', relationship: 'participate' }),
+      ] });
+    useConversationView.setState({ activeConversationId: 'room', sessions: { room: 'selected-session' } });
+    try {
+      await worldApi.deleteSandboxFile('box', 'Session/file.txt');
+      await worldApi.moveSandboxFile('box', 'Session/file.txt', 'Session/moved.txt');
+      await worldApi.runAgent('agent', 'Continue');
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(init.headers.get('X-OAW-State-Session')).toBe('selected-session');
+      }
+      await worldApi.uploadSandboxEntry('box', 'Session/input.txt', new File(['data'], 'input.txt'));
+      expect(fetchMock.mock.calls[3][0]).toContain('state_session=selected-session');
+      useWorldStore.setState({ edges: [] });
+      await worldApi.deleteSandboxFile('box', 'Default session/file.txt');
+      expect(fetchMock.mock.calls[4][1].headers.get('X-OAW-State-Session')).toBe('default');
+    } finally {
+      useWorldStore.setState({ cards: world.cards, catalog: world.catalog, edges: world.edges });
+      useConversationView.setState({ activeConversationId: view.activeConversationId, sessions: view.sessions });
+    }
   });
   it("sends global environment variables when saving Sandbox settings", async () => {
     const settings = { workspace_root: null, runtime: "auto", environment_variables: { OAW_MINERU_TOKEN: "test-global-token" } };

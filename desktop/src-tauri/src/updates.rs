@@ -11,6 +11,33 @@ use tauri::{
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_updater::UpdaterExt;
 
+fn backup_command(app: &tauri::AppHandle, mode: &str) -> Result<std::process::Output, String> {
+    let root = super::payload(app).map_err(|e| e.to_string())?;
+    let python = root.join(if cfg!(windows) {
+        "python/python.exe"
+    } else {
+        "python/bin/python3"
+    });
+    let mut command = Command::new(python);
+    command
+        .current_dir(&root)
+        .args(["-I", "-B", "launch.py", mode])
+        .env_remove("OPEN_AGENT_WORLD_DATA_ROOT")
+        .env_remove("OPEN_AGENT_WORLD_PLUGIN_DIRS")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command.output().map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    Ok(output)
+}
+
 pub fn setup(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
         .item(
@@ -54,8 +81,9 @@ pub fn check(app: tauri::AppHandle, quiet: bool) {
     }
     std::thread::spawn(move || {
         let result = tauri::async_runtime::block_on(update(&app, quiet));
-        if result.is_err() {
-            app.dialog().message("Update could not complete. Your saved data is kept. Check your connection or install from the official release page.\n更新未完成，已保存的数据会保留。请检查网络或前往官方发布页。").title("Open Agent World").blocking_show();
+        if let Err(error) = result {
+            app.dialog().message(format!("{error}\n\nYour workspace remains available. Resolve this issue, then try the update again.\n工作区仍可使用。请解决上述问题后重试更新。"))
+                .title("Update could not complete / 更新未完成").blocking_show();
         }
         app.state::<super::Runtime>()
             .updating
@@ -117,6 +145,14 @@ async fn update(app: &tauri::AppHandle, quiet: bool) -> Result<(), String> {
         let _ = window.set_title("Open Agent World");
     }
     let bytes = bytes.map_err(|e| e.to_string())?; // Signature verified before stopping anything.
+    if let Some(ref window) = window {
+        let _ = window.set_title("Open Agent World · Checking backup space / 检查备份空间");
+    }
+    let preflight = backup_command(app, "--backup-preflight");
+    if let Some(ref window) = window {
+        let _ = window.set_title("Open Agent World");
+    }
+    preflight?; // Leave the running workspace available when space is insufficient.
     if !app.dialog().message("The update is verified. Save your drafts and finish active tasks before continuing. OAW will close, back up saved data, then install and restart.\n更新已验证。请先保存草稿并完成运行中的任务；继续后将关闭工作区、备份数据并安装重启。")
         .title("Open Agent World").buttons(MessageDialogButtons::OkCancel).blocking_show() { return Ok(()); }
     // Stop editing while the backend drains. Normal exit handling remains available.
@@ -130,29 +166,7 @@ async fn update(app: &tauri::AppHandle, quiet: bool) -> Result<(), String> {
         if !super::stop(app) {
             return Err("Backend did not stop cleanly".into());
         }
-        let root = super::payload(app).map_err(|e| e.to_string())?;
-        let python = root.join(if cfg!(windows) {
-            "python/python.exe"
-        } else {
-            "python/bin/python3"
-        });
-        let mut command = Command::new(python);
-        command
-            .current_dir(&root)
-            .args(["-I", "-B", "launch.py", "--backup-for-update"])
-            .env_remove("OPEN_AGENT_WORLD_DATA_ROOT")
-            .env_remove("OPEN_AGENT_WORLD_PLUGIN_DIRS")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
-        let backup = command.output().map_err(|e| e.to_string())?;
-        if !backup.status.success() {
-            return Err("Data backup failed".into());
-        }
+        let backup = backup_command(app, "--backup-for-update")?;
         // Tell the user where the retained, verified backup lives before replacing the app.
         app.dialog()
             .message(format!(
@@ -164,9 +178,9 @@ async fn update(app: &tauri::AppHandle, quiet: bool) -> Result<(), String> {
         update.install(bytes).map_err(|e| e.to_string())?;
         Ok(())
     })();
-    if result.is_err() {
-        app.dialog().message("Installation was cancelled because shutdown, backup, or installation failed. Reopen OAW and check its logs. Your data directory was not removed.\n关闭、备份或安装失败，更新已取消。请重新打开 OAW 检查日志；原数据目录仍然保留。")
-            .title("Open Agent World").blocking_show();
+    if let Err(error) = result {
+        app.dialog().message(format!("{error}\n\nInstallation was cancelled. Reopen OAW; your data directory was kept.\n安装已取消。请重新打开 OAW；原数据目录仍然保留。"))
+            .title("Update could not complete / 更新未完成").blocking_show();
         app.exit(1);
         return Ok(());
     }

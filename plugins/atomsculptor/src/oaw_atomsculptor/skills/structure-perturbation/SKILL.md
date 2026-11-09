@@ -1,5 +1,5 @@
 ---
-name: structure-perturbation
+name: structure_perturbation
 description: Apply random/Gaussian/scaled-random displacements to atomic structures, single or batch.
 when_to_use: Use when generating perturbed structures for MLIP training data, NEB starts, finite-temperature initial configurations, or to stress-test a relaxed structure.
 entry: scripts/structure_perturbation.py

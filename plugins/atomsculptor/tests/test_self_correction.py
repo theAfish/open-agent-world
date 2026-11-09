@@ -102,7 +102,7 @@ async def test_new_contradictions_do_not_get_discarded_as_redundant_assessment(c
 async def test_recorded_plan_review_cannot_be_bypassed_by_a_redundant_ready_claim():
     e, calls, run = await setup()
     await run()
-    assert e.workflow.assess_previous(e, prior(e, assumption_invalid=True))["ok"]
+    assert e.workflow.assess_previous(e, prior(e, assumption_invalid=True, outcome="needs_plan_review"))["ok"]
     result = await run(action_mode="rewrite", source="print('next fact')",
                         previous_assessment=prior(e, outcome="ready"))
     assert result["error"]["code"] == "plan_review_required" and len(calls) == 2
@@ -180,7 +180,7 @@ async def test_dynamic_context_and_schema_agree_on_recorded_assessment_and_selec
     schemas = [d.parameters_json_schema for t in req.config.tools for d in t.function_declarations
                if d.name in {"patch_modelling_step", "rewrite_modelling_step"}]
     assert all("previous_assessment" not in s["required"] for s in schemas)
-    assert all("OMIT" in s["properties"]["previous_assessment"]["description"] for s in schemas)
+    assert schemas and all("previous_assessment" not in s["properties"] for s in schemas)
     snapshot = next(json.loads(p.text.split("\n", 1)[1]) for c in req.contents for p in c.parts
                     if p.text and p.text.startswith("HOST RUN EVIDENCE"))
     assert snapshot["current_experiment"]["assessment_status"] == "recorded"

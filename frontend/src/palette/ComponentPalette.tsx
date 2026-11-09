@@ -35,13 +35,14 @@ export function ComponentPalette() {
   const legionError = useWorldStore(state => state.legionError);
   const createCard = useWorldStore(state => state.createCard);
   const instantiateLegion = useWorldStore(state => state.instantiateLegion);
+  const openLegionInstance = useWorldStore(state => state.openLegionInstance);
   const [removing, setRemoving] = useState(false);
   const [trashActive, setTrashActive] = useState(false);
   const [dropDeck, setDropDeck] = useState<string>();
   const root = useRef<HTMLElement>(null);
   const cancelPointer = useRef<() => void>();
   const suppressClick = useRef(false);
-  const dragged = useRef<{ kind: "node" | "legion"; id: string; sourceDeckId?: string }>();
+  const dragged = useRef<PalettePointerItem['entry']>();
   const stageExpanded = expanded || (!compact && mouseInside) || editingDeck !== null;
   const endDrag = () => { dragged.current = undefined; setTrashActive(false); setDropDeck(undefined); useEquipmentDrag.getState().set(); };
   useEffect(() => { void library.refresh(); }, [library.refresh]);
@@ -74,6 +75,8 @@ export function ComponentPalette() {
   const snapshot = library.snapshot;
   const cards = snapshot ? [...collectedLibraryCards(snapshot), ...collectedLibraryLegions(snapshot, legions)] : [];
   const deck = snapshot?.decks.find(item => item.id === snapshot.active_deck_id);
+  const reference = deck?.entries.filter(entry => entry.kind === 'legion_instance').at(-1);
+  const referenceDescription = reference ? snapshot?.legion_instances?.[reference.id]?.description : undefined;
   useEffect(() => () => cancelPointer.current?.(), [deck?.id]);
   const moveToDeck = async (id: string, entry: PalettePointerItem['entry']) => {
     endDrag();
@@ -147,7 +150,7 @@ export function ComponentPalette() {
         {editingDeck === "edit" && <button type="button" className="deck-delete-button" disabled={library.busy || !deck || (snapshot?.decks.length ?? 0) < 2} title={t("Deleting a deck keeps its cards in your collection.")} onClick={async () => { if (deck && await library.edit({ action: "delete_deck", id: deck.id })) setEditingDeck(null); }}><Trash2 size={12} />{t("Delete deck")}</button>}
         {library.error ? <small role="alert">{library.error}</small> : null}
       </form> : <>
-      <div className="deck-caption"><span><DeckIcon icon={deck?.icon} size={13} /> {deck ? displayDeckName(deck) : t("Your deck")}</span><small>{t(library.open ? "Drop cards here to add" : touch ? 'Swipe · tap to place · drag up' : "Drag into the world")}</small>
+      <div className="deck-caption"><span><DeckIcon icon={deck?.icon} size={13} /> {deck ? displayDeckName(deck) : t("Your deck")}</span><small role={referenceDescription && !library.open ? 'status' : undefined}>{library.open ? t('Drop cards here to add') : referenceDescription || t(touch ? 'Swipe · tap to place · drag up' : "Drag into the world")}</small>
         <div className="deck-current-actions">
         <div className={`deck-trash ${trashActive ? "is-active" : ""}`} role="region" aria-label={t("Discard card")}
           title={t("Drop to remove from this deck")} aria-busy={removing}><Trash2 size={18} /><span className="deck-trash-hint" aria-hidden="true">{t("Drop to remove from this deck")}</span></div>
@@ -161,14 +164,16 @@ export function ComponentPalette() {
         {deck.entries.map(entry => {
           const definition = entry.kind === "node" ? snapshot?.card_definitions[entry.id] : undefined;
           const legion = entry.kind === "legion" ? legions.find(item => item.id === entry.id) : undefined;
-          const available = entry.kind === "node" ? snapshot?.available_card_ids.includes(entry.id) : legion?.compatible;
+          const instance = entry.kind === 'legion_instance' ? snapshot?.legion_instances?.[entry.id] : undefined;
+          const available = entry.kind === "node" ? snapshot?.available_card_ids.includes(entry.id) : entry.kind === 'legion_instance' ? Boolean(instance) : legion?.compatible;
           const card = cards.find(item => item.kind === entry.kind && item.id === entry.id) ?? {
-            ...entry, definition, label: definition ? t(definition.label) : legion?.name ?? entry.id,
-            description: definition ? t(definition.description) : t(legion?.preset ? "Preset formation" : "Saved formation"),
+            ...entry, definition, label: definition ? t(definition.label) : instance?.name ?? legion?.name ?? entry.id,
+            description: instance?.description ?? (definition ? t(definition.description) : t(legion?.preset ? "Preset formation" : "Saved formation")),
           };
           const label = card.label;
           const payload: PaletteDragPayload = entry.kind === "node" ? { version: 1, kind: "node", type: entry.id }
-            : { version: 1, kind: "legion", id: entry.id, revision: legion?.revision ?? 0 };
+            : entry.kind === 'legion' ? { version: 1, kind: "legion", id: entry.id, revision: legion?.revision ?? 0 }
+              : { version: 1, kind: 'legion_instance', id: entry.id };
           return <button type="button" key={`${entry.kind}:${entry.id}`} className="deck-hover-button" data-palette-card={entry.id} data-legion-preview={legion?.id} data-unavailable={!available}
             disabled={removing || library.busy} draggable={false} onPointerDown={event => {
               if (removing || library.busy || event.button !== 0 || !event.isPrimary) return;
@@ -179,7 +184,7 @@ export function ComponentPalette() {
                   start: () => {
                     suppressClick.current = true;
                     dragged.current = draggedEntry;
-                    if (available && payload.kind === "node") useEquipmentDrag.getState().set({
+                    if (available && payload?.kind === "node") useEquipmentDrag.getState().set({
                       ...buildCardDraft(payload.type, { x: 0, y: 0 }, catalog.node_types.find(item => item.id === payload.type)), id: "",
                     });
                   },
@@ -194,11 +199,13 @@ export function ComponentPalette() {
               if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; event.preventDefault(); return; }
               if (!available) { library.inspect(entry); return; }
               if (!library.open) {
-                entry.kind === "node" ? void createCard(entry.id) : void instantiateLegion(entry.id);
+                if (entry.kind === 'legion_instance') void openLegionInstance(entry.id);
+                else if (entry.kind === 'node') void createCard(entry.id);
+                else void instantiateLegion(entry.id);
                 if (explicitTray) setExpanded(false);
               }
             }}
-            aria-label={available ? t("Place {v0}", { v0: String(label) }) : t("{v0} unavailable", { v0: String(label) })} title={legion ? undefined : available ? (definition ? t(definition.description) : undefined) : t("Content unavailable. Inspect it in the Library.")}>
+            aria-label={available ? t(entry.kind === 'legion_instance' ? 'Open {v0}' : "Place {v0}", { v0: String(label) }) : t("{v0} unavailable", { v0: String(label) })} title={legion ? undefined : available ? (instance?.description ?? (definition ? t(definition.description) : undefined)) : t("Content unavailable. Inspect it in the Library.")}>
             <LibraryCardSurface card={card} className={`palette-item palette-item--${entry.kind === "node" ? entry.id : "legion"}`} data-deck-visual />
           </button>;
         })}

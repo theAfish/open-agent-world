@@ -8,12 +8,6 @@ from oaw_runtime import (
 )
 
 
-"""Build carbon nanotubes (CNTs) with various chiralities.
-
-This is a general-purpose tool for building CNT structures.
-Use cylinder_filler.py to fill the CNT with atoms or molecules.
-"""
-
 import numpy as np
 from ase.build import nanotube
 from ase.io import write
@@ -36,7 +30,7 @@ def build_nanotube(
         m: Chiral index m (determines tube structure)
         length: Length of CNT in unit cells
         bond: C-C bond length in Å (default: 1.42)
-        vacuum: Vacuum padding in xy plane in Å (default: 20.0)
+        vacuum: Radial vacuum in Å, also padding both axial ends when finite (default: 20.0)
         pbc_z: Whether to set periodic boundary in z (default: True)
         output_file: Output file name
 
@@ -45,6 +39,11 @@ def build_nanotube(
     """
     # Build CNT using ASE
     cnt = nanotube(n, m, length=length, bond=bond)
+    if not pbc_z:
+        # Choose consistent periodic representatives before cutting open ends.
+        # ASE can place equivalent boundary atoms near both 0 and the cell end;
+        # merely disabling PBC would leave an incomplete finite repeat window.
+        cnt.wrap()
 
     # Get CNT dimensions
     positions = cnt.get_positions()
@@ -104,9 +103,6 @@ def build_nanotube(
 
 
 TOOL_FUNCTION_NAMES = ["build_nanotube"]
-
-
-TOOL_FUNCTION_NAMES = ['build_nanotube']
 
 
 def _tool_functions():

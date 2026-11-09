@@ -155,12 +155,16 @@ def command_in_profile(arguments, python, environment):
     return [executable, *arguments[1:]]
 
 
+def verify_imports(python, recipe, environment):
+    probe = "import importlib,json,sys;[importlib.import_module(name) for name in json.loads(sys.argv[1])]"
+    run([python, "-I", "-c", probe, json.dumps(recipe["verify_imports"])], env=environment)
+
+
 def verify(generation, recipe, environment):
     python, env = private_environment(generation, environment)
     if not python.is_file():
         raise RuntimeError("Sandbox profile interpreter is missing")
-    probe = "import importlib,json,sys;[importlib.import_module(name) for name in json.loads(sys.argv[1])]"
-    run([python, "-I", "-c", probe, json.dumps(recipe["verify_imports"])], env=env)
+    verify_imports(python, recipe, env)
     if recipe["node"]:
         run([*npm_command(), "ls", "--prefix", generation / "node", "--depth=0", "--json"], env=env, capture=True)
     return python, env
@@ -357,12 +361,24 @@ def main():
     package = Path(__file__).resolve().parent
     recipe = json.loads((package / "recipe.json").read_text(encoding="utf-8"))
     recipe["command_id"] = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != "-" else None
+    if recipe.get("management") == "legacy-shared":
+        # The host's normal bootstrap owns this read-only environment. Keep
+        # the mounted recipe for live admission checks, but no private cache.
+        return execute(recipe, package)
     with runtime_lease(recipe):
         return execute(recipe, package)
 
 
 def execute(recipe, package):
-    python, environment = prepare(recipe)
+    if recipe.get("management") == "legacy-shared":
+        # This process was launched through SharedPythonRuntime.command.
+        # Restart its interpreter without -S so its prepared packages load.
+        python, environment = Path(sys.executable), clean_environment()
+        # The interpreter can survive a failed dependency installation. Check
+        # the declared imports before starting the requested command/Skill.
+        verify_imports(python, recipe, environment)
+    else:
+        python, environment = prepare(recipe)
     if recipe['mode'] == 'command':
         return subprocess.call([str(item) for item in command_in_profile(sys.argv[2:], python, environment)],
                                env=environment, stdin=subprocess.DEVNULL)

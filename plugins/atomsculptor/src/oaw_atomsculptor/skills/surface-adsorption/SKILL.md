@@ -1,7 +1,7 @@
 ---
-name: surface-adsorption
+name: surface_adsorption
 description: "Recipe for placing adsorbates on surfaces: site selection, height, orientation, periodic-image clearance."
-when_to_use: Use when placing a molecule on a slab. Combine with `surface-builder` (for the slab) and `supercell-dimension-check` (for sizing).
+when_to_use: Use when placing a molecule on a slab. Combine with `surface_builder` (for the slab) and `supercell_dimension_check` (for sizing).
 ---
 
 # Surface Adsorption Instructions
@@ -15,10 +15,10 @@ distances below are starting hypotheses, not universal pass/fail thresholds.
 ## Common Workflow
 
 1. **Create substrate surface**
-   - Generate an appropriate surface (see the connected `surface-creation` Skill)
+   - Generate an appropriate surface (see the connected `surface_creation` Skill)
    - Determine supercell size based on adsorbate and periodic image requirements
-   - Ensure sufficient vacuum (> 10 Å, more for large adsorbates)
-   - Optimize layer count for DFT cost (5 layers often sufficient)
+   - Choose vacuum for the slab/adsorbate extent and target accuracy
+   - Test layer count against convergence of the properties of interest
 
 2. **Generate adsorbate molecule**
    - Use ASE `molecule()` function for pre-optimized molecular geometries
@@ -36,7 +36,7 @@ distances below are starting hypotheses, not universal pass/fail thresholds.
    - Compare shortest contacts with the specific adsorbate/substrate chemistry;
      no single minimum distance applies to every element pair.
    - Calculate periodic image distances
-   - Verify supercell size maintains > 10 Å between periodic images
+   - Verify actual adsorbate-image separation meets the selected convergence criterion
 
 5. **Save and document**
    - Save structure in appropriate format (.extxyz, POSCAR)
@@ -46,24 +46,26 @@ distances below are starting hypotheses, not universal pass/fail thresholds.
 ## Key Considerations
 
 ### Supercell Sizing for Adsorbates
-- **Critical**: Periodic images of adsorbates must be > 10 Å apart
-- Calculate required supercell: account for both adsorbate size and surface unit cell
-- Progressively test supercell sizes: 2x2, 3x3, 4x4, 5x5, 6x6
+- Account for adsorbate size, the actual surface basis and image interactions.
+- A trial 10 Å image clearance is a possible starting hypothesis, not a universal
+  minimum. Select and converge a value for the chosen chemistry/calculation.
+- Test larger in-plane cells when the measured separation or convergence requires it.
 - Verify actual periodic image distances after construction
 
-### Supercell Sizing Examples
-| Surface | Supercell | Dimensions (Å) | Atoms | Use Case |
-|---------|-----------|----------------|-------|----------|
-| SiO2 (001) | 4×4×1 | 19.7×19.7 | 1152 | Large adsorbates |
-| SiO2 (100) | 4×3×1 | 19.7×16.3 | 864 | Medium adsorbates |
-| SiO2 (101) | 3×4×1 | 22.0×19.7 | 864 | Medium adsorbates |
-| SiO2 (110) | 2×3×1 | 17.0×16.3 | 432 | Small adsorbates |
+### Reproducible Supercell Sizing
+Record the input structure, cell setting, Miller indices, termination, slab-layer
+definition and repeat factors. Read atom count and dimensions from the generated
+file. A repeat alone multiplies the starting atom count by the product of its
+factors; document any subsequent passivation, addition or removal separately.
+No fixed SiO2 atom-count table is supplied: orientation/repeat labels alone do
+not specify a unique slab. See `surface_creation`'s material notes for provenance.
 
 ### Layer Optimization for DFT
-- Initial structures may use 8 layers for surface stability
-- For DFT, reduce to 5 layers to minimize computational cost
-- 5-layer structures typically reduce atoms by 40-60%
-- Verify surface properties maintained with fewer layers
+- Compare slab thicknesses using the target surface/adsorption properties.
+- For equal atom populations per layer, fixed area and unchanged termination,
+  reducing 8 layers to 5 removes 37.5% of slab atoms. Adsorbates, passivation or
+  unequal layer populations change the total reduction.
+- Five layers are not generally sufficient; choose the converged thickness.
 
 ### Adsorption Parameters
 - **Adsorption height**: Depends on adsorbate and surface
@@ -71,7 +73,8 @@ distances below are starting hypotheses, not universal pass/fail thresholds.
   - C-metal: typically 2.0-2.5 Å
   - N-metal: typically 2.0-2.5 Å
   - H-metal: typically 1.5-2.0 Å
-  - Benzene on oxide: ~3.5 Å (π-stacking distance)
+  - Benzene on an oxide: a trial height around 3.5 Å is a placement hypothesis,
+    not proof of binding or a universal equilibrium distance
 - **Orientation**: Match molecular symmetry to surface site symmetry
 - **Site selection**: Consider coordination and reactivity
 
@@ -85,7 +88,7 @@ distances below are starting hypotheses, not universal pass/fail thresholds.
 
 ### Periodic Image Distance Checking
 - For each atom in adsorbate, find distance to nearest periodic image
-- Minimum distance across all atoms should be > 10 Å
+- Compare the minimum distance with the chosen image-separation criterion
 - Use ASE or similar tools to calculate these distances
 - Larger molecules require larger supercells
 
@@ -94,42 +97,42 @@ distances below are starting hypotheses, not universal pass/fail thresholds.
 | Pitfall | Symptom | Fix |
 |---------|---------|-----|
 | Steric clashes | Chemically implausible contacts | Increase adsorption height or reorient; recheck element-specific distances |
-| Periodic image interactions | Adsorbate images < 10 Å apart | Increase supercell size (e.g., 2x2 → 3x3 or larger) |
+| Periodic image interactions | Observables change with in-plane size | Increase the supercell and check convergence |
 | Incorrect adsorption geometry | Unexpected binding mode | Adjust molecule orientation; check adsorption site |
-| Too large supercell | Excessive computational cost | Balance accuracy vs. cost; 10 Å is minimum threshold |
+| Too large supercell | Excessive computational cost | Use the smallest cell meeting the chosen accuracy criterion |
 | Wrong surface termination | Unexpected surface chemistry | Check termination for polar surfaces |
 
 ### Supercell Sizing Guidelines
-- **2x2 supercell**: Small adsorbates only
-- **3x3 supercell**: May still have < 10 Å for medium adsorbates
-- **4x4 supercell**: Often sufficient for medium adsorbates
-- **5x5 to 6x6 supercell**: Required for larger molecules (e.g., benzene)
-- **Always verify**: Calculate actual distances, don't assume
+- Repeat factors alone do not determine clearance: the starting lattice, skew
+  and adsorbate extent matter. Measure distances to translated adsorbate images,
+  not just in-plane cell-vector lengths.
+- Calculate actual separations and compare properties as the cell is enlarged.
 
 ## Additional Tips
 
 ### Benzene Adsorption Example (SiO2)
 - Benzene diameter: ~5 Å
-- Recommended starting surfaces: (110) and (101) - smaller atom counts
+- Possible trial orientations include (110) and (101); atom counts depend on
+  the selected bulk cell, thickness and termination
 - Site types: top_Si, top_O, bridge, hollow
-- Orientations: parallel (expected most stable), perpendicular
-- Adsorption height: 3.5 Å
-- Recommended: parallel orientation at bridge/hollow sites
+- Compare parallel and perpendicular orientations and relevant sites rather
+  than assuming the most stable configuration in advance
+- A 3.5 Å starting height is illustrative and needs chemistry-specific validation
 
 ### General Workflow for Adsorption Studies
 1. Build bulk structure from Materials Project
-2. Create multiple surface orientations
-3. Optimize layer count for DFT
-4. Build supercells with > 10 Å periodic image distance
-5. Place adsorbate at multiple sites/orientations
+2. Choose the requested orientations, comparing alternatives when relevant
+3. Converge slab thickness for the target properties
+4. Build supercells meeting the chosen image-separation/convergence criterion
+5. Place adsorbates at the requested sites, comparing alternatives when relevant
 6. Validate all configurations
-7. Generate batch of structures for systematic study
+7. Generate a batch only when the requested study needs one
 
 ### Validation Checklist
-- [ ] Minimum adsorbate-surface distance > 2.0 Å
-- [ ] Periodic image distances > 10 Å
+- [ ] Adsorbate-surface contacts checked for the actual chemistry
+- [ ] Periodic image distances measured against the chosen criterion
 - [ ] Molecular geometry not severely distorted
 - [ ] Correct surface termination
-- [ ] Sufficient layers (5+ for DFT)
-- [ ] Sufficient vacuum (> 10 Å)
+- [ ] Layer count/thickness justified for the target accuracy
+- [ ] Vacuum per side recorded and justified
 - [ ] Documentation includes supercell size, site, orientation, height

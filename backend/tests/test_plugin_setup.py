@@ -203,18 +203,23 @@ def test_partial_preparation_reports_identity_reason_and_continues(installer, mo
     assert '--profile demo' in output.err
 
 
-@pytest.mark.parametrize('platform,machine,version,allowed', [
-    ('win32', 'AMD64', '1.28.2', True), ('linux', 'x86_64', '1.28.2', True),
-    ('darwin', 'arm64', '1.28.2', True), ('darwin', 'x86_64', '1.28.2', False),
-    ('darwin', 'x86_64', '0.3.4', True), ('win32', 'AMD64', '2.0.0', False),
+@pytest.mark.parametrize('dependency,platform,machine,version,allowed', [
+    ('pymupdf4llm', 'win32', 'AMD64', '1.28.2', True),
+    ('pymupdf4llm', 'linux', 'x86_64', '1.28.2', True),
+    ('pymupdf4llm', 'darwin', 'arm64', '1.28.2', True),
+    ('pymupdf4llm', 'darwin', 'x86_64', '1.28.2', False),
+    ('pymupdf4llm', 'darwin', 'x86_64', '0.3.4', True),
+    ('pymupdf4llm', 'win32', 'AMD64', '2.0.0', False),
+    ('pymupdf', 'darwin', 'x86_64', '1.28.2', True),
+    ('pymupdf', 'darwin', 'x86_64', '2.1', False),
 ])
-def test_pdf_dependency_keeps_api_and_intel_mac_adapter_boundaries(platform, machine, version, allowed):
+def test_pdf_dependency_keeps_api_and_intel_mac_adapter_boundaries(dependency, platform, machine, version, allowed):
     import tomllib
     from packaging.requirements import Requirement
     project = Path(__file__).resolve().parents[2] / 'plugins/knowledge_base/pyproject.toml'
     requirements = [Requirement(value) for value in tomllib.loads(project.read_text())['project']['dependencies']]
-    active = [r for r in requirements if r.name == 'pymupdf4llm' and r.marker.evaluate(
-        {'sys_platform': platform, 'platform_machine': machine})]
+    active = [r for r in requirements if r.name == dependency and (r.marker is None or r.marker.evaluate(
+        {'sys_platform': platform, 'platform_machine': machine}))]
     assert len(active) == 1
     assert (version in active[0].specifier) == allowed
 

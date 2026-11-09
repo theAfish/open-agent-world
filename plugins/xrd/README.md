@@ -58,9 +58,23 @@ full input snapshots; individual history-file downloads are limited to 30 MiB.
 
 ## Local reference-library search
 
-In the match card, click **挂载谱库 ＋**, choose an empty slot, enter the main `.sq`
-file path and click **插入并挂载**. The library is opened read-only. Import an
-experimental spectrum, then choose **快速检索** (QualX3) or **遍历检索** (OAW).
+In the match node's **输入配置**, click **参考谱库** (or **挂载谱库 ＋** when absent) to open
+the library panel. It has two sources:
+
+- **卡片谱库** (your own cards): click **添加卡片 ＋** and choose one or more text
+  reference cards (the same `PDF#…` text format as standalone reference cards). Entries
+  are listed with a filter and can be deleted; adding a card with an existing ID replaces
+  it. Click **附加 CIF ＋** to attach structures: a CIF is matched to the entry whose ID
+  its filename starts with (for example `mp-xxxx_Li6PS5Cl.cif`). Candidates from that
+  library then supply their own CIF to the structure view, preoptimization and fitting,
+  with no COD download or manual CIF connection. Cards whose first line says `calculated` are marked as calculated, others as card
+  exports. The data is stored in a private SQLite file under `<OAW_XRD_ROOT>/libraries`,
+  never in templates and never deleted by Pack uninstall. It is searched by the native
+  (遍历检索) engine even when 快速检索 is selected for mounted libraries.
+- **槽位 1–6** (mounted libraries): choose an empty slot, enter the main `.sq`
+  file path and click **插入并挂载**. The library is opened read-only.
+
+Import an experimental spectrum, then choose **快速检索** (QualX3) or **遍历检索** (OAW).
 The result keeps the best 20 library candidates by default (1–100).
 An optional allowed-element list, e.g. `Li Ti P O`, excludes entries containing
 other elements. Leave it empty for an unrestricted full-library search.
@@ -230,6 +244,24 @@ a physically correct atomic model.
 Re-running a search starts a new lineage. Re-running preoptimization invalidates
 the displayed downstream fit associated with its old parent. Previous run folders
 remain available; failed re-runs do not silently supply a different stage's CIF.
+
+## Use from any Agent
+
+Any core Agent, including the DeepSeek Harness card, can use the XRD tools through graph
+connections (requires Plugin API 1.51); the XRD workbench's own Agents keep working unchanged.
+
+| Connect Agent to | Relationship | Tools |
+|---|---|---|
+| Match node | 运行控制 | `xrd_run_stage` (search, preopt, fit), `xrd_run_stop`, `xrd_run_status`, `xrd_read_results` |
+| Match node | 结果只读 / 结果报告归档 | `xrd_read_results`, `xrd_submit_report` |
+| Spectrum canvas | 导入实验谱 | `xrd_import_pattern` |
+
+`xrd_import_pattern` takes two-column 2θ/intensity text, so the Agent converts other
+formats (xy, xye, xrdml, raw) first; the text is validated and hashed like a UI import.
+It does not update earlier search runs: run the search stage again afterwards. Stage
+tools start the node's normal run and the pipeline still validates run and candidate
+lineage. Two nodes can share only one connection, so 运行控制 also includes result reading;
+use 结果报告归档 instead when the Agent should file reports. Runs started by a tool are detached; stop them with `xrd_run_stop` or the node.
 
 ## Synchronized scientific frames
 

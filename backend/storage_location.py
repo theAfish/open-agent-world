@@ -158,6 +158,41 @@ def storage_status(settings: Settings) -> dict:
             "managed_by": "settings" if config else "startup configuration"}
 
 
+def storage_usage(settings: Settings) -> dict:
+    """Explicit inspection only; ordinary settings and render paths never scan."""
+    from datetime import UTC, datetime
+    from backend.desktop_backup import update_backups
+    from backend.packs.lifecycle import ManagedResourceLedger
+    root = settings.data_root.resolve()
+    totals = dict(user_data=0, managed=0, temporary=0, backups=0)
+    sizes = {}
+    for path in _entries(root):
+        if _reparse(path) or not stat.S_ISREG(path.lstat().st_mode):
+            continue
+        relative = path.relative_to(root).as_posix()
+        size = path.stat().st_size
+        sizes[relative] = size
+        category = ('temporary' if relative.startswith('runtime/staging/') else
+                    'managed' if relative.startswith(('runtime/environments/', 'packs/cache/', 'packs/adapter-wheels/'))
+                    else 'user_data')
+        totals[category] += size
+    backups = update_backups(root)
+    for item in backups:
+        item['size_bytes'] = sum(path.lstat().st_size for path in _entries(Path(item['path']))
+                                 if not _reparse(path) and stat.S_ISREG(path.lstat().st_mode))
+        totals['backups'] += item['size_bytes']
+    reclaimable = sum(item['size_bytes'] for item in backups if item['removable'])
+    if (root / 'packs/resources.sqlite3').is_file():
+        ledger = ManagedResourceLedger(root)
+        removable = {item['id'] for item in ledger.preview() if item['action'] == 'remove'}
+        with ledger.connect() as db:
+            for row in db.execute('SELECT id,path FROM resources'):
+                if row['id'] in removable:
+                    reclaimable += sum(size for name, size in sizes.items() if name.startswith(row['path'] + '/'))
+    return {'categories': totals, 'reclaimable_bytes': reclaimable, 'backups': backups,
+            'measured_at': datetime.now(UTC).isoformat()}
+
+
 def schedule_storage(settings: Settings, target: str | None, revision: int) -> dict:
     config = settings.storage_config_path
     if config is None:

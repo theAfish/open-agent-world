@@ -82,6 +82,10 @@ RECORD_SOURCES = Table(
     Column("record_id", String(36), primary_key=True),
     Column("source_id", String(36), primary_key=True),
     Column("artifact_id", String(36), nullable=True),
+    # The content hash of the source at link time: a record's evidence pointer is
+    # content-addressed, so it can be verified against the retained bytes and
+    # survives a move of the object store.
+    Column("sha256", String(64), nullable=True),
     Index("ix_oaw_experiment_record_source_record", "record_id"),
 )
 
@@ -151,6 +155,9 @@ def _migrate(engine):
                     f"ALTER TABLE oaw_kb_experiment_record ADD COLUMN {name} {ddl}")
         connection.exec_driver_sql(
             "UPDATE oaw_kb_experiment_record SET status='published' WHERE status='confirmed'")
+        if "sha256" not in _columns(connection, "oaw_kb_experiment_record_source"):
+            connection.exec_driver_sql(
+                "ALTER TABLE oaw_kb_experiment_record_source ADD COLUMN sha256 VARCHAR(64)")
         tables = {row[0] for row in connection.exec_driver_sql(
             "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         if LEGACY_EVIDENCE in tables:
@@ -394,7 +401,8 @@ class ExperimentRecordStore:
         return record_ids
 
     def set_sources(self, record_id, links):
-        """Replace every source link for one record."""
+        """Replace every source link for one record; each link is
+        ``{source_id, artifact_id?, sha256?}``."""
         with self._engine.begin() as connection:
             connection.execute(delete(RECORD_SOURCES).where(
                 RECORD_SOURCES.c.record_id == str(record_id)))
@@ -405,7 +413,8 @@ class ExperimentRecordStore:
                     continue
                 seen.add(source_id)
                 rows.append({"record_id": str(record_id), "source_id": source_id,
-                             "artifact_id": str(link["artifact_id"]) if link.get("artifact_id") else None})
+                             "artifact_id": str(link["artifact_id"]) if link.get("artifact_id") else None,
+                             "sha256": link.get("sha256") or None})
             if rows:
                 connection.execute(insert(RECORD_SOURCES), rows)
 
@@ -413,4 +422,14 @@ class ExperimentRecordStore:
         with self._engine.connect() as connection:
             rows = connection.execute(select(RECORD_SOURCES).where(
                 RECORD_SOURCES.c.record_id == str(record_id))).mappings().all()
+        return [dict(row) for row in rows]
+
+    def links_for_sources(self, source_ids):
+        """Every record link that cites any of ``source_ids``."""
+        wanted = [str(value) for value in source_ids]
+        if not wanted:
+            return []
+        with self._engine.connect() as connection:
+            rows = connection.execute(select(RECORD_SOURCES).where(
+                RECORD_SOURCES.c.source_id.in_(wanted))).mappings().all()
         return [dict(row) for row in rows]

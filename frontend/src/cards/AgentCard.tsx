@@ -20,6 +20,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
   const schemaSettings = definition?.traits.includes("ui.schema-agent.v1");
   const xrdMatch = card.type === "xrd.match";
   const activeRun = card.status === "running" || card.status === "waiting";
+  const [activityOpen, setActivityOpen] = useState(false);
   const [hasResult, setHasResult] = useState(false);
   useEffect(() => {
     if (!xrdMatch) return;
@@ -156,10 +157,12 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
           <CircleStop size={14} /> {!xrdMatch && t("Stop")} </button>}
       </div>}
 
-      {level === "workspace" && !xrdMatch && <details className="agent-settings-details">
+      {level === "workspace" && !xrdMatch && <details className="agent-settings-details" open={activityOpen} onToggle={event => {
+        if (event.target === event.currentTarget) setActivityOpen(event.currentTarget.open);
+      }}>
         <summary>{t("Runtime activity")}</summary>
         <InstrumentOutput lines={output} empty="Run output and tool activity will appear here." />
-        <AgentRunHistory agentId={card.id} active={activeRun} />
+        {activityOpen && <AgentRunHistory agentId={card.id} active={activeRun} />}
       </details>}
     </div>
   );

@@ -36,7 +36,7 @@ def environment_status(owner, name, declaration, source_root, data_root, *, lega
         result['state'] = {'environment_ready': 'ready', 'environment_pending': 'preparing',
             'environment_failed': 'failed'}.get((legacy or {}).get('state'), 'on_use')
         result['error'] = (legacy or {}).get('error')
-    elif declaration.lock:
+    elif declaration.lock and not (declaration.target == 'host-worker' and declaration.provider == 'python'):
         result.update(state='unsupported', error='This environment provider does not yet support lockfile installation')
     elif declaration.target == 'sandbox':
         # Readiness is target-specific. A local install is never remote evidence.

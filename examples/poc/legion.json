@@ -236,7 +236,7 @@
           "status": "stopped",
           "workspace_access": "read_write",
           "workspace_path": null,
-          "workspace_scope": "session"
+          "workspace_scope": "shared"
         },
         "dependencies": [],
         "equipment_relationship": null,

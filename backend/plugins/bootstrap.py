@@ -79,6 +79,19 @@ class PluginEnvironmentBootstrap:
         return {p.id: self.registry.runtime_requirements.get(p.id, p.python_requirements)
                 for p in self.registry.plugins() if self.registry.is_enabled(p.id)}
 
+    def status(self, runtime_id):
+        """Dependency readiness is distinct from a usable base interpreter."""
+        rows = [row for row in self.records()
+                if self.registry.is_enabled(row['id']) and json.loads(row['declaration'])]
+        failed = [row for row in rows if row['state'] == 'environment_failed']
+        pending = [row for row in rows if row['state'] == 'environment_pending']
+        ready = all(row['state'] == 'environment_ready'
+                    and json.loads(row['completed']).get(runtime_id) == row['digest'] for row in rows)
+        return {'ready': ready, 'state': 'ready' if ready else 'failed' if failed else 'preparing' if pending else 'not_ready',
+                'runtime_id': runtime_id, 'owners': [row['id'] for row in rows],
+                'requirements': sorted({value for row in rows for value in json.loads(row['declaration'])}),
+                'error': '\n'.join(dict.fromkeys(row['error'] for row in failed if row['error'])) or None}
+
     def update(self, plugin_id, state, *, error=None, completed=None):
         with self.connect() as db:
             db.execute("UPDATE plugins SET state=?,error=?,updated_at=? WHERE id=?",

@@ -29,16 +29,17 @@ def setup(*, names=TOOLS, limits=None):
     return evidence
 
 
-def test_existing_agent_card_deadlines_upgrade_without_mutating_other_limits():
+@pytest.mark.parametrize('old_pair', [(60, 30), (600, 600)])
+def test_existing_agent_card_deadlines_upgrade_without_mutating_other_limits(old_pair):
     from oaw_atomsculptor import AtomSculptorAgentConfig
-    original = {"model_action_seconds": 60, "action_recovery_seconds": 30,
+    original = {"model_action_seconds": old_pair[0], "action_recovery_seconds": old_pair[1],
                 "max_model_requests": 45, "max_run_seconds": 1800}
     parsed = AtomSculptorAgentConfig.model_validate({"harness": original}).harness
     runtime_limits = HarnessLimits.model_validate(original)
     assert parsed == runtime_limits
-    assert parsed.model_action_seconds == parsed.action_recovery_seconds == 600
+    assert parsed.model_action_seconds is parsed.action_recovery_seconds is None
     assert parsed.max_model_requests == 45 and parsed.max_run_seconds == 1800
-    assert original["model_action_seconds"] == 60 and original["action_recovery_seconds"] == 30
+    assert original["model_action_seconds"] == old_pair[0] and original["action_recovery_seconds"] == old_pair[1]
     custom = HarnessLimits(model_action_seconds=120, action_recovery_seconds=90)
     assert custom.model_action_seconds == 120 and custom.action_recovery_seconds == 90
 
@@ -233,9 +234,15 @@ async def test_long_thought_or_disallowed_action_recovers_once_to_real_next_step
 
     model = bounded_output_model(Fixture(), e.trace, "structure_builder", e, SimpleNamespace(types=types), 16384)
     accepted = [r async for r in model.generate_content_async(req, stream=True) if not r.partial]
-    assert calls == 2 and len(accepted) == 1
-    assert accepted[0].content.parts[0].function_call.name == "write_sandbox_text_file"
-    assert e.actions.recoveries == (0 if kind == "output_limit" else 1) and not e.scripts
+    assert calls == (1 if kind == "wrong_tool" else 2) and len(accepted) == 1
+    call = accepted[0].content.parts[0].function_call
+    if kind == "wrong_tool":
+        assert call.name == "inspect_sandbox"
+        rejected = await tool(e, call.name, call.args, {}, call_id=call.id)
+        assert rejected["error"]["code"] == "disallowed_tool" and not rejected["error"]["command_dispatched"]
+    else:
+        assert call.name == "write_sandbox_text_file"
+    assert e.actions.recoveries == (1 if kind == "timeout" else 0) and not e.scripts
     if kind == "output_limit":
         assert e.output_recoveries["structure_builder"] == 1
     if kind == "timeout":
@@ -387,7 +394,7 @@ def test_legacy_output_policy_inherits_oaw_selection_without_database_edits(with
     limits = HarnessLimits.model_validate(original)
     assert limits.specialist_output_tokens is None and limits.recovered_action_output_tokens is None
     assert "max_output_tokens" not in type(limits).model_fields
-    assert limits.model_action_seconds == limits.action_recovery_seconds == 600
+    assert limits.model_action_seconds is limits.action_recovery_seconds is None
     assert original["specialist_output_tokens"] == 16384 and original["max_output_tokens"] == 65536
     custom = HarnessLimits.model_validate({**original, "max_output_tokens": 100000})
     assert custom.specialist_output_tokens == 16384 and "max_output_tokens" not in type(custom).model_fields
@@ -464,7 +471,7 @@ async def test_running_work_does_not_reset_or_consume_stagnation_budget():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("explicit", [None, 37])
+@pytest.mark.parametrize("explicit", [None, 37, 600])
 async def test_saved_script_deadline_uses_advertised_field_and_preserves_explicit_timeout(explicit):
     e = setup()
     e.configure_tools([ScopedToolDefinition("operation:" + name, name, "Fixture", input_schema=
@@ -477,6 +484,10 @@ async def test_saved_script_deadline_uses_advertised_field_and_preserves_explici
         args["timeout_seconds"] = explicit
     await tool(e, "execute_command", args, {"exit_code": 0})
     assert args["timeout_seconds"] == (120 if explicit is None else explicit)
+    budget = e.time_budget()
+    assert budget["default_script_timeout_seconds"] == 120
+    assert "script_execution_seconds" not in budget["effective_brakes"]
+    assert "not a hard cap" in budget["script_timeout_guidance"]
 
 
 @pytest.mark.asyncio
@@ -532,6 +543,74 @@ async def test_host_collection_does_not_grant_missing_wait_or_collect_untracked_
     assert await collect_script_operation(e, definitions, invoke, "execute_command",
         {"sandbox": "box", "argv": argv}, initial, asyncio.Event()) == initial
     assert not e.pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name,args", [
+    ("execute_command", {"sandbox": "box", "argv": ["python3", "-c", "import numpy;print(numpy.__version__)"]}),
+    ("install_python_packages", {"sandbox": "box", "requirements": ["numpy"]}),
+])
+async def test_host_collects_inline_and_environment_preparation_without_new_model_turns(name, args):
+    from oaw_atomsculptor.actions import collect_script_operation
+    e = setup(); await activate(e)
+    definitions = [ScopedToolDefinition("operation:wait_sandbox_operation", "wait_sandbox_operation", "Native")]
+    hooks = e.tool_callbacks("structure_builder")
+    obj, ctx = SimpleNamespace(name=name), SimpleNamespace(function_call_id="initial")
+    assert await hooks["before_tool_callback"](obj, args, ctx) is None
+    initial = {"status": "running", "operation_id": "op", "command_started": False, "phase": "preparing_python",
+        "shared_python": {"phase": "package_install", "last_install_state": "running",
+            "seconds_without_progress": 120, "output_tail": "Resolved packages\nDownloading sample (1MiB)\n"}}
+    calls = []
+    async def invoke(cap, values):
+        calls.append((cap, values))
+        if len(calls) == 1:
+            return initial
+        if len(calls) == 2:
+            return {'status': 'running', 'operation_id': 'op', 'phase': 'executing', 'command_started': True}
+        return {"exit_code": 0, "command_id": "op", "stdout": "2.5.4"}
+    result = await collect_script_operation(e, definitions, invoke, name, args, initial, asyncio.Event())
+    await hooks["after_tool_callback"](obj, args, ctx, result)
+    assert result["exit_code"] == 0 and len(calls) == 3
+    assert all(cap == "operation:wait_sandbox_operation" and values["operation_id"] == "op" for cap, values in calls)
+    assert not e.inline_executions and not e.inline_pending and e.model_requests == 0
+    if name == "execute_command":
+        assert e.actions.inline_measurements[-1]["command_id"] == "op"
+    assert not e.scripts and not e.measurement_reports
+    notices = []
+    while not e.trace.queue.empty():
+        _, entry = e.trace.queue.get_nowait()
+        if entry.get('workflow_event') == 'modelling_command_wait':
+            notices.append(entry)
+    assert len(notices) == 3
+    assert all('Preparing shared Python' in entry['text'] and 'Latest installer log: Downloading sample' in entry['text'] for entry in notices[:2])
+    assert all('last observed installer/cache activity 120s ago' in entry['text'] for entry in notices[:2])
+    assert all('no installer progress' not in entry['text'] for entry in notices)
+    assert notices[0]['operation_progress']['command_started'] is False
+    assert notices[0]['operation_progress']['installer']['seconds_without_progress'] == 120
+    assert notices[-1]['text'] == 'Sandbox command is running'
+    assert notices[-1]['operation_progress']['command_started'] is True
+    assert 'installer' not in notices[-1]['operation_progress']
+
+
+@pytest.mark.asyncio
+async def test_dependency_failure_takes_priority_over_local_science_repair():
+    names = TOOLS | {"install_python_packages"}
+    e = setup(names=names); await activate(e)
+    e.steps.available = True
+    await execute(e, "probe.py", result={"exit_code": 1, "command_id": "old", "stderr": "SyntaxError"})
+    await tool(e, "inspect_sandbox", {"sandbox": "box"}, {"state": "ready", "python_environment": {
+        "interpreter_ready": True, "ready": False, "dependencies": {"state": "failed", "ready": False,
+            "requirements": ["numpy", "ase"], "error": "wheel download timeout"}}})
+    req = request(names)
+    prepare(e, req)
+    assert "Infrastructure preparation failed" in e.actions.last_action
+    assert "install_python_packages" in declarations(req) and "run_modelling_step" not in declarations(req)
+    # Successful native preparation updates the cached scope; local source
+    # repair then becomes the current action again without a new plan.
+    await tool(e, "install_python_packages", {"sandbox": "box", "requirements": ["numpy", "ase"]},
+        {"ready": True, "python_environment": {"ready": True, "dependencies": {"state": "ready", "ready": True}}})
+    assert e.actions.environment_action(e) is None
+    assert e.workflow.local_repair(e)
 
 
 def test_planner_requires_executable_experiments():
@@ -612,7 +691,7 @@ async def test_action_deadline_is_bounded_and_user_cancellation_never_recovers(c
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("recovery_seconds", [1, 3])
+@pytest.mark.parametrize("recovery_seconds", [None, 1, 3])
 async def test_successful_recovery_does_not_shorten_next_action(monkeypatch, recovery_seconds):
     """Replay inspect -> correction -> start -> compute from the latest Run."""
     import oaw_atomsculptor.model_recovery as recovery
@@ -647,13 +726,13 @@ async def test_successful_recovery_does_not_shorten_next_action(monkeypatch, rec
     await e.trace.callbacks("structure_builder")["before_model_callback"](None, req)
     accepted = [r async for r in model.generate_content_async(req)]
     assert accepted[0].content.parts[0].function_call.name == "execute_command"
-    assert observed_limits == [2, max(2, recovery_seconds), 2]
+    assert observed_limits == [2, max(2, recovery_seconds or 2), 2]
     assert e.actions.recoveries == 1 and calls == 3 and not e.scripts
 
 
 @pytest.mark.asyncio
 async def test_active_reasoning_outlives_old_ceiling_with_native_idle_watchdog(monkeypatch):
-    """Scaled time: content continues past 60s, completes at about 120s."""
+    """Scale the former 600-second ceiling to .6s; active content must outlive it."""
     from backend.agents import model_observation
     from backend.agents.request_recovery import recoverable_model
     import oaw_atomsculptor.model_recovery as recovery
@@ -663,7 +742,11 @@ async def test_active_reasoning_outlives_old_ceiling_with_native_idle_watchdog(m
     req = request(); prepare(e, req)
     await e.trace.callbacks("structure_builder")["before_model_callback"](None, req)
     original_timeout = asyncio.timeout
-    monkeypatch.setattr(recovery.asyncio, "timeout", lambda seconds: original_timeout(seconds / 1000))
+    observed_limits = []
+    def scaled_timeout(seconds):
+        observed_limits.append(seconds)
+        return original_timeout(None if seconds is None else seconds / 1000)
+    monkeypatch.setattr(recovery.asyncio, "timeout", scaled_timeout)
     monkeypatch.setattr(model_observation, "STREAM_STALL_SECONDS", .09)
     monkeypatch.setattr(model_observation, "STREAM_FIRST_BYTE_SECONDS", .3)
     closed = 0
@@ -674,7 +757,7 @@ async def test_active_reasoning_outlives_old_ceiling_with_native_idle_watchdog(m
         async def generate_content_async(self, req, stream=False):
             nonlocal closed
             try:
-                for _ in range(12):
+                for _ in range(65):
                     yield LlmResponse(partial=True, content=types.Content(role="model", parts=[
                         types.Part(thought=True, text="Developing the executable probe. ")]))
                     await asyncio.sleep(.01)
@@ -687,6 +770,7 @@ async def test_active_reasoning_outlives_old_ceiling_with_native_idle_watchdog(m
     accepted = [r async for r in model.generate_content_async(req, stream=True) if not r.partial]
     assert len(accepted) == 1 and accepted[0].content.parts[0].function_call.name == "write_sandbox_text_file"
     assert e.actions.recoveries == 0 and closed == 1 and not e.scripts
+    assert observed_limits == [None]
     assert not any(p.get("finish_reason") == "HOST_ACTION_TIMEOUT" for _, p in e.trace.queue._queue)
 
 

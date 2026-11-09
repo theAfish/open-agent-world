@@ -5,7 +5,8 @@ export const LEGACY_NODE_DRAG_MIME = "application/open-agent-card";
 
 export type PaletteDragPayload =
   | { version: 1; kind: "node"; type: CardType }
-  | { version: 1; kind: "legion"; id: string; revision: number };
+  | { version: 1; kind: "legion"; id: string; revision: number }
+  | { version: 1; kind: "legion_instance"; id: string };
 
 export function serializePaletteDrag(payload: PaletteDragPayload): string {
   return JSON.stringify(payload);
@@ -20,6 +21,9 @@ export function parsePaletteDrag(value: string): PaletteDragPayload | undefined 
     if (record.version !== 1) return undefined;
     if (record.kind === "node" && typeof record.type === "string" && record.type.length > 0) {
       return { version: 1, kind: "node", type: record.type };
+    }
+    if (record.kind === 'legion_instance' && typeof record.id === 'string' && record.id.length > 0) {
+      return { version: 1, kind: 'legion_instance', id: record.id };
     }
     if (
       record.kind === "legion"
@@ -41,7 +45,7 @@ export function writePaletteDrag(dataTransfer: DataTransfer, payload: PaletteDra
   if (payload.kind === "node") {
     dataTransfer.setData(LEGACY_NODE_DRAG_MIME, payload.type);
   }
-  dataTransfer.effectAllowed = "copyMove";
+  dataTransfer.effectAllowed = payload.kind === 'legion_instance' ? 'move' : "copyMove";
 }
 
 export function readPaletteDrag(dataTransfer: DataTransfer): PaletteDragPayload | undefined {

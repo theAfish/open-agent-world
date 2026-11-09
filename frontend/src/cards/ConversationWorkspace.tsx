@@ -131,7 +131,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const composer = useConversationComposer({
     conversationId: card.id, activeSessionId, activeSession, participants, busy, history, transcript,
   });
-  const { draft, setDraft, attachments, messageInput, selectedAgentId, setPreferredAgentId,
+  const { draft, setDraft, attachments, messageInput, selectedAgentId, setPreferredAgentId, setContinuationRunId,
     intake, uploading, visibleOutgoing, messages } = composer;
   useHydrationLease(card.id, 'conversation-operation', busy || uploading || stoppingRuns.size > 0 || creatingGroup || addingParticipants || groupsOpen || !!confirmation);
   const activeRuns = history.activeRuns;
@@ -536,6 +536,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                   {Boolean(history.runSummaries[message.run_id]?.recovery_kind) && <button type="button" className="secondary-button"
                     disabled={busy || uploading || !!draft.trim() || attachments.length > 0 || activeRuns.length > 0}
                     onClick={() => {
+                      setContinuationRunId(message.run_id!);
                       const recovery = history.runSummaries[message.run_id!];
                       const facts = recovery?.recovery_receipts ?? [];
                       setDraft([

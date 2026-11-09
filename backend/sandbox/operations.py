@@ -130,6 +130,12 @@ class SandboxOperations:
             receipt.update(state="error", error=str(error)[:4096],
                 failure_type="security" if isinstance(error, SandboxSecurityError) else "internal")
             if result is not None:
+                if receipt.get("phase") == "preparing_python" and receipt.get("operation_kind") in {"command", "skill_script"}:
+                    # The manager's final dispatch hook never ran. Preserve
+                    # this native fact instead of turning a setup failure into
+                    # an ambiguous model execution that cannot be retried.
+                    result["error"]["command_dispatched"] = False
+                    result.update(operation_id=operation_id, command_id=operation_id, command_started=False)
                 receipt["tool_result"] = result
                 receipt.pop("failure_type", None)
                 if isinstance(error, SandboxOperationError):

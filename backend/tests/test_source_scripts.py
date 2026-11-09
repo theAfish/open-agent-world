@@ -2,6 +2,7 @@
 from contextlib import nullcontext
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -298,7 +299,10 @@ def test_repeated_dev_starts_prepare_once_then_run_vite_and_propagate_failure(sc
     monkeypatch.setattr(dev, "backend_python", lambda root: python)
     monkeypatch.setattr(dev, "prerequisites", lambda **kw: {"node": "node", "npm": "npm"})
     monkeypatch.setattr(dev, "available_port", lambda port: port)
-    monkeypatch.setattr(sys, "argv", ["dev.py", "--profile", "fixture", "--plugin-path", "extra plugin"]
+    inherited = str(tmp_path / "configured pack")
+    monkeypatch.setenv("OPEN_AGENT_WORLD_PLUGIN_DIRS", inherited)
+    monkeypatch.setattr(sys, "argv", ["dev.py", "--profile", "fixture", "--plugin-path", "extra plugin",
+                                     "--plugin-path", "another pack", "--plugin-path", "extra plugin"]
                         + (["--deployment", str(tmp_path / "runtime")] if published else []))
     commands, children, stopped = [], [], []
     monkeypatch.setattr(dev.subprocess, "run", lambda command, **kwargs: commands.append(command))
@@ -309,6 +313,8 @@ def test_repeated_dev_starts_prepare_once_then_run_vite_and_propagate_failure(sc
     monkeypatch.setattr(dev.urllib.request, "build_opener", lambda *args: SimpleNamespace(open=probe))
 
     def popen(command, **kwargs):
+        assert kwargs["env"]["OPEN_AGENT_WORLD_PLUGIN_DIRS"].split(os.pathsep) == [
+            inherited, str(SCRIPTS.parent / "extra plugin"), str(SCRIPTS.parent / "another pack")]
         commands.append(command)
         assert kwargs["env"]["OAW_DEV_PUBLISHED_RUNTIME"] == ("1" if published else "0")
         code = 2 if command[0] == "node" else None
@@ -334,6 +340,7 @@ def test_repeated_dev_starts_prepare_once_then_run_vite_and_propagate_failure(sc
     if published:
         assert commands[2][1:] == ["-m", "backend.deploy", "--serve", str((tmp_path / "runtime").resolve()),
                                    "--api-only", "--port", "8000", "--desktop"]
+    assert os.environ["OPEN_AGENT_WORLD_PLUGIN_DIRS"] == inherited
 
 
 def test_failed_preflight_never_launches_processes(scripts, monkeypatch, tmp_path):

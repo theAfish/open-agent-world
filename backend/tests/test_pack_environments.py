@@ -1,6 +1,7 @@
 """Real private workers and durable environment lifecycle, without network."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -32,7 +33,19 @@ def test_stdlib_worker_prepare_reuses_offline_and_never_changes_host(tmp_path, m
     assert handle.python == sys.executable
 
 
-def test_local_wheel_runs_only_in_private_worker_and_detects_missing_files(tmp_path, monkeypatch):
+def test_locked_environment_rejects_unresolved_requirement_files_before_staging(tmp_path):
+    lock = tmp_path / 'requirements.lock'
+    lock.write_text('')
+    requirements = tmp_path / 'requirements.txt'
+    requirements.write_text('missing-package==1.0\n')
+    manager = runtime.PackEnvironmentManager(tmp_path / 'profile')
+    with pytest.raises(ValueError, match='direct requirements in requirements'):
+        manager.prepare_python(spec(lockfile=lock, requirements_files=(requirements,)))
+    assert not manager.root.exists()
+
+
+@pytest.mark.parametrize('locked', [False, True, 'direct-url'])
+def test_local_wheel_runs_only_in_private_worker_and_detects_missing_files(tmp_path, monkeypatch, locked):
     if not shutil.which("uv"):
         pytest.skip("uv is required for the local-wheel provider integration")
     monkeypatch.setenv("UV_OFFLINE", "1")
@@ -44,17 +57,35 @@ def test_local_wheel_runs_only_in_private_worker_and_detects_missing_files(tmp_p
         archive.writestr("oaw_env_fixture-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: oaw-env-fixture\nVersion: 1.0\n")
         archive.writestr("oaw_env_fixture-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
         archive.writestr("oaw_env_fixture-1.0.dist-info/RECORD", "")
-    declaration = spec(requirements=(str(wheel),), verify_imports=("oaw_env_fixture",))
+    lock = tmp_path / 'requirements.lock'
+    lock.write_text(f'oaw-env-fixture @ {wheel.as_uri()} --hash=sha256:{hashlib.sha256(wheel.read_bytes()).hexdigest()}\n')
+    requirement = f'oaw-env-fixture @ {wheel.as_uri()}' if locked == 'direct-url' else 'oaw-env-fixture==1.0'
+    declaration = spec(requirements=(str(wheel),) if not locked else (requirement,), verify_imports=("oaw_env_fixture",),
+                       lockfile=lock if locked else None)
     manager = runtime.PackEnvironmentManager(tmp_path / "profile")
     handle = manager.prepare_python(declaration)
+    assert json.loads((handle.root / 'ready.json').read_text())['resolved_packages'] == {'oaw-env-fixture': '1.0'}
     probe = "import json,site,sys;site.addsitedir(sys.argv[1]);import oaw_env_fixture;print(json.dumps([oaw_env_fixture.value,sys.path]))"
     value, paths = json.loads(subprocess.check_output([handle.python, "-I", "-S", "-c", probe,
                                                       str(handle.root / "packages")], text=True))
     assert value == "private-wheel"
     assert not any("site-packages" in path for path in paths)
     assert "oaw_env_fixture" not in sys.modules
+    if locked == 'direct-url':
+        with pytest.raises(ValueError, match='Worker dependency does not match'):
+            manager._verify_legacy_requirements(spec(requirements=(requirement,)), handle.root, 'host')
     (handle.root / "packages/oaw_env_fixture/__init__.py").unlink()
     assert manager.status(declaration)["status"] == "invalid"
+    if locked:
+        missing = spec(requirements=('undeclared-package==1.0',), lockfile=lock)
+        with pytest.raises(ValueError, match='Worker dependency does not match'):
+            manager.prepare_python(missing)
+        fingerprint = declaration.fingerprint
+        lock.write_text(f'oaw-env-fixture @ {wheel.as_uri()} --hash=sha256:{"0" * 64}\n')
+        assert declaration.fingerprint != fingerprint
+        with pytest.raises(subprocess.CalledProcessError):
+            manager.prepare_python(declaration)
+        assert manager.status(declaration)['status'] == 'failed'
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows MAX_PATH regression")
@@ -115,6 +146,8 @@ def test_failure_preserves_previous_environment_and_retry_operation_identity(tmp
     assert operation["status"] == "failed"
     assert not manager.environment_root(declaration).exists()
     assert manager.read_python(previous) == old
+    assert list((manager.root / 'staging').iterdir()) == []
+    assert not list((manager.root / 'operations').glob('*.verify-*.json'))
     current = manager.prepare_python(declaration)
     assert current.operation_id == operation["operation_id"]
     assert manager.read_python(previous) == old
@@ -158,10 +191,30 @@ def test_ready_stage_after_interrupted_publish_is_reused_without_install(tmp_pat
     failed = manager.status(declaration)
     stage = manager.root / "staging" / failed["stage"]
     assert (stage / "ready.json").is_file()
+    from backend.packs.lifecycle import ManagedResourceLedger
+    ledger = ManagedResourceLedger(tmp_path)
+    assert ledger.preview()[0]['action'] == 'retain'
+    assert ledger.collect() == []
     monkeypatch.setattr(Path, "rename", rename)
     monkeypatch.setattr(runtime.shutil, "which", lambda _: pytest.fail("recovery must reuse verified stage"))
     handle = manager.prepare_python(declaration)
     assert handle.operation_id == failed["operation_id"]
+    assert not stage.exists()
+
+
+def test_repair_waits_for_live_worker_and_reclaims_displaced_payload(tmp_path):
+    manager = runtime.PackEnvironmentManager(tmp_path)
+    declaration = spec()
+    handle = manager.prepare_python(declaration)
+    with manager.lease(handle):
+        (handle.root / 'ready.json').write_text('{}')
+        with pytest.raises(RuntimeError, match='running process'):
+            manager.prepare_python(declaration)
+        assert handle.root.is_dir()
+        stage = manager.root / 'staging' / manager.status(declaration)['stage']
+        assert (stage / 'ready.json').is_file()
+    assert manager.prepare_python(declaration).root == handle.root
+    assert list((manager.root / 'staging').iterdir()) == []
 
 
 def test_published_receipt_reconciles_missing_operation_and_relocates(tmp_path):
@@ -232,13 +285,18 @@ def test_incompatible_host_uses_private_python_and_relative_relocatable_receipt(
     assert Path(moved.python).is_file()
 
 
-def test_static_declaration_and_matcreator_launcher_have_identical_identity():
+@pytest.mark.parametrize('pack', ['matcreator', 'xrd'])
+def test_static_declaration_and_worker_launcher_have_identical_identity(pack):
     from backend.packs.spec import read_source_pack
-    from plugins.matcreator.oaw_matcreator import native_environment
-    root = native_environment.PACKAGE.parent
+    if pack == 'matcreator':
+        from plugins.matcreator.oaw_matcreator import native_environment as environment
+        root, name = environment.PACKAGE.parent, 'native'
+    else:
+        from plugins.xrd.src.oaw_xrd import runtime_environment as environment
+        root, name = environment.PACKAGE.parent.parent, 'scientific'
     source = read_source_pack(root)
-    declared = runtime.PythonEnvironmentSpec.from_declaration(source.owner, "native", source.environments["native"], root)
-    assert declared.fingerprint == native_environment.environment_spec().fingerprint
+    declared = runtime.PythonEnvironmentSpec.from_declaration(source.owner, name, source.environments[name], root)
+    assert declared.fingerprint == environment.environment_spec().fingerprint
 
 
 def test_status_observes_real_process_lock_and_crash_without_changing_receipts(tmp_path):
@@ -352,7 +410,7 @@ def test_declared_preparation_discovers_legacy_and_copies_without_network(tmp_pa
 @pytest.mark.parametrize("child_version,child_present", [("1", True), ("2", False)])
 def test_legacy_seed_rejects_wrong_or_missing_transitive_extra(tmp_path, monkeypatch, child_version, child_present):
     seed, declaration = legacy_fixture(tmp_path, monkeypatch, child_version=child_version, child_present=child_present)
-    with pytest.raises(ValueError, match="Legacy dependency"):
+    with pytest.raises(ValueError, match="Worker dependency"):
         runtime.PackEnvironmentManager._verify_legacy_requirements(declaration, seed, "host")
     monkeypatch.setattr(runtime.shutil, "which", lambda _: "uv")
     def runner(args, *, env):

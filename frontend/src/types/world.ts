@@ -1,4 +1,4 @@
-export type PluginStateSpec = { mode: "none" } | { mode: "scoped"; supportedScopes: ("shared" | "session")[]; defaultScope: "shared" | "session"; userConfigurable?: boolean };
+export type PluginStateSpec = { mode: "none" } | { mode: "scoped"; supportedScopes: ("shared" | "session" | "group")[]; defaultScope: "shared" | "session" | "group"; userConfigurable?: boolean; followWorkspace?: boolean };
 
 export type CardType = string;
 export type { CardFinish } from '../cards/cardFinish';
@@ -16,10 +16,17 @@ export interface NodePresentation {
 }
 
 export type AgentStatus = "idle" | "running" | "waiting" | "error";
+/** Immediate admission receipt, not the eventual outcome of the Run. */
+export interface AgentRunReceipt {
+  accepted: true;
+  agent_id: string;
+  run_id: string;
+}
 export type SandboxStatus = "stopped" | "ready" | "running" | "error";
 export type SandboxWorkspaceAccess = "read_write" | "read_only";
 
 export interface SandboxConfig {
+  workspace_scope?: "shared" | "session" | "group";
   runtime: string;
   workspace_path: string | null;
   workspace_access: SandboxWorkspaceAccess;
@@ -118,14 +125,15 @@ export interface CardConfig extends Record<string, unknown> {
   runtime?: string;
   workspace_path?: string | null;
   workspace_access?: SandboxWorkspaceAccess;
+  workspace_scope?: "shared" | "session" | "group";
 }
 
 export interface WorldCard {
   missing_plugin?: { plugin_id: string; reason: string } | null;
   /** Missing on old snapshots; rendered as normal. Set once by the backend. */
   finish?: import('../cards/cardFinish').CardFinish;
-  state_scope?: "shared" | "session" | null;
-  state_scope_override?: "shared" | "session" | null;
+  state_scope?: "shared" | "session" | "group" | null;
+  state_scope_override?: "shared" | "session" | "group" | null;
   id: string;
   revision?: number;
   parent_id?: string | null;
@@ -387,6 +395,7 @@ export interface ConversationMessage {
   content: string;
   mention_agent_ids: string[];
   run_id?: string;
+  continuation_run_id?: string;
   created_at: string;
 }
 

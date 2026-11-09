@@ -13,3 +13,4 @@ packages = ["src/oaw_xrd"]
 
 [tool.hatch.build]
 artifacts = ["src/oaw_xrd/OAW_XRDfit/**/*.json"]
+exclude = ["src/oaw_xrd/OAW_XRDfit/src/refs/**"]

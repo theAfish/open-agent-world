@@ -143,7 +143,7 @@ class XRDRuntime(RuntimeProvider):
             if options.mode == 'match':
                 own = await self.capability_provider.read_own_document(config.agent_id)
                 library = own['value']
-                if library.get('path') or any(library.get('slots', [])):
+                if library.get('path') or any(library.get('slots', [])) or (library.get('managed') or {}).get('count'):
                     inputs.append({'node_id': config.agent_id, 'revision': own['revision'], 'value': library})
             patterns = [i for i in inputs if i["value"]["kind"] == "pattern"]
             refs = [i for i in inputs if i["value"]["kind"] == "reference"]

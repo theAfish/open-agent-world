@@ -143,6 +143,7 @@ class CommandResult:
     cancelled: bool = False
     command_id: str | None = None
     concurrent_commands: tuple[Mapping[str, Any], ...] = ()
+    working_directory: str = ""
 
 
 @dataclass(frozen=True, slots=True)

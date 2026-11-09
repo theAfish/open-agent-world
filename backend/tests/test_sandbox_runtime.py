@@ -49,6 +49,12 @@ class FakeWindowsNativeApi:
         assert sid == 0xA71A5
         self.grants.append((Path(path), read_only))
 
+    def grant_workspace(self, path: Path, sid: int, *, read_only: bool, root_handle=None) -> None:
+        self.grant_path(path, sid, read_only=read_only)
+
+    def revoke_workspace(self, path: Path, sid: int, *, root_handle=None) -> None:
+        self.revoke_path(path, sid)
+
     def revoke_path(self, path: Path, sid: int) -> None:
         assert sid == 0xA71A5
         self.revocations.append(Path(path))

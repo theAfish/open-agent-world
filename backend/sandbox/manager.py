@@ -33,6 +33,7 @@ class _Binding:
 
 
 class SandboxManager(SandboxBackend):
+    supports_workspace_scopes = True
     supports_invocation_environment = True
     supports_optional_python_runtime = True
     supports_folder_mounts = True
@@ -52,6 +53,7 @@ class SandboxManager(SandboxBackend):
         self._python_warmups: dict[str, asyncio.Task] = {}
         self._python_warmup_errors: dict[str, str] = {}
         self.pack_requirements = lambda: {}
+        self.pack_python_status = lambda runtime_id: {"ready": True, "state": "ready", "owners": [], "error": None}
 
     def _warm_python_after_start(self, runtime_id: str | None) -> None:
         """Begin Seatbelt's interpreter setup while the Agent does other work."""
@@ -355,12 +357,18 @@ class SandboxManager(SandboxBackend):
                       invocation_env: Mapping[str, object] | None = None,
                       runtime_mount: RuntimeMount | None = None,
                       python_environment: str = "auto", on_command_start=None,
-                      folder_mounts: Sequence[FolderMount] = ()) -> CommandResult:
+                      folder_mounts: Sequence[FolderMount] = (), working_directory: str = "", workspace_write_directory: str | None = None) -> CommandResult:
         binding = self._binding(sandbox_id)
         if not binding.provisioned:
             raise SandboxStateError("Start the Sandbox before executing commands")
         options = {"runtime_mount": runtime_mount} if runtime_mount is not None else {}
+        if workspace_write_directory is not None:
+            options["workspace_write_directory"] = workspace_write_directory
+        if working_directory:
+            options["working_directory"] = working_directory
         backend = self._backend(binding.resolved_runtime or "")
+        if workspace_write_directory is not None and not backend.supports_workspace_scopes:
+            raise SandboxValidationError("This runtime cannot enforce session/group workspace write restrictions")
         from .commands import needs_managed_python
         managed_python = needs_managed_python(argv, python_environment,
             skill=runtime_mount is not None)
@@ -385,6 +393,17 @@ class SandboxManager(SandboxBackend):
             options["invocation_env"] = invocation_env
         if managed_python:
             await self._wait_for_python_preparation(binding.resolved_runtime or "")
+            # Private profiles prepare their own dependency closure. Shared
+            # profiles and ordinary managed Python use the native Pack bootstrap.
+            recipe = dict(runtime_mount.bundle.files).get("_oaw_profile/recipe.json") if runtime_mount else None
+            private_profile = recipe is not None and json.loads(recipe).get("management") != "legacy-shared"
+            dependencies = self.pack_python_status(binding.resolved_runtime or "")
+            if not private_profile and not dependencies["ready"]:
+                from .models import SandboxPreparationError
+                raise SandboxPreparationError(
+                    f"Shared Python Pack dependencies are {dependencies['state']} for "
+                    f"{', '.join(dependencies['owners'])}: {dependencies.get('error') or 'Preparation has not completed on this platform'}. "
+                    "No command started. Retry the declared Pack preparation or install_python_packages; do not change interpreters.")
             warmup_error = self._python_warmup_errors.get(binding.resolved_runtime or "")
             if warmup_error:
                 from .models import SandboxPreparationError
@@ -431,11 +450,14 @@ class SandboxManager(SandboxBackend):
             async with self._python_preparation_locks.setdefault(runtime_id, asyncio.Lock()):
                 backend = self._backend(runtime_id)
                 if hasattr(backend, "prepare_python"):
-                    return await backend.prepare_python(requirements, bootstrap_key=bootstrap_key)
-                runtime = getattr(backend, "python_runtime", None)
-                if runtime is None:
-                    raise SandboxValidationError("This execution platform has no managed Python runtime")
-                return await runtime.prepare(requirements, bootstrap_key=bootstrap_key)
+                    result = await backend.prepare_python(requirements, bootstrap_key=bootstrap_key)
+                else:
+                    runtime = getattr(backend, "python_runtime", None)
+                    if runtime is None:
+                        raise SandboxValidationError("This execution platform has no managed Python runtime")
+                    result = await runtime.prepare(requirements, bootstrap_key=bootstrap_key)
+                self._python_warmup_errors.pop(runtime_id, None)
+                return result
         finally:
             if task is not None:
                 pending = self._python_preparations.get(runtime_id)
@@ -457,12 +479,14 @@ class SandboxManager(SandboxBackend):
         backend = self._backend(binding.resolved_runtime)
         if hasattr(backend, "python_status"):
             status = await backend.python_status()
-            return ({**status, "preparing": self.python_preparation_active(binding.resolved_runtime),
+            return ({**status, "dependencies": self.pack_python_status(binding.resolved_runtime),
+                     "preparing": self.python_preparation_active(binding.resolved_runtime),
                      "warmup_error": self._python_warmup_errors.get(binding.resolved_runtime)}
                     if isinstance(status, dict) else status)
         runtime = getattr(backend, "python_runtime", None)
         status = await asyncio.to_thread(runtime.snapshot) if runtime is not None else None
-        return ({**status, "preparing": self.python_preparation_active(binding.resolved_runtime),
+        return ({**status, "dependencies": self.pack_python_status(binding.resolved_runtime),
+                 "preparing": self.python_preparation_active(binding.resolved_runtime),
                  "warmup_error": self._python_warmup_errors.get(binding.resolved_runtime)}
                 if isinstance(status, dict) else status)
 

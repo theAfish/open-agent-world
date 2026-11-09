@@ -23,6 +23,24 @@ def configured(tmp_path):
     return replace(Settings.for_data_root(root), storage_config_path=tmp_path / 'startup.json')
 
 
+def test_usage_is_explicit_and_distinguishes_owned_cache_from_user_data(tmp_path, monkeypatch):
+    settings = Settings.for_data_root(tmp_path)
+    for relative, content in [('documents/saved.txt', b'user'), ('runtime/environments/owned/file', b'cache'),
+                               ('runtime/staging/unknown/file', b'temp')]:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True)
+        path.write_bytes(content)
+    scan = storage._entries
+    monkeypatch.setattr(storage, '_entries', lambda *_: pytest.fail('ordinary settings must not scan'))
+    assert storage.storage_status(settings)['current_path'] == str(tmp_path)
+    monkeypatch.setattr(storage, '_entries', scan)
+    result = storage.storage_usage(settings)
+    assert result['categories'] == {'user_data': 4, 'managed': 5, 'temporary': 4, 'backups': 0}
+    # A location alone does not authorize deletion or mark unknown files reclaimable.
+    assert result['reclaimable_bytes'] == 0
+    assert (tmp_path / 'runtime/staging/unknown/file').read_bytes() == b'temp'
+
+
 def test_restart_relocates_and_preserves_original(tmp_path):
     settings = configured(tmp_path)
     target = tmp_path / 'new-store'
@@ -124,6 +142,28 @@ def test_api_and_application_restart(tmp_path):
         assert status['current_path'] == str(target), status
         assert status['last_error'] is None
         assert client.get('/api/nodes').status_code == 200
+
+
+def test_storage_inspection_and_backup_management_api(tmp_path):
+    from fastapi.testclient import TestClient
+    from backend.main import create_app
+    from backend.desktop_backup import backup_for_update, update_backups
+    root = tmp_path / 'profile'
+    root.mkdir()
+    (root / 'document').write_text('saved')
+    settings = Settings.for_data_root(root)
+    backup_for_update(settings)
+    backup_for_update(settings)
+    latest, older = update_backups(root)
+    with TestClient(create_app(settings)) as client:
+        usage = client.post('/api/settings/storage/usage')
+        assert usage.status_code == 200, usage.text
+        assert usage.json()['categories']['backups'] > 0
+        assert client.delete('/api/settings/storage/backups/' + latest['name']).status_code == 409
+        removed = client.delete('/api/settings/storage/backups/' + older['name'])
+        assert removed.status_code == 200, removed.text
+        assert client.get('/api/nodes').status_code == 200
+    assert (root / 'document').read_text() == 'saved'
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows WSL reparse points')
 def test_wsl_links_preserved_without_resolving_and_internal_paths_rebased(tmp_path):

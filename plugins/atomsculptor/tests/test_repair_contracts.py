@@ -58,7 +58,7 @@ async def test_repeated_execution_cause_stays_in_local_repair_without_false_plan
     assert e.execution_sequence == 2 and len(e.experiment_history) == 1
     result = await tool(e, "finish_task", {"result": {"status": "needs_plan_review", "reason": "Same native code failure after repair",
                 "sandbox": "box", "script_path": "step.py"}}, "Task completed.")
-    assert result['error']['code'] == 'execution_repair_required' and not e.workflow.review_request
+    assert result == 'Task completed.' and e.workflow.review_request['exit_code'] == 1
     assert e.workflow.plan_revision == 1 and e.workflow.host_signal is None
 
 

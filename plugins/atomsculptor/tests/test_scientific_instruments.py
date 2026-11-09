@@ -9,7 +9,7 @@ from ase import Atoms
 from ase.io import write
 from skill_materialization import skill_scripts
 
-SCRIPTS = skill_scripts("structure-inspect")
+SCRIPTS = skill_scripts("structure_inspect")
 spec = importlib.util.spec_from_file_location("scientific_fixture", SCRIPTS / "scientific_analysis.py")
 science = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(science)

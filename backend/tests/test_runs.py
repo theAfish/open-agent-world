@@ -731,6 +731,8 @@ async def test_inactive_provider_stream_fails_run_instead_of_stalling(
         record = await manager.wait_terminal(run.run_id)
         assert record.status is RunStatus.FAILED
         assert "no activity" in (record.error or "")
+        assert "deadline" not in record.error
+        assert record.lifecycle["termination_reason"] == "provider_inactivity"
         await manager.wait_execution(run.run_id)
         assert not manager.holds_agent_slot(run.run_id)
         assert services.get_card(agent.id).status == "idle"
@@ -861,6 +863,8 @@ async def test_native_execution_deadline_override_retains_default_and_stop(tmp_p
             record = await asyncio.wait_for(manager.wait_terminal(run.run_id), 2)
             assert record.status is RunStatus.FAILED
             assert "deadline" in record.error
+            assert "no activity" not in record.error
+            assert record.lifecycle["termination_reason"] == "execution_deadline"
         assert "run_execution_deadline_seconds" not in provider.configs[agent.id].provider_config
         await asyncio.wait_for(manager.wait_execution(run.run_id), 2)
         assert not manager.holds_agent_slot(run.run_id)
@@ -883,7 +887,8 @@ def test_native_deadline_uses_atomsculptor_default_for_existing_card(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_provider_timeout_with_both_host_watchdogs_disabled_reports_failure(tmp_path):
+@pytest.mark.parametrize("disable_host_watchdogs", [False, True])
+async def test_provider_timeout_reports_provider_error_not_host_inactivity(tmp_path, disable_host_watchdogs):
     class TimeoutProvider(RecordingProvider):
         async def execute(self, config, context, input):
             raise TimeoutError("remote request expired")
@@ -891,12 +896,13 @@ async def test_provider_timeout_with_both_host_watchdogs_disabled_reports_failur
 
     services = _services(tmp_path, TimeoutProvider())
     try:
-        agent = await services.create_card(CardCreate(type="agent", name="Atlas", config={
-            "run_execution_deadline_seconds": 0, "run_inactivity_timeout_seconds": 0}))
+        overrides = {"run_execution_deadline_seconds": 0, "run_inactivity_timeout_seconds": 0} if disable_host_watchdogs else {}
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas", config=overrides))
         manager = services._require_run_manager()
         run = await manager.start_run(agent.id, "request")
         result = await asyncio.wait_for(manager.wait_terminal(run.run_id), 2)
-        assert result.status is RunStatus.FAILED and "no activity" in result.error
+        assert result.status is RunStatus.FAILED and result.error == "remote request expired"
+        assert "termination_reason" not in result.lifecycle
         assert "None seconds" not in result.error and "NoneType" not in result.error
         await asyncio.wait_for(manager.wait_execution(run.run_id), 2)
         assert not manager.holds_agent_slot(run.run_id)

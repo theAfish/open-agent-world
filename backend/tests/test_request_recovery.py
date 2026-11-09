@@ -6,7 +6,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import patch
 
 from backend.agents.context import Checkpoint, ContextBudget, ManagedContext, text_content
-from backend.agents.model_observation import ModelTrace, model_stream_disconnected
+from backend.agents.model_observation import ModelTrace, content_kinds, model_stream_disconnected
 from backend.agents.request_recovery import RequestRecoveryExhausted, RequestRetryPolicy, recover_request, _retry_delay
 
 
@@ -20,6 +20,14 @@ def response(text="", *, partial=False, tool=None):
 
 
 class RequestRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    def test_content_kinds_include_non_text_activity_without_exposing_payloads(self):
+        content = NS(parts=[NS(text="thought", thought=True), NS(text="answer"),
+                            NS(function_call={"name": "save"}), NS(function_response={"result": "private"}),
+                            NS(inline_data=b"private"), NS(file_data="private"),
+                            NS(executable_code="private"), NS(code_execution_result="private")])
+        self.assertEqual(content_kinds(content), {"reasoning", "text", "tool_call", "tool_result", "media"})
+        self.assertEqual(content_kinds(NS(parts=[NS(text="")])), set())
+
     def setup_request(self):
         request = Request(contents=[{"role": "user", "parts": [{"text": "build"}]}],
                           config=NS(max_output_tokens=None), tools_dict={"save": object()})
@@ -47,6 +55,14 @@ class RequestRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(row["first_response_seconds"])
         self.assertIsNotNone(row["last_response_idle_seconds"])
         self.assertNotIn("private", str(events))
+        metrics = row["stream_metrics"]
+        self.assertEqual(metrics["content_chunks_by_kind"], {"reasoning": 1})
+        self.assertEqual(metrics["observed_activity"], "content_received")
+        self.assertEqual(metrics["observation_scope"], "adapter_responses")
+        self.assertFalse(metrics["transport_observation_available"])
+        self.assertFalse(metrics["generation_resume_used"])
+        self.assertEqual(metrics["request_mode"], "initial_request")
+        self.assertGreaterEqual(metrics["longest_content_gap_seconds"], 0)
 
     async def test_partial_disconnect_retries_exact_request_without_tool_replay(self):
         request, trace = self.setup_request()
@@ -72,10 +88,16 @@ class RequestRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests, [request.contents, request.contents])
         self.assertTrue(provider.assert_tools)
         self.assertEqual(closed, [1, 2])
+        self.assertEqual(trace.request_stream_metrics["structure_builder"]["observed_response_chunks"], 2)
+        self.assertFalse(trace.request_stream_metrics["structure_builder"]["stream_requested"])
+        self.assertEqual(trace.request_stream_metrics["structure_builder"]["request_mode"], "request_replay")
+        self.assertEqual(trace.request_stream_metrics["structure_builder"]["content_chunks_by_kind"],
+                         {"reasoning": 1, "tool_call": 2})
         events = [trace.queue.get_nowait()[1] for _ in range(trace.queue.qsize())]
         recovery = next(e for e in events if e.get("phase") == "model_recovery")
         self.assertEqual(recovery["model_request"], 1)
         self.assertEqual(recovery["error_type"], "ConnectionResetError")
+        self.assertEqual(recovery["recovery_mode"], "request_replay")
         self.assertNotIn("secret request data", str(events))
         previews = [e for e in events if e.get("kind") == "model_reasoning"]
         self.assertTrue(any(e["interrupted"] for e in previews))
@@ -145,6 +167,8 @@ class RequestRecoveryTests(unittest.IsolatedAsyncioTestCase):
         error = next(e for e in events if e.get("phase") == "model_recovery")
         self.assertEqual(error["stage"], "first_byte")
         self.assertEqual(error["received_content_chunks"], 0)
+        self.assertEqual(error["stream_metrics"]["observed_activity"], "empty_responses_only")
+        self.assertIsNone(error["stream_metrics"]["first_content_seconds"])
 
     async def test_cancellation_never_retries(self):
         request, trace = self.setup_request()

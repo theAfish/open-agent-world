@@ -1,22 +1,25 @@
-"""A macOS CPython download is shared across OAW checkouts and profiles."""
+"""A macOS backend-Python copy is shared across OAW checkouts and profiles."""
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from backend.sandbox.models import SandboxPreparationError
-from backend.sandbox.python_runtime import SharedPythonRuntime
+from backend.sandbox.python_runtime import SharedPythonRuntime, DARWIN_MANAGED_PYTHON
 
 
 def fake_python(root: Path) -> None:
-    distribution = root / "cpython-3.12-test"
+    distribution = root / f"cpython-{DARWIN_MANAGED_PYTHON}-test"
     binary = distribution / "bin" / "python3"
     binary.parent.mkdir(parents=True)
     binary.write_text("#!/bin/sh\n", encoding="utf-8")
-    stdlib = distribution / "lib" / "python3.12" / "os.py"
+    stdlib = distribution / "lib" / f"python{DARWIN_MANAGED_PYTHON}" / "os.py"
     stdlib.parent.mkdir(parents=True)
     stdlib.write_text("# standard library marker\n", encoding="utf-8")
+    from backend.sandbox.darwin_python_copy import source_identity
+    (root / 'backend-source.json').write_text(json.dumps(source_identity()))
 
 
 class DarwinSharedStoreTests(unittest.TestCase):
@@ -24,8 +27,8 @@ class DarwinSharedStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake_python(root / "base")
-            distribution = root / "base" / "cpython-3.12.14-macos-aarch64-none"
-            (root / "base" / "cpython-3.12-test").rename(distribution)
+            distribution = root / "base" / f"cpython-{DARWIN_MANAGED_PYTHON}.14-macos-aarch64-none"
+            (root / "base" / f"cpython-{DARWIN_MANAGED_PYTHON}-test").rename(distribution)
             runtime = SharedPythonRuntime(root / "profile", darwin_store=root / "shared")
             self.assertEqual(runtime._darwin_base_python(root / "base"), distribution / "bin" / "python3")
 
@@ -48,11 +51,15 @@ class DarwinSharedStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "shared"
-            downloads = []
+            copies = []
 
             def make_profile(name):
                 runtime = SharedPythonRuntime(root / name, darwin_store=store)
-                runtime._ensure_uv = lambda: "uv"
+                runtime._uv = lambda: "uv"
+                def copy(root):
+                    copies.append(name)
+                    fake_python(root)
+                runtime._copy_backend_python = copy
 
                 def run(argv):
                     arguments = [str(arg) for arg in argv]
@@ -72,7 +79,7 @@ class DarwinSharedStoreTests(unittest.TestCase):
             first._ensure_darwin()
             second._ensure_darwin()
 
-            self.assertEqual(downloads, ["checkout-a"])
+            self.assertEqual(copies, ["checkout-a"])
             self.assertIsNotNone(first._darwin_base_python())
             self.assertIsNotNone(second._darwin_base_python())
             self.assertTrue(first.python.is_file())
@@ -97,14 +104,13 @@ class DarwinSharedStoreTests(unittest.TestCase):
             root = Path(directory)
             runtime = SharedPythonRuntime(root / "checkout", darwin_store=root / "shared")
 
-            def fail(argv):
-                arguments = [str(arg) for arg in argv]
-                fake_python(Path(arguments[arguments.index("--install-dir") + 1]))
-                raise SandboxPreparationError("download interrupted")
+            def fail(staging):
+                fake_python(staging)
+                raise SandboxPreparationError("copy interrupted")
 
-            runtime._run = fail
-            with self.assertRaisesRegex(SandboxPreparationError, "download interrupted"):
-                runtime._cached_darwin_base("uv")
+            runtime._copy_backend_python = fail
+            with self.assertRaisesRegex(SandboxPreparationError, "copy interrupted"):
+                runtime._cached_darwin_base()
             self.assertFalse((root / "shared" / "base").exists())
             self.assertFalse((root / "shared" / "base.partial").exists())
 
@@ -128,7 +134,7 @@ class DarwinSharedStoreTests(unittest.TestCase):
             root = Path(directory)
             store = root / "shared"
             fake_python(store / "base")
-            stdlib = store / "base" / "cpython-3.12-test" / "lib" / "python3.12" / "os.py"
+            stdlib = store / "base" / f"cpython-{DARWIN_MANAGED_PYTHON}-test" / "lib" / f"python{DARWIN_MANAGED_PYTHON}" / "os.py"
             external = store / "source-stdlib" / "os.py"
             external.parent.mkdir(parents=True)
             external.write_text("# shared stdlib\n", encoding="utf-8")
@@ -136,11 +142,11 @@ class DarwinSharedStoreTests(unittest.TestCase):
             try:
                 stdlib.symlink_to(os.path.relpath(external, stdlib.parent))
                 (store / "base" / "cpython-3.12-macos-alias").symlink_to(
-                    store / "base.partial" / "cpython-3.12-test", target_is_directory=True)
+                    store / "base.partial" / f"cpython-{DARWIN_MANAGED_PYTHON}-test", target_is_directory=True)
             except (OSError, NotImplementedError) as error:
                 self.skipTest(f"Symbolic links unavailable: {error}")
             runtime = SharedPythonRuntime(root / "checkout", darwin_store=store)
-            runtime._ensure_uv = lambda: "uv"
+            runtime._uv = lambda: "uv"
 
             def run(argv):
                 if "venv" in [str(arg) for arg in argv]:
@@ -150,7 +156,7 @@ class DarwinSharedStoreTests(unittest.TestCase):
 
             runtime._run = run
             runtime._ensure_darwin()
-            copied = runtime.base / "cpython-3.12-test" / "lib" / "python3.12" / "os.py"
+            copied = runtime.base / f"cpython-{DARWIN_MANAGED_PYTHON}-test" / "lib" / f"python{DARWIN_MANAGED_PYTHON}" / "os.py"
             self.assertTrue(copied.is_file())
             self.assertFalse(copied.is_symlink())
 

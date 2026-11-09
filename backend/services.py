@@ -6,7 +6,7 @@ import json
 import logging
 import math
 from collections.abc import Callable, Coroutine, Mapping
-from contextlib import asynccontextmanager, suppress
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -1116,7 +1116,10 @@ class ApplicationServices:
             )
             try:
                 await transaction.commit()
-                card = self.enrich_card(self.world.update_card(card_id, request))
+                with self.database.transaction(immediate=True):
+                    from backend.workspace_context import preserve_sessions_on_change
+                    preserve_sessions_on_change(self, current, updated)
+                    card = self.enrich_card(self.world.update_card(card_id, request))
             except BaseException as error:
                 rollback_error = await self._rollback_lifecycle(transaction, error)
                 if rollback_error is not None:
@@ -1184,12 +1187,11 @@ class ApplicationServices:
                 for _, transaction in prepared:
                     attempted.append(transaction)
                     await transaction.commit()
-                cards = [
-                    self.enrich_card(card)
-                    for card in self.world.update_cards(
-                        [item for item, _ in prepared]
-                    )
-                ]
+                with self.database.transaction(immediate=True):
+                    from backend.workspace_context import preserve_sessions_on_change
+                    for item, _ in prepared:
+                        preserve_sessions_on_change(self, previous_cards[item.node_id], self.world.preview_update_card(item.node_id, item.patch))
+                    cards = [self.enrich_card(card) for card in self.world.update_cards([item for item, _ in prepared])]
             except BaseException as error:
                 for transaction in reversed(attempted):
                     rollback_error = await self._rollback_lifecycle(transaction, error)
@@ -1221,7 +1223,7 @@ class ApplicationServices:
 
     async def delete_cards(self, card_ids: list[str], *, expected_revisions: dict[str, int] | None = None) -> list[Card]:
         finish_committed_delete: Coroutine[Any, Any, None]
-        async with self._node_mutation():
+        async with self._node_mutation(), AsyncExitStack() as context_cleanup:
             ids = self.expand_card_deletions(card_ids)
             cards = [self.world.get_card(card_id) for card_id in ids]
             for card in cards:
@@ -1247,6 +1249,11 @@ class ApplicationServices:
             affected = {
                 edge.id: self._affected_agents(edge) for edge in attached_edges.values()
             }
+            session_ids = [session.id for card in cards
+                           if self.plugins.has_trait(card.type, "core.conversation")
+                           for session in self.conversations.list_sessions(card.id)]
+            if session_ids:
+                await context_cleanup.enter_async_context(self._require_run_manager().deleting_contexts(session_ids))
             context = self._node_lifecycle_context()
             transactions: list[NodeLifecycleTransaction] = []
             for card in cards:
@@ -1810,7 +1817,7 @@ class ApplicationServices:
         if current.parent_id == updated.parent_id or not self.plugins.has_trait(current.type, "core.agent"):
             return
         if self.run_manager is not None and any(
-            run.status not in TERMINAL_RUN_STATUSES for run in self.run_manager.list_runs(agent_id=current.id)
+            run.status not in TERMINAL_RUN_STATUSES for run in self.run_manager.store.current(agent_id=current.id, summary=True)
         ):
             raise ConflictError("Stop the Agent's active Runs before changing container membership")
 
@@ -2189,14 +2196,28 @@ class ApplicationServices:
                     from backend.legions.runtime import LegionStateWrite, write_shared_state
                     write_shared_state(self.world, self.state, node_ids[node.key],
                                        LegionStateWrite(value=node.initial_shared_state, expected_revision=0))
-            for node in scoped_document_seeds:
+            def seed_scoped_document(node):
                 from backend.node_documents import read_document, write_document
                 new_id = node_ids[node.key]
                 spec = self.plugins.node_type(node.type).document
                 kind = self.world.get_card(new_id).state_scope
-                identity = (kind, self.card_state.default_session(new_id) if kind == "session" else "*")
+                session = self.card_state.default_session(new_id)
+                state_policy = self.plugins.node_type(node.type).state
+                if getattr(state_policy, 'follow_workspace', False):
+                    from backend.workspace_context import resolve_workspace
+                    workspace = resolve_workspace(self, new_id, session_id=session)
+                    identity = workspace['scope_type'], workspace['scope_id']
+                elif kind == 'group':
+                    with self.database.locked() as db:
+                        row = db.execute('SELECT group_id FROM conversation_sessions WHERE id=?', (session,)).fetchone()
+                    identity = kind, row['group_id'] if row else session
+                else:
+                    identity = kind, session if kind == 'session' else '*'
                 revision = read_document(self, new_id, state_identity=identity)["revision"]
                 write_document(self, new_id, spec.remap_references(node.initial_document, node_ids), revision, state_identity=identity)
+            for node in scoped_document_seeds:
+                if not getattr(self.plugins.node_type(node.type).state, 'follow_workspace', False):
+                    seed_scoped_document(node)
             from backend.plugin_defaults import restore_metadata, ensure_equipment, adopt_equipment
             with self.events.committed_batch(), self.database.transaction(immediate=True):
                 for node in template_nodes:
@@ -2226,6 +2247,9 @@ class ApplicationServices:
                     target=external.id if binding["internal_is_source"] else internal,
                     relationship=binding["relationship"], direction=binding["direction"],
                 ), _publish_event=False))
+            for node in scoped_document_seeds:
+                if getattr(self.plugins.node_type(node.type).state, 'follow_workspace', False):
+                    seed_scoped_document(node)
         except BaseException as error:
             cleanup_errors = await self._compensate_legion_instance(
                 created_nodes, created_edges, creation_receipts, error
@@ -2537,10 +2561,17 @@ class ApplicationServices:
     async def run_agent(
         self, agent_id: str, prompt: str, *, context_id: str | None = None,
         fresh_context: bool = False, idempotency_key: str | None = None,
+        task_id: str | None = None, parent_run_id: str | None = None, detached: bool = False,
     ) -> dict[str, Any]:
         self._require_agent(agent_id)
+        from backend.card_state import active_state_session, DEFAULT_SESSION
+        from backend.workspace_context import session_context
+        if context_id is None and active_state_session.get() is not None:
+            selected = session_context(self, agent_id)['id']
+            context_id = selected if selected != DEFAULT_SESSION else None
         run = await self._require_run_manager().start_run(
             agent_id, prompt, context_id=context_id, fresh_context=fresh_context, idempotency_key=idempotency_key,
+            task_id=task_id, parent_run_id=parent_run_id, detached=detached,
         )
         return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
@@ -2550,10 +2581,14 @@ class ApplicationServices:
         fresh_context: bool = False, idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         self._require_agent(agent_id)
+        from backend.card_state import active_state_session
+        from backend.workspace_context import session_context
+        session_id = (session_context(self, agent_id)['id'] if active_state_session.get() is not None
+                      else self.card_state.session_id(agent_id))
         run = await self._require_run_manager().submit_run(
             agent_id, prompt, task_id=task_id, parent_run_id=parent_run_id,
             detached=detached, fresh_context=fresh_context, idempotency_key=idempotency_key,
-            state_session_id=self.card_state.session_id(agent_id),
+            state_session_id=session_id,
         )
         return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
@@ -2716,12 +2751,15 @@ class ApplicationServices:
     async def delete_conversation_group(self, conversation_id: str, group_id: str) -> None:
         async with self._node_mutation():
             self._require_card_type(conversation_id, CardType.CONVERSATION)
-            for session in self.conversations.list_sessions(conversation_id):
-                if session.group_id == group_id:
-                    self.node_execution.assert_session_idle(session.id)
-            session_ids = self.conversations.delete_group(conversation_id, group_id)
-            for session_id in session_ids:
-                self.state.delete_scope("session", session_id)
+            sessions = [session for session in self.conversations.list_sessions(conversation_id) if session.group_id == group_id]
+            for session in sessions:
+                self.node_execution.assert_session_idle(session.id)
+            if any(session.is_default for session in sessions):
+                raise ConversationValidationError("the group containing the default General session cannot be deleted")
+            async with self._require_run_manager().deleting_contexts([session.id for session in sessions]):
+                session_ids = self.conversations.delete_group(conversation_id, group_id)
+                for session_id in session_ids:
+                    self.state.delete_scope("session", session_id)
         for session_id in session_ids:
             await self.events.publish(EventType.CONVERSATION_SESSION_DELETED, node_id=conversation_id,
                                       conversation_id=conversation_id, session_id=session_id,
@@ -2736,8 +2774,9 @@ class ApplicationServices:
             if session.is_default:
                 raise ConversationValidationError("the default General session cannot be deleted")
             self.node_execution.assert_session_idle(session_id)
-            self.conversations.delete_session(conversation_id, session_id)
-            self.state.delete_scope("session", session_id)
+            async with self._require_run_manager().deleting_contexts([session_id]):
+                self.conversations.delete_session(conversation_id, session_id)
+                self.state.delete_scope("session", session_id)
         await self.events.publish(
             EventType.CONVERSATION_SESSION_DELETED,
             node_id=conversation_id,
@@ -2766,6 +2805,13 @@ class ApplicationServices:
             self._require_session_participant(session, agent_id)
             self._require_conversation_connection(agent_id, conversation_id)
 
+        if request.continuation_run_id is not None:
+            from backend.conversations.continuation import require_source, original_task
+            source = require_source(self, str(request.continuation_run_id), conversation_id, session_id)
+            original_task(self, source.run_id, conversation_id, session_id)
+            if mentions != [source.agent_id]:
+                raise ConversationValidationError("Continue with the original Agent only")
+
         # Persistence is deliberately independent from Run admission. A busy
         # Agent must never make the user's message disappear or fail to send.
         message = self.conversations.add_message(
@@ -2779,6 +2825,7 @@ class ApplicationServices:
             mention_agent_ids=mentions,
             attachments=attachments,
             delivery_agent_ids=mentions,
+            continuation_run_id=str(request.continuation_run_id) if request.continuation_run_id else None,
         )
         await self._publish_conversation_message(message)
 
@@ -2806,11 +2853,18 @@ class ApplicationServices:
     def _conversation_delivery_task(self, message_ids: list[str]) -> str:
         messages = [self.conversations.get_message(message_id) for message_id in message_ids]
         if len(messages) == 1:
-            latest = messages[0].content
+            message = messages[0]
+            if message.continuation_run_id:
+                from backend.conversations.continuation import original_task
+                return original_task(self, message.continuation_run_id, message.conversation_id, message.session_id)
+            latest = message.content
         else:
             chunks = []
             for index, message in enumerate(messages, start=1):
                 text = message.content
+                if message.continuation_run_id:
+                    from backend.conversations.continuation import original_task
+                    text = original_task(self, message.continuation_run_id, message.conversation_id, message.session_id) + "\nContinuation request: " + text
                 for attachment in message.attachments:
                     text += (
                         f"\n[Attachment: {attachment.name}; version_id={attachment.version_id}; "
@@ -2843,11 +2897,11 @@ class ApplicationServices:
                 # at a model boundary; unsupported providers retain the queue.
                 if any((run.status not in TERMINAL_RUN_STATUSES or manager.execution_in_progress(run.run_id))
                        and manager._conversation_scope(run) == (conversation_id, session_id)
-                       for run in manager.list_runs(agent_id=agent_id)):
+                       for run in manager.store.current(agent_id=agent_id, summary=True)):
                     raise RuntimeUnavailableError('Conversation session is already running')
                 manager.assert_can_start(agent_id)
             except RuntimeUnavailableError:
-                runs = manager.list_runs(agent_id=agent_id)
+                runs = manager.store.current(agent_id=agent_id, summary=True)
                 active = [
                     run for run in runs
                     if run.status not in TERMINAL_RUN_STATUSES or manager.execution_in_progress(run.run_id)
@@ -2890,10 +2944,14 @@ class ApplicationServices:
             )
             if not claimed:
                 return
-            prompt = self._conversation_delivery_prompt(
-                conversation_id, session, agent_id, claimed, max_sequence
-            )
             try:
+                prompt = self._conversation_delivery_prompt(
+                    conversation_id, session, agent_id, claimed, max_sequence
+                )
+                from backend.conversations.continuation import recovery_context
+                continuation = await recovery_context(self, claimed, agent_id)
+                if continuation.text:
+                    prompt += "\n\n" + continuation.text
                 run = await manager.start_run(
                     agent_id,
                     prompt,
@@ -2905,6 +2963,7 @@ class ApplicationServices:
                     initial_lifecycle={
                         "delivery_message_ids": claimed,
                         "conversation_max_sequence": max_sequence,
+                        "continuation_run_id": continuation.source_run_id,
                     },
                 )
             except Exception:
@@ -3202,6 +3261,7 @@ class ApplicationServices:
         environment_id: str | None = None,
         target_id: str | None = None,
         python_environment: str = "auto",
+        _working_directory: str | None = None,
     ) -> CommandResult:
         from backend.sandbox.execution import execute_sandbox
 
@@ -3209,7 +3269,7 @@ class ApplicationServices:
             self, sandbox_id, argv, command=command, timeout_seconds=timeout_seconds,
             agent_id=agent_id, skill_request=_skill_request, background_job_id=_background_job_id,
             keep_on_disconnect=_keep_on_disconnect, operation_id=_operation_id,
-            environment_id=environment_id, target_id=target_id, python_environment=python_environment,
+            environment_id=environment_id, target_id=target_id, python_environment=python_environment, working_directory=_working_directory,
         )
 
     async def _refresh_sandbox_write_mounts(
@@ -3264,7 +3324,17 @@ class ApplicationServices:
         await self.ensure_sandbox_running(sandbox_id, agent_id=agent_id)
         if agent_id is not None:
             self.capabilities.require_sandbox_execute(agent_id, sandbox_id)
-        return await backend.install_python_packages(sandbox_id, requirements)
+        result = await backend.install_python_packages(sandbox_id, requirements)
+        # Reconcile the same durable Pack bootstrap receipts after a successful
+        # explicit retry. Its existing resolver reuses installed packages.
+        self.plugin_bootstrap.enqueue()
+        await asyncio.shield(self.plugin_bootstrap.task)
+        status = await backend.python_status(sandbox_id)
+        if isinstance(status, dict) and not status.get('dependencies', {}).get('ready', True):
+            from backend.sandbox.models import SandboxPreparationError
+            raise SandboxPreparationError(status['dependencies'].get('error') or 'Shared Pack preparation is incomplete')
+        from backend.capabilities.provider import _python_environment_summary
+        return {**result, 'python_environment': _python_environment_summary(status)}
 
     async def publish_sandbox_event(self, event: SandboxEvent) -> None:
         # Service receipts own admission/completion; native events may arrive
@@ -3299,7 +3369,7 @@ class ApplicationServices:
         if command_id:
             payload["command_id"] = command_id
         if current:
-            payload.update(caller=current["caller"], run_id=current.get("run_id"))
+            payload.update(caller=current["caller"], run_id=current.get("run_id"), working_directory=current.get('working_directory', ''))
         active = [dict(item) for item in self._sandbox_commands.values() if item["sandbox_id"] == event.sandbox_id]
         payload["active_commands"] = [{key: item.get(key) for key in ("id", "caller", "run_id", "argv", "started_at")}
             for item in active if item["state"] == "running" and not (event.type == SandboxEventType.COMMAND_FINISHED and item["id"] == command_id)]
@@ -4082,6 +4152,7 @@ def create_services(
         services.sandbox_backend if isinstance(services.sandbox_backend, SandboxManager) else None)
     if isinstance(services.sandbox_backend, SandboxManager):
         services.sandbox_backend.pack_requirements = services.plugin_bootstrap.requirements
+        services.sandbox_backend.pack_python_status = services.plugin_bootstrap.status
     from backend.packs.installation import PackInstallationManager
     services.pack_installations = PackInstallationManager(settings.data_root, plugin_registry)
     with startup_stage("reconcile Pack resources"):

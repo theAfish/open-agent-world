@@ -9,6 +9,7 @@ runtime-resources = [
     "src/oaw_xrd/history.py",
     "src/oaw_xrd/install_engine_runtime.py",
     "src/oaw_xrd/library.py",
+    "src/oaw_xrd/managed_library.py",
     "src/oaw_xrd/matching.py",
     "src/oaw_xrd/multiphase_components.py",
     "src/oaw_xrd/multiphase_decision.py",
@@ -19,6 +20,7 @@ runtime-resources = [
     "src/oaw_xrd/multiphase_structures.py",
     "src/oaw_xrd/multiphase_worker.py",
     "src/oaw_xrd/multiphase_wpem.py",
+    "src/oaw_xrd/pattern_import.py",
     "src/oaw_xrd/OAW_XRDfit/__init__.py",
     "src/oaw_xrd/OAW_XRDfit/demo/intensity.csv",
     "src/oaw_xrd/OAW_XRDfit/demo/Mn2O3.cif",
@@ -112,6 +114,7 @@ runtime-resources = [
     "src/oaw_xrd/qualx.py",
     "src/oaw_xrd/refinement.py",
     "src/oaw_xrd/results_context.py",
+    "src/oaw_xrd/run_control.py",
     "src/oaw_xrd/runtime.py",
     "src/oaw_xrd/runtime_environment.py",
     "src/oaw_xrd/sql_history.py",
@@ -124,7 +127,7 @@ runtime-resources = [
 ]
 
 [compatibility]
-plugin_api = "1.41"
+plugin_api = "1.51"
 oaw = ">=0.1.0"
 
 [distribution]

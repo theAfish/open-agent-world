@@ -7,6 +7,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+from typing import Literal
 
 from starlette.responses import JSONResponse
 
@@ -47,6 +48,9 @@ def approved_plugins(data_root: Path | None = None, *, pack_settings=None):
     class CloudSandboxConfig(SandboxConfig):
         # Apply the provider default to every Sandbox, regardless of its Pack.
         command_timeout: float = Field(default=60, gt=0, le=36000)
+        # The dedicated VM/Volume isolates users. This adapter does not yet
+        # enforce read-only sibling directories within a single user's VM.
+        workspace_scope: Literal['shared'] = 'shared'
 
     registry = load_plugin_registry(data_root=data_root, load_installed=False,
         load_entry_points=False, load_unenrolled_sources=True,

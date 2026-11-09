@@ -153,7 +153,13 @@ class ArtifactStore:
         self.authorize(services, collection_id, agent_id, 'artifact.publish')
         if not request.finalized:
             raise ResourceValidationError('Publishing requires explicitly finalized inputs; pause all external writers first')
-        canonical = json.dumps({'collection_id': collection_id, **request.model_dump()}, sort_keys=True)
+        from backend.sandbox.task_workspace import binding, path_for
+        directory = binding(services, request.sandbox_id, agent_id)["directory"]
+        if any(not path for path in request.paths):
+            raise ResourceValidationError('Select explicit files or directories within the workspace, not its root')
+        source_paths = [path_for(directory, path) for path in request.paths]
+        scope = {'workspace_directory': directory} if directory else {}
+        canonical = json.dumps({'collection_id': collection_id, **request.model_dump(), **scope}, sort_keys=True)
         fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
         owner = agent_id or 'user'
         async with self._lock, services._node_mutation():
@@ -196,6 +202,8 @@ class ArtifactStore:
                     'run_id': context.run_id if context else None, 'sandbox_id': source.id, 'sandbox_name': source.name,
                     'selected_paths': request.paths, 'finalized_inputs': True, 'inputs': inputs, 'session_id': session_id},
                 'error': None}
+            if directory:
+                record['provenance']['workspace_directory'] = directory
             self.check_source(services, request.sandbox_id, agent_id)
             self.reserve_source(services, request.sandbox_id, agent_id)
             try:
@@ -210,7 +218,7 @@ class ArtifactStore:
         try:
             async with self.workspace(services, request.sandbox_id, agent_id, reserved=True):
                 backend = services._require_sandbox_backend()
-                manifest = await backend.file_operation(request.sandbox_id, 'capture_manifest', paths=request.paths)
+                manifest = await backend.file_operation(request.sandbox_id, 'capture_manifest', paths=source_paths)
                 if any(item['size'] > MAX_FILE_BYTES for item in manifest):
                     raise ResourceValidationError('File exceeds the 512 MiB transfer limit')
                 size = sum(item['size'] for item in manifest)
@@ -226,11 +234,12 @@ class ArtifactStore:
                 await run_file_operation(staging.mkdir)
                 captured = []
                 for entry in manifest:
-                    target = staging.joinpath(*parts(entry['path']))
+                    relative = entry['path'][len(directory) + 1:] if directory else entry['path']
+                    target = staging.joinpath(*parts(relative))
                     await run_file_operation(target.parent.mkdir, parents=True, exist_ok=True)
                     if entry['directory']:
                         await run_file_operation(target.mkdir, exist_ok=True)
-                        captured.append({'path': entry['path'], 'directory': True, 'size': 0})
+                        captured.append({'path': relative, 'directory': True, 'size': 0})
                         continue
                     digest = hashlib.sha256()
                     with target.open('xb') as output:
@@ -252,8 +261,8 @@ class ArtifactStore:
                                 break
                         await run_file_operation(output.flush)
                         await run_file_operation(os.fsync, output.fileno())
-                    captured.append({'path': entry['path'], 'directory': False, 'size': offset, 'sha256': digest.hexdigest()})
-                if await backend.file_operation(request.sandbox_id, 'capture_manifest', paths=request.paths) != manifest:
+                    captured.append({'path': relative, 'directory': False, 'size': offset, 'sha256': digest.hexdigest()})
+                if await backend.file_operation(request.sandbox_id, 'capture_manifest', paths=source_paths) != manifest:
                     raise ResourceValidationError('Selected inputs changed during publication; no consistent bundle was published')
                 record['manifest'] = captured
                 record['content_sha256'] = hashlib.sha256(json.dumps(captured, sort_keys=True).encode()).hexdigest()
@@ -516,11 +525,16 @@ class ArtifactStore:
     async def materialize(self, services, collection_id, version_id, request, agent_id=None):
         async with self.consume(services, collection_id, version_id, agent_id) as record, self.workspace(services, request.sandbox_id, agent_id):
             backend = services._require_sandbox_backend()
-            prefix = '/'.join(parts(request.destination))
+            from backend.sandbox.task_workspace import ensure_directory, path_for
+            workspace = await ensure_directory(services, request.sandbox_id, agent_id)
+            prefix = path_for(workspace['directory'], request.destination)
             if not prefix:
                 raise ResourceValidationError('Choose a new destination directory')
+            components = parts(prefix)
+            if len(components) > 1:
+                await backend.file_operation(request.sandbox_id, 'mkdir', path='/'.join(components[:-1]))
             await backend.file_operation(request.sandbox_id, 'transfer_mkdir', path=prefix)
-            directories = {prefix}
+            directories = {'/'.join(components[:length]) for length in range(1, len(components) + 1)}
             for entry in record['manifest']:
                 target = prefix + '/' + entry['path']
                 parent_parts = parts(target) if entry['directory'] else parts(target)[:-1]
@@ -547,5 +561,5 @@ class ArtifactStore:
                     raise ResourceValidationError('Artifact integrity verification failed; destination is incomplete')
             self.authorize(services, collection_id, agent_id, version_id=version_id)
             self.check_source(services, request.sandbox_id, agent_id)
-            return {'version_id': version_id, 'destination': prefix, 'state': 'copied',
+            return {'version_id': version_id, 'destination': request.destination, 'workspace_destination': prefix, 'state': 'copied',
                     'note': 'Mutable working copy; publish a new version after editing. Revocation does not erase existing copies.'}

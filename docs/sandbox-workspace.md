@@ -8,7 +8,7 @@ Open the Sandbox inspector, select a runtime, and save its configuration before 
 
 Writes change real files immediately. Deleting a Sandbox removes its owned storage and permissions, never the selected external folder. Stop before changing the working folder. The runtime is pinned on first start; use a new card to change runtime after that point. Host folder bindings are excluded from Legion templates.
 
-Automatic discovery prefers a usable existing WSL2 distribution on Windows, otherwise native Windows. Native Linux uses its own kernel. Linux/WSL needs Bubblewrap, libseccomp, Python 3.10+ for the trusted worker, and a systemd user manager with cgroup-v2 memory/process limits; the application backend needs Python 3.11+. No Docker or VM image is required. macOS offers two runtimes: **Container VM** (preferred when available; macOS 26+ on Apple Silicon with Apple `container` 0.6.0+) runs each command in its own lightweight Linux VM, while **Seatbelt** is a zero-install native fallback on macOS 13+. Container VM defaults to an offline network and enforces a read-only root filesystem, memory budget and per-command process budget; its opt-in public-IPv4 mode requires a separately prepared firewall-equipped image. Seatbelt uses a deny-default `sandbox-exec` profile and a backend-liveness watchdog, but macOS has no safe native equivalent to cgroup/Job Object whole-tree memory and process limits; changing those two defaults is therefore rejected with guidance to select Container VM. Seatbelt does not depend on a system `/usr/bin/python3`: on first Python use, the trusted backend bootstraps a private `uv` when needed, installs an OAW-managed CPython 3.12, and exposes its base runtime and shared environment read-only to sandboxed commands. Container VM separately creates its Python 3.12 environment inside Linux, so Darwin wheels are never reused in the VM.
+Automatic discovery prefers a usable existing WSL2 distribution on Windows, otherwise native Windows. Native Linux uses its own kernel. Linux/WSL needs Bubblewrap, libseccomp, Python 3.10+ for the trusted worker, and a systemd user manager with cgroup-v2 memory/process limits; the application backend needs Python 3.11+. No Docker or VM image is required. macOS offers two runtimes: **Container VM** (preferred when available; macOS 26+ on Apple Silicon with Apple `container` 0.6.0+) runs each command in its own lightweight Linux VM, while **Seatbelt** is a zero-install native fallback on macOS 13+. Container VM defaults to an offline network and enforces a read-only root filesystem, memory budget and per-command process budget; its opt-in public-IPv4 mode requires a separately prepared firewall-equipped image. Seatbelt uses a deny-default `sandbox-exec` profile and a backend-liveness watchdog, but macOS has no safe native equivalent to cgroup/Job Object whole-tree memory and process limits; changing those two defaults is therefore rejected with guidance to select Container VM. Seatbelt does not depend on a system `/usr/bin/python3`: the trusted backend copies its base Python interpreter, standard library and required native libraries, then creates a separate managed environment without inheriting backend third-party packages. It exposes the prepared base and shared environment read-only to sandboxed commands. Like Windows AppContainer, Seatbelt uses this managed Python for all commands and rejects `python_environment=none`. Pack dependencies use the existing shared bootstrap or private managed profile according to their declarations; see [Shared sandbox Python](shared-python-runtime.md). Container VM separately creates its Python 3.12 environment inside Linux, so Darwin wheels are never reused in the VM.
 
 Discovery reports missing prerequisites. Use **Refresh** after fixing them. Missing isolation never falls back to a normal host subprocess. Networking has [separate prerequisites](sandbox-networking.md).
 
@@ -32,6 +32,96 @@ New, copied and summoned Sandboxes are ready on demand: commands, managed Python
 
 Agent-to-Sandbox connections offer **Execute** (the default) or **Execute + Start/Stop**. Both grant the existing command and inspection tools; the latter also grants `start_sandbox` and `stop_sandbox`. Start uses saved configuration, and stop terminates active commands through the same cleanup lifecycle as the UI, affecting all agents sharing the Sandbox. Downgrading or removing the connection revokes lifecycle access immediately. Existing Execute connections retain their permissions: automatic startup by an Agent still requires its Start grant, while execute-only Agents can use an already running Sandbox.
 
+## Workspace organization
+
+**Sandbox Settings → Workspace sharing** offers three modes. **Session** is the
+default. Group means a native Conversation group, resolved from the selected
+session rather than supplied by a plugin.
+
+| Mode | Writable location for newly assigned sessions | Other workspace files |
+| --- | --- | --- |
+| Global shared | The Sandbox's `workspace/` root, with no partition | Read/write |
+| Session | `workspace/<session name>/` | Read-only |
+| Group | `workspace/<group name>/`, shared by sessions in that group | Read-only |
+
+Folder names come from session/group titles, never the prompt. Unsafe characters
+are normalized; duplicate names and collisions with existing files gain a short
+identity suffix. An existing unowned folder is never adopted or overwritten.
+Creating/selecting a session or opening a workspace view does not create a
+folder. Before its first execution or write, the proposed folder name follows
+the current session/group title. The first use claims the physical directory;
+later renaming updates the displayed label without moving that directory.
+Standalone
+execution uses the implicit default session. A configured read-only external
+workspace remains an input root with no writable partition.
+
+The host resolves Conversation sources through native Agent capabilities:
+`Conversation → Agent → Sandbox`. A direct Conversation/Sandbox edge is not
+required. A Run uses its own session and explicit Sandbox target, regardless of
+the browser's current Conversation. A disconnected Sandbox uses its independent
+default workspace; it never adopts an unrelated visible or sole Conversation.
+Each Sandbox stores its own session/group bindings, so two Sandboxes can serve
+the same session independently.
+
+Browsing uses a selected session only from a connected Conversation. If several
+connected Conversations exist and none is selected, Total workspace remains
+readable, Current session and command submission wait for an explicit selection,
+and no speculative session binding is created. Select the session with the native
+Conversation controls. A result viewer with multiple Sandbox sources requires
+one explicit file-preview source, even when their organization modes match.
+
+Changes apply only to new sessions. Existing sessions in related Conversations
+keep their recorded organization and document scope, including unused sessions.
+Already allocated directories stay fixed; an unused folder proposal can still
+follow a renamed title before first use.
+Related means the current native graph or prior Run/command evidence for this
+Sandbox. Unrelated Conversations are not preassigned; connecting one later uses
+the then-current organization policy. The
+binding is host-owned metadata in the existing StateStore; Run lifecycle records
+retain the concrete execution binding. Same-session continuations keep it;
+starting in a different session resolves that session's own binding. Old root,
+task and ID-named directories remain available without moving or merging files.
+Changing organization does not restart the runtime or prepare another Python
+environment.
+
+Commands, Skills, file tools, plugin staging/imports and Artifact materialization
+use the same assigned directory. The host sets process cwd; `cd` does not persist.
+`inspect_sandbox` reports both that directory and the full root. Receipts retain
+`working_directory`. Read-only tools default to `scope="workspace"` for the current
+directory; `scope="all"` reads the full root and `scope="shared"` reads explicit
+inputs under root `shared/`. Relative write paths omit the assigned folder prefix.
+The old `scope="task"` spelling remains accepted for compatibility only.
+
+The write boundary is enforced by the native runtime as well as file mutation
+APIs, not just by cwd or file-tree filtering. Linux/WSL and Container VM expose a
+read-only workspace root with the owned subtree writable; Seatbelt grants writes
+only to that subtree; Windows applies the corresponding ACLs under exclusive
+command admission and restores configured access afterward. Writable attachment
+aliases cannot reopen another workspace directory. Unsupported runtimes reject
+restricted execution instead of silently running with broader access.
+
+**View workspace** has exactly two entries, in this order: **Total workspace**,
+then **Current session**. Total shows the entire tree and command history,
+including old directories; Current session shows the session's saved directory
+and its receipts (the shared group directory in group mode). The total browser
+is read-only for session/group bindings; edit through Current session. Manual
+terminal cwd follows the selected view, while command write authority always
+remains the current session's. Global shared bindings use the same root in both
+views. Switching views never reassigns a session or changes a running Run.
+
+File selections, previews and terminal drafts restore separately per view.
+Workspace-following documents and their drafts use the same saved shared,
+session or group identity; Atom Structure opts into this native policy. Other
+plugins retain their declared persistence policy. Stale responses cannot replace
+the current preview. Resolving a ready workspace creates only its assigned
+directory, with no Python/package preparation.
+
+Python/Pack environments, caches and HOME retain their existing sharing behavior.
+Workspace permissions do not create separate interpreters, file versioning or
+task identity. Same-directory access does not prove file authorship or that Runs
+belong to one task. Existing leases and platform concurrency limits still apply;
+history and model/tool logs stay in native Run storage.
+
 ## Configuration and authority
 
 Both global Sandbox settings and Sandbox-local environment settings use the same variable editor and private binding pipeline. Choose **Path** (file or folder), enter a host path or use Browse to choose a file or folder, and select **Read only** (default) or **Read and write**. The editor checks paths in the background and reports errors. Preview does not grant access; saving independently detects and validates the current type, then records it in the private binding. Read-only permits reading, `cat`, model loading and copying into a writable working folder; the copy can be modified independently, but the source cannot. Folder read/write allows creating, changing and deleting files inside that directory. Single-file read/write allows changing its contents; rename, deletion and atomic replacement require the containing folder's authority. A file selection never grants access to its siblings. Saving grants use to commands covered by that environment; a global resource is shared with all Sandboxes unless overridden. Changes apply to subsequent commands, while running commands keep their captured access.
@@ -45,6 +135,17 @@ Paths, resource types and permissions remain private host bindings. Documents an
 On native Windows, some `cmd.exe` commands probe parent directories (`type` does this for a single-file selection) and can report access denied even when direct file APIs work. Use direct file APIs, such as Python `open`/`shutil.copyfile`, or shell input redirection for a selected file. Path variables do not grant access to drive roots or parent directories. Linux/WSL `cat` and `cp` work directly on the injected paths.
 
 Sandbox-local variables use the existing `EnvironmentProfile` document model, editor and private credential bindings, scoped directly to the Sandbox node. No hidden Environment cards are created. Under Settings → Environment variables, choose Value or Secret, enter the value, and save. Secret references and encrypted bindings are managed automatically in the same save. Configured secrets stay unchanged when their input is blank. Secret input is local to the mounted editor and is cleared on reload or closing it; ordinary drafts still follow the Sandbox across surfaces.
+
+Global, profile and Sandbox-local variables accept these explicit installer names:
+`UV_DEFAULT_INDEX`, `UV_INDEX_URL`, `PIP_INDEX_URL`, `UV_HTTP_TIMEOUT`,
+`UV_REQUEST_TIMEOUT`, `PIP_TIMEOUT`, `PIP_DEFAULT_TIMEOUT`,
+`UV_HTTP_CONNECT_TIMEOUT`, `UV_HTTP_RETRIES`, `PIP_RETRIES`,
+`UV_CONCURRENT_DOWNLOADS`, `UV_CONCURRENT_INSTALLS`, and `UV_OFFLINE`.
+Enter literal values without shell quotes. Other reserved installer controls,
+such as interpreter selection and installation destinations, remain restricted.
+These names are passed as ordinary command environment values, without converting
+pip options into uv options. This does not configure OAW's separate shared-Python
+preparation process, which continues to use its existing environment handling.
 
 An `environment.default` connection points from an Environment Profile to a Sandbox. At most one default is allowed. It remains a live reference. The resolution order is:
 
@@ -100,7 +201,7 @@ The Skill panel distinguishes the selected document revision, available files, c
 
 Enable public outbound networking using **Stop → Save → Start**. Missing networking components are reported separately from offline runtime availability. Mount isolation, dropped capabilities, resource limits and deadlines remain enforced. No privileged host socket is mounted. The execution contract remains arbitrary executable/argv, independent of network protocol. See [network policies, prerequisites and native checks](sandbox-networking.md).
 
-**Check execution environment** runs through the selected Sandbox and reports working directory, configured access, configuration readiness, common tool availability/versions and network policy. **Test connectivity** probes a user-entered HTTP(S) destination with `curl` through that same Sandbox policy, without URL credentials or disabling certificate verification. It distinguishes setup failure, DNS failure, TLS verification failure, connection failure, HTTP authentication refusal and missing tools. Offline mode reports disabled without making a request. On macOS Seatbelt, this system-only diagnostic does not prepare managed Python. Diagnostics never install packages or modify system settings.
+**Check execution environment** runs through the selected Sandbox and reports working directory, configured access, configuration readiness, common tool availability/versions and network policy. **Test connectivity** probes a user-entered HTTP(S) destination with `curl` through that same Sandbox policy, without URL credentials or disabling certificate verification. It distinguishes setup failure, DNS failure, TLS verification failure, connection failure, HTTP authentication refusal and missing tools. Offline mode reports disabled without making a request. Diagnostics use the same runtime preparation as other commands. Windows AppContainer and macOS Seatbelt may prepare managed Python before a diagnostic; the diagnostic itself does not install packages or modify system settings.
 
 ## Console and recovery
 

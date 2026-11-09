@@ -85,6 +85,10 @@ def inspect_library(path):
 
 
 def validate_library(doc):
+    if doc.get('managed'):
+        validate_library(doc['managed'])
+        if not doc.get('path') and not doc.get('slots'):
+            return
     if doc.get('slots'):
         for mounted in doc['slots']:
             if mounted:
@@ -93,6 +97,8 @@ def validate_library(doc):
     path = Path(doc.get('path', ''))
     if not path.is_file():
         raise ValueError('参考谱库文件不存在，请在谱库卡片中配置本机 .sq 路径')
+    if doc.get('metadata', {}).get('managed'):
+        return
     stat = path.stat()
     if stat.st_size != doc.get('size_bytes') or stat.st_mtime_ns != doc.get('mtime_ns'):
         raise ValueError('谱库文件已变更，请重新点击「加载谱库」确认版本')
@@ -102,8 +108,11 @@ def expand_library_slots(inputs):
     result = []
     for item in inputs:
         slots = item['value'].get('slots')
-        if item['value']['kind'] == 'library' and slots:
-            for index, mounted in enumerate(slots):
+        managed = item['value'].get('managed')
+        if item['value']['kind'] == 'library' and (slots or managed):
+            if managed and managed.get('count'):
+                result.append({**item, 'node_id': f"{item['node_id']}:managed", 'value': managed})
+            for index, mounted in enumerate(slots or []):
                 if mounted:
                     result.append({**item, 'node_id':f"{item['node_id']}:slot{index+1}", 'value':mounted})
         else:
@@ -124,6 +133,8 @@ def iter_references(item, allowed=None, reference_ids=None):
                      if 'card_id_map' in tables else 'SELECT id,id,metadata_json FROM source_cards')
             sources = {str(row[0]): (row[1], json.loads(row[2])) for row in db.execute(query)}
             info = dict(db.execute('SELECT * FROM infodb LIMIT 1').fetchone() or {})
+            structured = ({str(r[0]) for r in db.execute('SELECT id FROM structures')}
+                          if 'structures' in tables else set())
         # Filter small metadata first: rejected entries must not load their large
         # peak arrays. Keep ID traversal order and the exact existing ranking.
         if reference_ids is None:
@@ -178,7 +189,7 @@ def iter_references(item, allowed=None, reference_ids=None):
                     'engine_reference_id': str(row['id']), 'library_node_id': item['node_id'],
                     'source': str(info.get('source') or 'User TXT cards'),
                     'reference_kind': source.get('reference_kind', 'card_export'),
-                    'structure_available': 'false'}
+                    'structure_available': 'true' if str(row['id']) in structured else 'false'}
             yield {'node_id': f"{item['node_id']}:{row['id']}", 'revision': item['revision'],
                 'value': {'filename': filename, 'metadata': metadata,
                     '_d': d, '_intensity': intensity}}

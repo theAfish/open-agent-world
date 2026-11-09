@@ -15,6 +15,7 @@ _EXPORTS = {
     "snapshot_request": ("backend.agents.request_recovery", "_snapshot"),
     "recoverable_model": ("backend.agents.request_recovery", "recoverable_model"),
     "RequestWindow": ("backend.agents.request_window", "RequestWindow"),
+    "signed_history": ("backend.agents.request_window", "signed_history"),
     "ContextCapabilities": ("backend.agents.request_window", "ContextCapabilities"),
     "ManagedContext": ("backend.agents.context", "ManagedContext"),
     "ContextBudget": ("backend.agents.context", "ContextBudget"),

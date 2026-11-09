@@ -1,4 +1,18 @@
-# Install Open Agent World
+# Open Agent World v0.7.1
+
+## What's new since v0.6.0
+
+- Redesigned Pack & Card Library with shared artwork, grouped cards, animated Pack previews, and clearer installation and restart feedback.
+- Workspace switching and publishing, scoped Sandbox sessions, and administrator-managed Pack installation for hosted workspaces.
+- CLI Harness execution providers with declared environments, resource validation, and reuse of OAW model connections.
+- New installable Office Skills and Time & Count Packs; improvements to Knowledge Base schema editing and scientific workflows in AtomSculptor and XRD.
+- Conversation attachments up to 512 MiB, streamed files in scoped execution workspaces, visible upload errors, and delivered files that remain available after an Agent completes.
+- More reliable interrupted-task recovery, hosted upgrades, managed scientific runtimes, and backend reconnection.
+- Keep the shared PDF engine on PyMuPDF 1.x, including prebuilt Intel macOS wheels.
+
+[Full changelog](https://github.com/theAfish/open-agent-world/compare/v0.6.0...v0.7.1)
+
+## Install Open Agent World
 
 ## Download
 

@@ -1,7 +1,7 @@
 ---
-name: surface-builder
+name: surface_builder
 description: Build a surface slab (Miller indices, layers, vacuum) from a bulk crystal, optionally first symmetrizing to the conventional cell.
-when_to_use: Use to construct an arbitrary (hkl) slab from a bulk structure. Read the `surface-creation` skill for picking Miller indices, layer count, and vacuum thickness; read `surface-defect-creation` / `surface-adsorption` for follow-on steps.
+when_to_use: Use to construct an arbitrary (hkl) slab from a bulk structure. Read the `surface_creation` skill for picking Miller indices, layer count, and vacuum thickness; read `surface_defect_creation` / `surface_adsorption` for follow-on steps.
 entry: scripts/surface_builder.py
 ---
 
@@ -22,5 +22,10 @@ python3 scripts/surface_builder.py build_surface \
 ```
 
 `need_conventional=true` runs `pymatgen.symmetry.analyzer.SpacegroupAnalyzer`
-first to produce the conventional standard cell — strongly recommended for
-anything coming out of Materials Project (often primitive).
+first to produce the conventional standard cell. The surface is then built by
+`ase.build.surface`, which expects a conventional input cell; if conversion is
+disabled, verify that the supplied cell already has the intended setting.
+`layers` means ASE equivalent layers, not a count of individual atomic planes.
+`vacuum=15.0` adds approximately 15 Å on each side of the slab, rather than
+15 Å total. Choose layer count and vacuum for the requested model and convergence
+requirements; the example is not a universal DFT prescription.

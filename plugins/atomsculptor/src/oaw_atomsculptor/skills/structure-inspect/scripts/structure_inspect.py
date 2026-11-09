@@ -12,7 +12,7 @@ from ase.neighborlist import neighbor_list
 
 from oaw_runtime import build_cli_parser, run_cli
 from oaw_runtime import display_path, resolve_output_path, workspace_root
-from structure_validation import measure_structure, measure_nanotube
+from structure_validation import DistanceMode, measure_structure, measure_nanotube
 
 _LARGE_CIF_SIZE_BYTES = 1_000_000
 
@@ -166,7 +166,7 @@ def validate_structure(folder: str, file_name: str, expected_count: int | None =
                        nearest_neighbor_min: float | None = None,
                        nearest_neighbor_max: float | None = None,
                        connectivity_cutoff: float | None = None, require_connected: bool = False,
-                       region_checks_file: str | None = None, distance_mode: str = "auto") -> dict:
+                       region_checks_file: str | None = None, distance_mode: DistanceMode = "auto") -> dict:
     """Independently inspect geometry with distances matching the file's PBC."""
     rules = None
     if region_checks_file is not None:

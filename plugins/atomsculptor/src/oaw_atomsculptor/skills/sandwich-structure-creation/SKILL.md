@@ -1,5 +1,5 @@
 ---
-name: sandwich-structure-creation
+name: sandwich_structure_creation
 description: Recipe for sandwich and multi-layer vdW heterostructures (e.g. metal | molecule | oxide, graphene/MoS2/GaAs).
 when_to_use: Use when stacking three or more layers, inserting a molecule between two substrates, or building vdW heterostructures.
 ---
@@ -8,7 +8,7 @@ when_to_use: Use when stacking three or more layers, inserting a molecule betwee
 
 This is guidance, not a bundled sandwich-builder script. Use only connected
 OAW Skills and a separately authorized Sandbox. The ZSL interface procedure
-below refers to the `interface-builder` Skill script invoked through
+below refers to the `interface_builder` Skill script invoked through
 `run_skill_script`, not a standalone `build_interface` Agent tool. When a
 required construction step has no packaged script, use user-permitted Sandbox
 code and verify its output; do not claim that a missing tool ran. Save the
@@ -28,7 +28,7 @@ the open Atom Structure should be replaced.
    - Create molecule using SMILES or other method with geometry optimization
 
 3. **Build lattice-matched interface**
-   - If appropriate, use the connected `interface-builder` Skill's ZSL script
+   - If appropriate, use the connected `interface_builder` Skill's ZSL script
    - Set gap parameter to accommodate molecule plus margins
    - Example: 15 Å gap for 4.5 Å thick molecule
 
@@ -79,6 +79,7 @@ For creating multi-layer van der Waals heterostructures (e.g., graphene/MoS2/GaA
 ### ASE Functions for 2D Materials
 ```python
 from ase.build import graphene, mx2, surface
+from ase.io import read
 
 # Graphene - perfect hexagonal rings
 gr = graphene(vacuum=10.0)  # Add vacuum for 2D
@@ -86,8 +87,9 @@ gr = graphene(vacuum=10.0)  # Add vacuum for 2D
 # MoS2 2H phase - proper S-Mo-S trilayer
 mos2 = mx2('MoS2', vacuum=10.0)
 
-# Thin surface slab
-gaas = surface('GaAs', (0,0,1), 4, vacuum=10.0)
+# Requires an existing bulk input with the intended cell setting and lattice.
+gaas_bulk = read('GaAs_bulk.extxyz')
+gaas = surface(gaas_bulk, (0,0,1), 4, vacuum=10.0)
 ```
 
 ## Key Considerations
@@ -105,7 +107,7 @@ gaas = surface('GaAs', (0,0,1), 4, vacuum=10.0)
 
 ### Lattice Matching
 - Critical for creating defect-free interface
-- Use the ZSL script in the connected `interface-builder` Skill when appropriate
+- Use the ZSL script in the connected `interface_builder` Skill when appropriate
 - Different crystal structures can be matched
 - Some lattice strain may be unavoidable
 - For dissimilar structures, manual stacking may be necessary
@@ -145,7 +147,7 @@ When build_interface struggles with dissimilar structures:
 4. This maintains structural integrity while achieving correct ordering
 
 ### Lattice Matching Challenges
-- The packaged `interface-builder` script uses ZSL; it is not an OAW host tool
+- The packaged `interface_builder` script uses ZSL; it is not an OAW host tool
 - May struggle with very dissimilar structures (e.g., 3D surface slab vs 2D material)
 - Manual stacking avoids forced lattice matching that breaks structure
 

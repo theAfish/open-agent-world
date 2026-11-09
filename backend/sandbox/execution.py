@@ -58,6 +58,7 @@ async def execute_sandbox(
     environment_id: str | None = None,
     target_id: str | None = None,
     python_environment: str = "auto",
+    working_directory: str | None = None,
 ) -> CommandResult:
     _validate_execution_options(python_environment, timeout_seconds)
     async with services._portable_state_gate.execution():
@@ -66,6 +67,10 @@ async def execute_sandbox(
             services._require_card_type(sandbox_id, CardType.SANDBOX)
             if agent_id is not None:
                 services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
+            from backend.card_state import active_state_session
+            if services.run_manager.current_context is not None or active_state_session.get() is not None:
+                from backend.workspace_context import session_context
+                session_context(services, sandbox_id)
         backend = services._require_sandbox_backend()
         if (argv is None) == (command is None):
             raise SandboxValidationError("provide exactly one of command or argv")
@@ -82,6 +87,7 @@ async def execute_sandbox(
             timeout_seconds=timeout_seconds, agent_id=agent_id, skill_request=skill_request,
             background_job_id=background_job_id, operation_id=operation_id,
             environment_id=environment_id, target_id=target_id, python_environment=python_environment,
+            requested_directory=working_directory,
         )
         execution_task = asyncio.create_task(execution.run())
         try:
@@ -121,6 +127,9 @@ class _CommandExecution:
     environment_id: str | None
     target_id: str | None
     python_environment: str
+    requested_directory: str | None
+    directory: str = field(default="", init=False)
+    workspace_binding: dict = field(default_factory=dict, init=False)
     command_id: str = field(init=False)
     execution_argv: list[str] = field(init=False)
     options: dict[str, Any] = field(default_factory=dict, init=False)
@@ -240,6 +249,27 @@ class _CommandExecution:
         if self.sandbox_id in self.services._sandbox_stopping:
             raise SandboxStateError("Sandbox admission is closed while termination cleanup is pending")
 
+    async def _configure_workspace(self) -> None:
+        from .task_workspace import binding, ensure_directory, path_for
+        if self.requested_directory is not None:
+            if self.agent_id is not None:
+                raise SandboxValidationError("Agent cwd is assigned by the host")
+            self.directory = path_for("", self.requested_directory)
+            previous = binding(self.services, self.sandbox_id)['directory']
+            self.workspace_binding = await ensure_directory(self.services, self.sandbox_id)
+            if self.directory == previous:
+                self.directory = self.workspace_binding['directory']
+        else:
+            self.workspace_binding = await ensure_directory(self.services, self.sandbox_id, self.agent_id)
+            self.directory = self.workspace_binding['directory']
+        writable = self.workspace_binding.get('writable_directory', self.workspace_binding.get('directory') or None)
+        if writable is not None:
+            if not getattr(self.backend, 'supports_workspace_scopes', False):
+                raise SandboxValidationError('This runtime cannot enforce session/group workspace write restrictions')
+            self.options['workspace_write_directory'] = writable
+        if self.directory:
+            self.options['working_directory'] = self.directory
+
     async def _prepare(self) -> None:
         if getattr(self.backend, "supports_execution_policy", False):
             config = self.services.world.get_card(self.sandbox_id).config
@@ -256,6 +286,7 @@ class _CommandExecution:
             self._configure_python()
             secrets = self._configure_environment()
             self._assert_admission()
+            await self._configure_workspace()
             self.services._require_card_type(self.sandbox_id, CardType.SANDBOX)
             self._start_receipt(secrets)
 
@@ -264,6 +295,8 @@ class _CommandExecution:
         receipt_data = {
             "id": self.command_id, "caller": self.agent_id or "user", "state": "running",
             "sandbox_id": self.sandbox_id, "python_environment": self.python_environment,
+            "working_directory": self.directory, "session_id": self.workspace_binding.get('session_id'),
+            "group_id": self.workspace_binding.get('group_id'),
             "history_key": command_history_key(self.services, self.sandbox_id),
             "run_id": self.services.run_manager.current_context.run_id if self.services.run_manager.current_context else None,
             "started_at": datetime.now(UTC).isoformat(), "argv": redact(list(self.execution_argv), secrets),
@@ -300,7 +333,7 @@ class _CommandExecution:
         save(self.services, self.sandbox_id, self.receipt)
         await self.services._emit_sandbox_event(SandboxEvent(
             self.sandbox_id, SandboxEventType.COMMAND_STARTED,
-            {"command_id": self.command_id, "argv": self.receipt["argv"], "concurrent_commands": self.concurrent_commands},
+            {"command_id": self.command_id, "argv": self.receipt["argv"], "working_directory": self.directory, "concurrent_commands": self.concurrent_commands},
         ))
 
     async def _record_result(self, result: CommandResult) -> CommandResult:
@@ -319,7 +352,7 @@ class _CommandExecution:
         )
         if self.receipt.get("cancellation_requested"):
             self.receipt.update(cleanup="complete", termination_confirmed=True)
-        return replace(result, command_id=self.command_id, concurrent_commands=self.concurrent_commands)
+        return replace(result, command_id=self.command_id, concurrent_commands=self.concurrent_commands, working_directory=self.directory)
 
     def _record_error(self, error: Exception) -> None:
         if self.receipt is None:

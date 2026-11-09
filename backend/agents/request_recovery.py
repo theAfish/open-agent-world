@@ -183,6 +183,7 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
             deadline.reschedule(asyncio.get_running_loop().time() + seconds)
         trace.request_attempts[role] = attempt
         started = time.monotonic()
+        trace.request_stream_metrics.pop(role, None)
         trace.pending[role] = (request_id, started, "model")
         trace._last_activity.pop(role, None)
         trace._reasoning.pop(role, None)
@@ -200,6 +201,24 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
         first_content = None
         response_chunks = 0
         first_response = last_response = None
+        kind_counts = {}
+        response_gap = content_gap = 0.0
+        def stream_metrics():
+            now = time.monotonic()
+            last_content = trace._last_activity.get(role)
+            return {"elapsed_seconds": round(now - started, 3),
+                "first_content_seconds": round(first_content - started, 3) if first_content is not None else None,
+                "first_response_seconds": round(first_response - started, 3) if first_response is not None else None,
+                "last_response_idle_seconds": round(now - last_response, 3) if last_response is not None else None,
+                "last_content_idle_seconds": round(now - last_content, 3) if last_content is not None else None,
+                "longest_response_gap_seconds": round(max(response_gap, now - (last_response if last_response is not None else started)), 3),
+                "longest_content_gap_seconds": round(max(content_gap, now - (last_content if last_content is not None else started)), 3),
+                "received_content_chunks": content_chunks, "observed_response_chunks": response_chunks,
+                "empty_response_chunks": response_chunks - content_chunks, "content_chunks_by_kind": dict(kind_counts),
+                "observed_activity": "content_received" if content_chunks else "empty_responses_only" if response_chunks else "no_adapter_response",
+                "observation_scope": "adapter_responses", "transport_observation_available": False,
+                "request_mode": "initial_request" if attempt == 1 else "request_replay", "generation_resume_used": False,
+                "watchdog_scope": "adapter_content", "stream_requested": stream}
         archive_id = trace.archive_model_start(role, snapshot, model=getattr(delegate, "model", None), stream=stream)
         try:
             async with aclosing(delegate.generate_content_async(_snapshot(snapshot), stream=stream)) as source:
@@ -228,13 +247,17 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
                         await asyncio.gather(read, return_exceptions=True)
                     before = trace._last_activity.get(role)
                     response_chunks += 1
+                    response_gap = max(response_gap, time.monotonic() - (last_response if last_response is not None else started))
                     last_response = time.monotonic()
                     if first_response is None:
                         first_response = last_response
                     content = getattr(response, "content", None)
-                    trace.note_activity(role, content)
-                    if trace._last_activity.get(role) != before:
+                    kinds = trace.note_activity(role, content)
+                    if kinds:
                         content_chunks += 1
+                        content_gap = max(content_gap, time.monotonic() - (before if before is not None else started))
+                        for kind in kinds:
+                            kind_counts[kind] = kind_counts.get(kind, 0) + 1
                         if first_content is None:
                             first_content = time.monotonic()
                     if getattr(response, "partial", False):
@@ -243,14 +266,17 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
                         completed.append(response)
             if not completed:
                 raise IncompleteModelResponse("Provider stream ended without a completed response")
-        except (asyncio.CancelledError, GeneratorExit):
+        except (asyncio.CancelledError, GeneratorExit) as error:
+            if archive_id is not None:
+                trace.invocations.interrupt_model(archive_id, error_type=type(error).__name__, stream_metrics=stream_metrics())
             preview = trace.interrupted_reasoning(role)
             if preview:
                 trace.queue.put_nowait(("progress", preview))
             raise
         except Exception as error:
+            metrics = stream_metrics()
             if archive_id is not None:
-                trace.invocations.interrupt_model(archive_id, error_type=type(error).__name__)
+                trace.invocations.interrupt_model(archive_id, error_type=type(error).__name__, stream_metrics=metrics)
             preview = trace.interrupted_reasoning(role)
             if preview:
                 trace.queue.put_nowait(("progress", preview))
@@ -293,6 +319,8 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
                 "first_response_seconds": round(first_response - started, 3) if first_response is not None else None,
                 "last_response_idle_seconds": round(now - last_response, 3) if last_response is not None else None,
                 "watchdog_scope": "adapter_content",
+                "stream_metrics": metrics,
+                "recovery_mode": "request_replay" if retrying else None,
                 "error_chain_types": _error_chain_types(error),
                 "stage": "mid_stream" if last is not None else "first_byte",
                 "text": (f"{role.replace('_', ' ')} · model request {request_id}, attempt {attempt} "
@@ -335,8 +363,10 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
                     await window.prepare(snapshot)
             await _wait_to_retry(trace, role, request_id, attempt + 1, attempt_limit, delay)
             continue
+        metrics = stream_metrics()
+        trace.request_stream_metrics[role] = metrics
         if archive_id is not None:
-            trace.invocations.finish_model(archive_id, completed)
+            trace.invocations.finish_model(archive_id, completed, stream_metrics=metrics)
         for response in completed:
             if window is not None:
                 window.observe_usage(response)

@@ -87,16 +87,20 @@ def main() -> None:
     if not python.is_file():
         parser.error(f"Run setup.sh --profile {args.profile} --skip-build or setup.ps1 -Profile {args.profile} -SkipBuild first")
     commands = prerequisites(install=False, warn=False)
+    env = dict(os.environ)
+    plugin_paths = [part for part in env.get("OPEN_AGENT_WORLD_PLUGIN_DIRS", "").split(os.pathsep) if part]
+    plugin_paths.extend(str((root / path).resolve()) for path in args.plugin_path)
+    if plugin_paths:
+        env["OPEN_AGENT_WORLD_PLUGIN_DIRS"] = os.pathsep.join(dict.fromkeys(plugin_paths))
     check = [str(python), str(root / "scripts/check-source-environment.py"), "--profile", args.profile]
     for path in args.plugin_path:
         check += ["--plugin-path", str((root / path).resolve())]
-    subprocess.run(check, cwd=root, check=True)
-    subprocess.run([commands["node"], str(root / "frontend/scripts/prepare-dev.mjs")], cwd=root, check=True)
+    subprocess.run(check, cwd=root, env=env, check=True)
+    subprocess.run([commands["node"], str(root / "frontend/scripts/prepare-dev.mjs")], cwd=root, env=env, check=True)
     backend_port = available_port(args.backend_port)
     frontend_port = available_port(args.frontend_port)
     if frontend_port == backend_port:
         frontend_port = available_port(frontend_port + 1)
-    env = dict(os.environ)
     env["OPEN_AGENT_WORLD_AGENT_RUNTIME"] = args.agent_runtime
     env["OPEN_AGENT_WORLD_MODE"] = "development"
     env["OAW_DEV_BACKEND_HTTP_URL"] = f"http://127.0.0.1:{backend_port}"

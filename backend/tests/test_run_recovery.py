@@ -44,10 +44,16 @@ class RunRecoveryTests(unittest.TestCase):
                                      arguments={"argv": ["python3", "build.py"]}, read_only=False)
         self.journal.finish(receipt, {"status": "running", "operation_id": "command-1"})
         command = {"id": "command-1", "run_id": self.run.run_id,
-                   "state": "finished", "exit_code": 0}
+                   "state": "finished", "exit_code": 0, "argv": ["python3", "-c", "print(1)"],
+                   "stdout": "1\n", "stderr": ""}
         with patch("backend.sandbox.history.read", return_value=[command]):
             result = asyncio.run(assess_run(self.services, "agent", self.run.run_id))
         self.assertEqual(result[0]["evidence"], "confirmed")
+        self.assertEqual(result[0]["operation"]["argv"], command["argv"])
+        self.assertFalse(result[0]["operation"]["argv_truncated"])
+        self.assertEqual(result[0]["operation"]["output_preview"]["stdout"], "1\n")
+        self.assertEqual(result[0]["operation"]["output_reference"]["arguments"]["operation_id"], "command-1")
+        self.assertEqual(result[0]["operation"]["output_reference"]["reader"], "wait_sandbox_operation")
         with patch("backend.sandbox.history.read", return_value=[{**command, "run_id": "another-run"}]):
             result = asyncio.run(assess_run(self.services, "agent", self.run.run_id))
         self.assertEqual(result[0]["evidence"], "unknown")
@@ -56,6 +62,26 @@ class RunRecoveryTests(unittest.TestCase):
         }]):
             result = asyncio.run(assess_run(self.services, "agent", self.run.run_id))
         self.assertEqual(result[0]["evidence"], "unknown")
+
+    def test_operation_outputs_are_bounded_and_keep_a_native_reader(self):
+        receipt = self.journal.begin(run_id=self.run.run_id, agent_id="agent",
+            capability_kind="sandbox.execute", target_id="sandbox", arguments={}, read_only=False)
+        self.journal.finish(receipt, {"operation_id": "command-1"})
+        command = {"id": "command-1", "run_id": self.run.run_id, "state": "finished",
+            "tool_result": {"exit_code": 0, "stdout": "x" * 1500, "stderr": "diagnostic"}}
+        with patch("backend.sandbox.history.read", return_value=[command]):
+            result = asyncio.run(assess_run(self.services, "agent", self.run.run_id))
+        operation = result[0]["operation"]
+        self.assertEqual(result[0]["evidence"], "confirmed")
+        self.assertEqual(operation["exit_code"], 0)
+        self.assertEqual(len(operation["output_preview"]["stdout"]), 1000)
+        self.assertTrue(operation["output_truncated"])
+        self.assertEqual(operation["output_reference"]["arguments"]["operation_id"], "command-1")
+        self.capabilities.capability_for_id = Mock(side_effect=RuntimeError("revoked"))
+        with patch("backend.sandbox.history.read") as history:
+            result = asyncio.run(assess_run(self.services, "agent", self.run.run_id))
+        self.assertNotIn("operation", result[0])
+        history.assert_not_called()
 
     def test_lost_tool_response_can_reconcile_by_tool_receipt_id(self) -> None:
         receipt = self.journal.begin(run_id=self.run.run_id, agent_id="agent",
@@ -83,6 +109,18 @@ class RunRecoveryTests(unittest.TestCase):
         self.assertNotIn("sha256", result[0]["result_hints"])
         backend.file_operation.assert_not_awaited()
         authorize.assert_called_once_with("agent", "sandbox.write_text_file:sandbox")
+
+
+    def test_start_is_confirmed_by_live_state_and_unknown_when_not_recovered(self):
+        receipt = self.journal.begin(run_id=self.run.run_id, agent_id='agent',
+            capability_kind='sandbox.start', target_id='sandbox', arguments={}, read_only=False)
+        self.journal.finish(receipt, {'state': 'ready'})
+        self.services.get_sandbox = AsyncMock(return_value=SimpleNamespace(state=SimpleNamespace(value='ready')))
+        result = asyncio.run(assess_run(self.services, 'agent', self.run.run_id))
+        self.assertEqual(result[0]['evidence'], 'confirmed')
+        self.services.get_sandbox.return_value.state.value = 'error'
+        result = asyncio.run(assess_run(self.services, 'agent', self.run.run_id))
+        self.assertEqual(result[0]['evidence'], 'unknown')
 
 
 if __name__ == "__main__":

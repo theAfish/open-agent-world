@@ -37,6 +37,8 @@ test('publishes the original research layout with shared card interfaces', async
   await download;
 
   // The published file connection drives the original Structure Viewer.
+  // The fixture places this file at the workspace root, outside the current session.
+  await page.getByRole('combobox', { name: 'View workspace' }).selectOption('');
   await page.getByRole('button', { name: 'crystal.xyz', exact: true }).click();
   await expect(page.locator('.structure-viewer--workspace')).toBeVisible();
   await expect(page.locator('.structure-viewer--workspace canvas')).toBeVisible({ timeout: 30_000 });

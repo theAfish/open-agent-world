@@ -2,6 +2,7 @@ import { useConversationView } from "./conversationView";
 import type { DataSchema } from '../plugins/dataSources';
 import { useOpenFiles } from './openFiles';
 import { useLegionDeployments } from "./legionDeployments";
+import { useLegionWorkspace } from './legionWorkspace';
 import { ensureCardsCollected } from "./cardDependencies";
 import type { MapPinLocation } from "../canvas/MapAtlas";
 import { create } from "zustand";
@@ -13,6 +14,7 @@ import { profileStorage } from "./profileStorage";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
 import { isHosted } from "../auth/hostedSession";
 import type {
+  AgentRunReceipt,
   CardType,
   EdgeDirection,
   FlowViewportState,
@@ -31,7 +33,7 @@ import type {
   WorldPosition,
   WorldSnapshot,
 } from "../types/world";
-import { filterCardsToChunks, getViewportChunkKeys, sameViewportChunks, viewportCenterToWorld } from "./chunks";
+import { filterCardsToChunks, getViewportChunkKeys, sameViewportChunks, viewportCenterToWorld, positionToChunk } from "./chunks";
 import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { summarizeLegionSelection } from "./legions";
@@ -384,6 +386,9 @@ interface WorldState {
     nodeIds: string[];
   }) => Promise<LegionSummary | undefined>;
   deleteLegion: (id: string) => Promise<boolean>;
+  loadLegionInstance: (id: string) => Promise<WorldCard | undefined>;
+  openLegionInstance: (id: string) => Promise<boolean>;
+  placeLegionInstance: (id: string, position: WorldPosition) => Promise<boolean>;
   instantiateLegion: (
     id: string,
     anchor?: WorldPosition,
@@ -404,6 +409,7 @@ interface WorldState {
   loadText: (id: string) => Promise<void>;
   saveText: (id: string, content: string, expectedRevision?: number) => Promise<boolean>;
   uploadImage: (id: string, file: File) => Promise<boolean>;
+  requestAgentRun: (id: string, prompt: string, freshContext?: boolean) => Promise<AgentRunReceipt>;
   runAgent: (id: string, prompt: string, freshContext?: boolean) => Promise<void>;
   stopAgent: (id: string) => Promise<void>;
   loadSandboxRuntimes: (refresh?: boolean) => Promise<void>;
@@ -411,7 +417,7 @@ interface WorldState {
   saveSandboxConfig: (id: string, config: SandboxConfig) => Promise<boolean>;
   startSandbox: (id: string) => Promise<boolean>;
   stopSandbox: (id: string) => Promise<boolean>;
-  executeSandbox: (id: string, command: string, pythonEnvironment?: "auto" | "managed") => Promise<boolean>;
+  executeSandbox: (id: string, command: string, pythonEnvironment?: "auto" | "managed", workingDirectory?: string) => Promise<boolean>;
   ingestEvent: (event: RuntimeEvent) => void;
   ingestEvents: (events: RuntimeEvent[]) => void;
   setSocketState: (state: SocketState) => void;
@@ -1046,6 +1052,41 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   }),
 
+  loadLegionInstance: async (id) => {
+    try {
+      await get().waitForPositionCommits();
+      const group = await worldApi.getCard(id);
+      if (group.type !== 'legion') throw new Error('This entry no longer points to a Legion.');
+      const key = positionToChunk(group.position).key;
+      const snapshot = await worldApi.getWorld([key]);
+      if (!snapshot.nodes.some(node => node.id === id)) throw new Error('This Legion is no longer available.');
+      set(state => ({ cards: mergeCards(state.cards, snapshot.nodes, state.cardTombstones),
+        edges: mergeEdges(state.edges, snapshot.edges, state.edgeTombstones),
+        loadedChunkKeys: [...new Set([...state.loadedChunkKeys, key, ...chunkKeysFromSnapshot(snapshot)])] }));
+      if (!get().cards.some(node => node.id === id)) throw new Error('This Legion is no longer available.');
+      return get().cards.find(node => node.id === id);
+    } catch (error) {
+      get().pushToast({ tone: 'error', title: 'Legion is unavailable', detail: apiErrorMessage(error) });
+      return undefined;
+    }
+  },
+
+  openLegionInstance: async (id) => {
+    if (!await get().loadLegionInstance(id)) return false;
+    get().selectCards([id], { syncCanvas: true });
+    useLegionWorkspace.getState().open(id);
+    return true;
+  },
+
+  placeLegionInstance: async (id, position) => {
+    if (!await get().loadLegionInstance(id)) return false;
+    await get().updateCardPositions([{ id, position }]);
+    const placed = get().cards.find(node => node.id === id);
+    if (!placed || !samePosition(placed.position, position)) return false;
+    get().selectCards([id], { syncCanvas: true });
+    return true;
+  },
+
   deleteLegion: (id) => withHistoryTransaction(() => withLegionOperation(id, async () => {
     const legion = get().legions.find((item) => item.id === id);
     if (!legion || legion.preset) return false;
@@ -1560,20 +1601,26 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
-  runAgent: async (id, prompt, freshContext) => {
+  requestAgentRun: async (id, prompt, freshContext) => {
     const queued = isHosted();
     const before = queued ? get().cards.find(card => card.id === id) : undefined;
+    const receipt = await worldApi.runAgent(id, prompt, freshContext);
+    set((state) => ({
+      cards: state.cards.map(card => {
+        // Live events may already reflect execution after queue admission.
+        if (card.id !== id || (queued && card !== before)) return card;
+        const status = queued && card.status !== "running" ? "waiting" : "running";
+        return mergeCardPatch(card, { status, config: { prompt } });
+      }),
+      activityOpen: true,
+    }));
+    return receipt;
+  },
+
+  runAgent: async (id, prompt, freshContext) => {
+    const queued = isHosted();
     try {
-      await worldApi.runAgent(id, prompt, freshContext);
-      set((state) => ({
-        cards: state.cards.map(card => {
-          // A live event or published poll may already reflect newer state.
-          if (card.id !== id || (queued && card !== before)) return card;
-          const status = queued && card.status !== "running" ? "waiting" : "running";
-          return mergeCardPatch(card, { status, config: { prompt } });
-        }),
-        activityOpen: true,
-      }));
+      await get().requestAgentRun(id, prompt, freshContext);
     } catch (error) {
       get().pushToast({ tone: "error", title: queued ? "Run submission not confirmed" : "Agent did not start", detail: apiErrorMessage(error) });
     }
@@ -1729,7 +1776,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
-  executeSandbox: async (id, command, pythonEnvironment = "auto") => {
+  executeSandbox: async (id, command, pythonEnvironment = "auto", workingDirectory = "") => {
     if (get().sandboxBusy[id]) return false;
     const previousEventIds = new Set(get().events.map((event) => event.id));
     const revision = (get().sandboxRevisions[id] ?? 0) + 1;
@@ -1738,10 +1785,13 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       sandboxErrors: { ...state.sandboxErrors, [id]: undefined },
       sandboxRevisions: { ...state.sandboxRevisions, [id]: revision },
       cards: state.cards.map((card) => card.id === id
-        ? mergeCardPatch(card, { config: { active_command: command, output: [...(Array.isArray(card.config.output) ? card.config.output : []), `$ ${command}`].slice(-100) } }) : card),
+        ? mergeCardPatch(card, { config: { active_command: command, output_directory: workingDirectory,
+          output: [...(card.config.output_directory === workingDirectory && Array.isArray(card.config.output) ? card.config.output : []), `$ ${command}`].slice(-100) } }) : card),
     }));
     try {
-      const result = pythonEnvironment === "managed"
+      const result = workingDirectory
+        ? await worldApi.executeSandbox(id, command, pythonEnvironment, workingDirectory)
+        : pythonEnvironment === "managed"
         ? await worldApi.executeSandbox(id, command, "managed")
         : await worldApi.executeSandbox(id, command);
       if (get().sandboxRevisions[id] !== revision) return true;
@@ -1762,8 +1812,9 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           ? mergeCardPatch(card, {
               config: {
                 active_command: "",
+                output_directory: workingDirectory,
                 output: [
-                  ...(Array.isArray(card.config.output) ? card.config.output : []),
+                  ...(card.config.output_directory === workingDirectory && Array.isArray(card.config.output) ? card.config.output : []),
                   ...stdout,
                   ...stderr,
                   ...completion,
@@ -1896,15 +1947,18 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
             else if (normalizedType.includes("command_finished") && card.type !== "sandbox") status = "ready";
             else if (normalizedType.includes("error")) status = "error";
 
-            const shouldAppend =
+            // Reasoning already has one live snapshot in events and a durable
+            // Run archive. Copying cumulative text here retains every prefix.
+            const shouldAppend = event.payload.kind !== "model_reasoning" && (
               normalizedType.includes("stdout") ||
               normalizedType.includes("stderr") ||
               normalizedType.includes("tool_") ||
               normalizedType.includes("command_") ||
               normalizedType.includes("agent_") ||
               normalizedType.startsWith("run_") ||
-              normalizedType.includes("error");
-            const existing = Array.isArray(card.config.output) ? card.config.output : [];
+              normalizedType.includes("error"));
+            const outputDirectory = typeof event.payload.working_directory === 'string' ? event.payload.working_directory : card.config.output_directory;
+            const existing = outputDirectory === card.config.output_directory && Array.isArray(card.config.output) ? card.config.output : [];
             const output = shouldAppend && outputText
               ? [...existing, `${event.payload.command_id ? `[${String(event.payload.caller ?? "")} ${String(event.payload.command_id).slice(0, 8)}] ` : ""}${normalizedType.includes("stderr") ? "! " : ""}${outputText}`].slice(-100)
               : existing;
@@ -1912,6 +1966,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
               status,
               config: {
                 output,
+                ...(outputDirectory !== undefined ? { output_directory: outputDirectory } : {}),
                 active_command: Array.isArray(event.payload.active_commands)
                   ? event.payload.active_commands.map((item: { argv?: string[] }) => (item.argv ?? []).join(" ")).join(" · ")
                   : normalizedType.includes("command_finished")

@@ -119,6 +119,27 @@ class ContextCapabilities:
         return cls(preserve_tool_reasoning=getattr(model, "requires_tool_reasoning", False) is True)
 
 
+@dataclass(frozen=True)
+class BoundedReader:
+    """Host-registered paging contract, independent of a particular tool name.
+
+    Only a bounded text page with small positioning metadata is exempt from
+    result projection. Tool output cannot opt itself out of accounting.
+    """
+    identity_fields: tuple[str, ...]
+    max_chars: int = 8000
+
+    def accepts(self, value):
+        if not isinstance(value, dict) or value.get("ok") is False or value.get("error"):
+            return False
+        text, offset, total = value.get("text"), value.get("offset"), value.get("total_chars")
+        return (isinstance(text, str) and len(text) <= self.max_chars
+            and type(offset) is int and offset >= 0 and type(total) is int
+            and total >= offset + len(text)
+            and all(type(value.get(k)) in (str, int) for k in self.identity_fields)
+            and len(json.dumps({k: v for k, v in value.items() if k != "text"}, ensure_ascii=False)) <= 4000)
+
+
 class RequestWindow:
     def __init__(self, budget: ContextBudget, trace, role: str, *, reducer=None, capabilities=None):
         self.budget, self.trace, self.role = budget, trace, role
@@ -131,6 +152,62 @@ class RequestWindow:
         self.measured_tokens = None
         self.measured_estimate = 0
         self.last_stats = {}
+        self.bounded_readers: dict[str, BoundedReader] = {}
+        self.visible_reads: list[dict] = []
+        self.register_bounded_reader("read_tool_result", identity_fields=("invocation_id", "section", "pointer"))
+        self.register_bounded_reader("read_sandbox_file", identity_fields=("sandbox_id", "path"))
+
+    def register_bounded_reader(self, name: str, *, identity_fields: tuple[str, ...]):
+        """Adapters register trusted readers; normal input accounting still applies."""
+        self.bounded_readers[name] = BoundedReader(identity_fields)
+
+    def _bounded_read(self, response):
+        reader = self.bounded_readers.get(response.name)
+        return reader if reader is not None and reader.accepts(response.response) else None
+
+    def read_pages(self, request):
+        """Metadata for pages actually present, not a second result archive."""
+        pages = []
+        for content in request.contents:
+            for part in content.parts or []:
+                response = getattr(part, "function_response", None)
+                reader = self._bounded_read(response) if response is not None else None
+                if reader is not None and response.id:
+                    value = response.response
+                    pages.append({"tool": response.name, "call_id": response.id,
+                        "source": {k: value[k] for k in reader.identity_fields},
+                        "offset": value["offset"], "end": value["offset"] + len(value["text"]),
+                        "total_chars": value["total_chars"]})
+        return pages
+
+    def retrieval_context(self, request):
+        """Protect the latest complete read exchange during native compaction.
+
+        Keep its original calls and responses together. Older pages remain
+        available through native archives and are not pinned indefinitely.
+        """
+        if signed_history(request):
+            return []
+        for end in range(len(request.contents) - 1, -1, -1):
+            responses = [p.function_response for p in request.contents[end].parts or [] if p.function_response]
+            if not responses:
+                continue
+            if any(not r.id or self._bounded_read(r) is None for r in responses):
+                return []
+            pending = {r.id for r in responses}
+            for start in range(end - 1, -1, -1):
+                earlier = [p.function_response for p in request.contents[start].parts or [] if p.function_response]
+                if earlier:
+                    if any(not r.id or self._bounded_read(r) is None or r.id in pending for r in earlier):
+                        return []
+                    pending.update(r.id for r in earlier)
+                calls = [p.function_call for p in request.contents[start].parts or [] if p.function_call]
+                if calls:
+                    if {c.id for c in calls} == pending:
+                        return request.contents[start:end + 1]
+                    return []  # Never pin an orphan or only half of a batch.
+            return []
+        return []
 
     def set_scope(self, scope: str):
         if scope != self.scope:
@@ -140,6 +217,7 @@ class RequestWindow:
             self.measured_tokens = None
             self.measured_estimate = 0
             self.last_stats = {}
+            self.visible_reads = []
 
     def issue_reference(self, invocation_id: str, *, source_role: str | None = None):
         """Host-only handoff of one complete, redacted result in this Run.
@@ -182,7 +260,7 @@ class RequestWindow:
         for content in request.contents:
             for part in getattr(content, "parts", None) or []:
                 response = getattr(part, "function_response", None)
-                if response is None or response.name == "read_tool_result":
+                if response is None or self._bounded_read(response) is not None:
                     continue
                 # A persisted working checkpoint may already contain a projection.
                 # Re-authorize it only against this Run's returned native record.
@@ -359,9 +437,12 @@ class RequestWindow:
             compaction_seconds=compaction_seconds,
             reduction_ratio=round(1 - stats["estimated_input_tokens"] / max(1, before), 4),
             provider_reasoning_preserved=self.capabilities.preserve_tool_reasoning,
-            native_compaction_available=callable(self.capabilities.native_compact))
+            native_compaction_available=callable(self.capabilities.native_compact),
+            provider_native_compaction_available=callable(self.capabilities.native_compact),
+            oaw_compaction_available=callable(self.reducer))
         self.last_stats = stats
         self.last_estimate = stats["estimated_input_tokens"]
+        self.visible_reads = self.read_pages(request)
         self.trace.context_stats[self.role] = stats
         return stats
 

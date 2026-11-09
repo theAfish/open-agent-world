@@ -168,7 +168,11 @@ async def build_pipeline_input(root, agent_id, options, *, progress=None):
             from .library import expand_library_slots
             library_nodes = {item['node_id'] for item in expand_library_slots(snapshot) if item['value']['kind'] == 'library'}
             try:
-                if library_id in library_nodes and isinstance(cod_id, str) and re.fullmatch(r'[1-9][0-9]{6}', cod_id) and cid == f'{library_id}:{cod_id}':
+                from .managed_library import stored_structure
+                stored = stored_structure(snapshot, candidate)
+                if stored:
+                    source = stored
+                elif library_id in library_nodes and isinstance(cod_id, str) and re.fullmatch(r'[1-9][0-9]{6}', cod_id) and cid == f'{library_id}:{cod_id}':
                     prepared = await structures.prepare_cod_structure({}, {'cod_id': cod_id})
                     source = decoded_cif(prepared['structure'])
                 else:

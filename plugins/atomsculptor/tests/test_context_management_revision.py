@@ -10,8 +10,26 @@ from google.genai import types
 from test_execution_steps import setup
 from test_execution_cycle import history
 from oaw_atomsculptor.harness import HarnessLimits, RunEvidence
-from oaw_atomsculptor.runtime import _ModelTrace
+from oaw_atomsculptor.runtime import _ModelTrace, _specialist_task_prompt
 from backend.tests.test_invocation_logs import native
+
+
+@pytest.mark.parametrize('content', [None, NS(), NS(role='user', parts=None),
+    types.Content(role='model', parts=[types.Part(text='private reasoning', thought=True)]),
+    types.Content(role='user', parts=[types.Part(function_response=types.FunctionResponse(name='read', response={'text': 'tool data'}))]),
+    types.Content(role='user', parts=[types.Part(text='   ')])])
+def test_specialist_task_prompt_falls_back_without_using_thoughts_or_tool_results(content):
+    request = NS(contents=[content] if content is not None else [])
+    assert _specialist_task_prompt(request, 'original task') == 'original task'
+
+
+def test_specialist_task_prompt_prefers_public_invocation_input_and_excludes_reasoning():
+    initial = types.Content(role='user', parts=[types.Part(text='older history')])
+    delegated = types.Content(role='user', parts=[types.Part(text='current delegation'),
+        types.Part(text='private reasoning', thought=True), types.Part(text='signed', thought_signature=b'signed')])
+    request = NS(contents=[initial])
+    assert _specialist_task_prompt(request, 'original task', user_content=delegated) == 'current delegation'
+    assert _specialist_task_prompt(request, 'original task') == 'older history'
 
 
 @pytest.mark.asyncio
@@ -108,7 +126,7 @@ def test_specialist_preserves_full_unsigned_reasoning_when_adapter_requires_it()
 
 
 @pytest.mark.asyncio
-async def test_large_current_script_never_refills_a_focused_window():
+async def test_large_saved_script_does_not_refill_history_and_host_does_not_trim_it():
     e, _, run = await setup()
     source = "print('measured')\n" * 6000
     await run(source=source)
@@ -116,20 +134,17 @@ async def test_large_current_script_never_refills_a_focused_window():
     req = LlmRequest(contents=history(e.original_request), config=types.GenerateContentConfig())
     before = len(req.model_dump_json())
     e.before_model("structure_builder", req, NS(types=types), 81920)
-    # HOST frames legitimately add size before focusing; focus must shrink that
-    # fully assembled window, and cannot grow with the full 100K current script.
+    # Native accounting owns compaction. The HOST keeps a bounded excerpt,
+    # rather than reinjecting the full 100K source or cutting history by chars.
     focused = len(req.model_dump_json())
-    assert focused < before and source not in req.model_dump_json()
-    checkpoint = next(json.loads(p.text) for c in req.contents for p in c.parts
-                      if p.text and "HOST working-context checkpoint" in p.text)
+    assert before < focused and source not in req.model_dump_json()
+    assert 'measured-0' in req.model_dump_json() and 'measured-15' in req.model_dump_json()
     head = json.loads(req.contents[-1].parts[0].text.split("\n", 1)[1])["current_saved_source"]
-    assert "source_head" not in checkpoint["source_snapshot"]
     assert head["source_chars"] == len(source) and len(head["source_head"]) <= 800
     assert head["version"] == e.scripts[e.current_script_key].version
-    assert "working_decision" not in checkpoint
     for _ in range(3):
         e.before_model("structure_builder", req, NS(types=types), 81920)
-    assert req.model_dump_json().count("HOST working-context checkpoint") == 1
+    assert "HOST working-context checkpoint" not in req.model_dump_json()
     assert len(req.model_dump_json()) <= focused + 1000
 
 

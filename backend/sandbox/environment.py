@@ -21,6 +21,16 @@ _SAFE_OVERRIDE_NAMES = frozenset(
     }
 )
 
+# Explicit installer options are ordinary configurable command variables.
+# Keep interpreter, install-target and other UV_/PIP_ controls reserved. This
+# allowlist does not change the host's separate shared-Python preparation flow.
+_INSTALL_OPTION_NAMES = frozenset({
+    "UV_DEFAULT_INDEX", "UV_INDEX_URL", "PIP_INDEX_URL",
+    "UV_HTTP_TIMEOUT", "UV_REQUEST_TIMEOUT", "PIP_TIMEOUT", "PIP_DEFAULT_TIMEOUT",
+    "UV_HTTP_CONNECT_TIMEOUT", "UV_HTTP_RETRIES", "PIP_RETRIES",
+    "UV_CONCURRENT_DOWNLOADS", "UV_CONCURRENT_INSTALLS", "UV_OFFLINE",
+})
+
 # Application variables are allowed, but startup, loader, transport and isolation
 # controls remain host-owned on every backend. Compare case-insensitively so a
 # portable profile cannot acquire different authority on Windows.
@@ -84,7 +94,8 @@ def validate_command_environment(values: Mapping, *, allow_target: bool = True,
         seen.add(normalized)
         steps = _steps(value)
         path_extension = normalized == "PATH" and all(step.operation != "replace" for step in steps)
-        allowed = (path_extension or normalized in _SAFE_OVERRIDE_NAMES or (allow_target and key == "OAW_TARGET_CONFIG_JSON")
+        allowed = (path_extension or normalized in _SAFE_OVERRIDE_NAMES or normalized in _INSTALL_OPTION_NAMES
+                   or (allow_target and key == "OAW_TARGET_CONFIG_JSON")
                    or (allow_host and normalized in HOST_ENVIRONMENT_NAMES))
         if not allowed and (normalized in _RESERVED or normalized.startswith(_RESERVED_PREFIXES)):
             raise SandboxValidationError(f"Environment variable {key!r} is reserved by the sandbox")

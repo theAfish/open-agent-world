@@ -99,7 +99,7 @@ class LegionTemplateNode(BaseModel):
     parent_key: str | None = None
     owner_key: str | None = None
     equipment_relationship: str | None = None
-    state_scope: Literal["shared", "session"] | None = None
+    state_scope: Literal["shared", "session", "group"] | None = None
     initial_document: dict[str, Any] | None = None
     initial_shared_state: dict[str, Any] | None = None
     # Initialized default equipment slots; resource IDs are portable node keys.

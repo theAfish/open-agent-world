@@ -4,16 +4,17 @@
 
 Normal sandbox backends select a persistent Python venv under the OAW data root:
 `runtime/python/venv`. Python commands and Skill scripts use this environment.
-On macOS Seatbelt, ordinary commands no longer prepare or mount it; direct
-`python`/`python3` argv commands and Skill scripts select it automatically.
-Shell commands that invoke Python indirectly must request
-`python_environment: "managed"` through the execute API/tool, or enable
-**Managed Python** in the Sandbox terminal. Without that choice a shell runs
-without OAW's managed Python environment. Other runtimes retain eager Python
-preparation for now. The managed environment excludes system site-packages, user site-packages,
-backend `PYTHONPATH`, and the backend project venv. Windows has a managed copy of
-the base interpreter and standard library in `runtime/python/base`; sandbox ACLs
-never grant access to the backend or host Python installation.
+Windows AppContainer and macOS Seatbelt select the managed environment for
+ordinary commands, shells, installed CLI entry points and Python commands alike.
+They do not support `python_environment: "none"`; an unavailable environment
+returns a preparation failure rather than falling back to the backend Python.
+The environment excludes system/user site-packages, backend `PYTHONPATH`, and
+backend project dependencies. Both platforms copy the backend's base Python
+runtime into `runtime/python/base`, then create a separate venv. Windows copies
+its interpreter, standard library and runtime DLLs. macOS copies its interpreter,
+standard library and required Mach-O libraries, relocates library references and
+signs modified binaries. Third-party packages and startup hooks are excluded.
+Sandbox access is granted only to the managed copy, not the backend environment.
 
 Workspaces and resource mounts retain their existing isolation. The Python
 runtime is read-only inside each sandbox. Packages persist across commands,
@@ -22,18 +23,14 @@ retain modules they have already imported; a new command sees installed packages
 
 Windows, Darwin and Linux venvs are not binary-compatible. WSL distributions each
 share one Linux venv under `runtime/platforms/<distribution-key>/runtime/python/venv`.
-Seatbelt uses an OAW-managed CPython 3.12; it does not assume `/usr/bin/python3`.
-One verified, architecture-specific distribution is kept under
-`~/Library/Application Support/OpenAgentWorld/shared-python/` and reused across
-source checkouts and development profiles. Each profile copies that base below
-its own `runtime/python/base` and creates a separate `runtime/python/venv`.
-Seatbelt can read only the profile copy, not the global distribution or the
-backend's Conda environment. A development runtime reset removes the profile
-copy/venv, but not the shared distribution; it therefore does not require
-another CPython download. Apple Container VM uses a separate Linux
-environment below `runtime/macos-container-python`, prepared inside its Python
-3.12 image and mounted at `/opt/oaw-python`. There are no per-sandbox or
-per-plugin environments.
+Seatbelt uses the Python version of the running backend. A verified runtime copy
+is cached under `~/Library/Application Support/OpenAgentWorld/shared-python/`
+and each profile copies it below its own `runtime/python/base`. A source identity
+receipt distinguishes the backend runtime from older downloaded CPython copies.
+The existing wheel-cache path is retained. A profile reset requires copying the
+base again, without downloading CPython. Apple Container VM remains a separate
+Linux environment below `runtime/macos-container-python`; macOS binaries cannot
+be used in that VM.
 
 On Seatbelt, uv's wheel cache also lives in that shared directory. A new
 profile still creates its own venv and installs its required packages, but
@@ -41,20 +38,12 @@ previously downloaded compatible wheels can be reused without fetching them
 again. Changing the Python version or CPU architecture uses a different
 distribution/cache directory.
 
-Starting a macOS Seatbelt Sandbox begins shared Python preparation in the
-background. `start_sandbox` and `inspect_sandbox` report `shared_python.ready`,
-`distribution_cached`, `preparing`, the current preparation `phase`, time since observable progress,
-and any warmup error. A direct Python command submitted during warmup keeps its
-own operation ID and reports `phase: "preparing_python"` with
-`command_started: false`; the phase changes to `executing` only after preparation.
-Starting an already running Sandbox again retries a failed warmup. Seatbelt's
-first managed CPython download is stopped if its output, cache, and staging files
-show no progress for 600 seconds. The failed installation is recorded in
-`install.log` and the command is not launched. The ordinary command timeout only
-starts after Python preparation and process dispatch.
-Other macOS Python package/installer downloads use a 300-second no-progress
-limit. Progress includes installation output and modified cache/runtime files;
-these are observations, not a claim that a download will succeed.
+Sandbox startup and inspection report Python preparation state. The host-owned
+Pack bootstrap prepares declared dependencies using the same shared installer on
+Windows and macOS. First-time Python setup copies the base runtime; missing
+third-party dependencies use uv and its wheel cache. Existing packages in an OAW
+venv are preserved during a macOS base-format migration when the Python ABI
+matches. Package hooks are never executed on the host during migration.
 
 Installed `.oawpack` manifests declare `runtime.sandbox.python`; discovery feeds
 the same bootstrap used by bundled plugins. All enabled Pack requirements are
@@ -79,13 +68,11 @@ Start the sandbox once to select its execution platform before installing.
 
 The manager serializes mutations with an OS file lock, including across backend
 processes. A per-profile lock wait exceeding 60 seconds returns structured
-`resource_busy` feedback to the Agent. The shared macOS distribution lock can
-wait for another checkout's download rather than starting a duplicate one.
+`resource_busy` feedback to the Agent. The shared macOS runtime-copy lock serializes preparations across checkouts.
 Inspect the installation
 and wait before retrying the rejected command.
 Package installs have a 30-minute wall-clock limit; most interpreter setup steps
-have a 10-minute limit. The macOS CPython download has a separate 600-second
-no-progress limit. The WSL transport budget covers lock acquisition, setup, installer
+have a 10-minute limit. The WSL transport budget covers lock acquisition, setup, installer
 bootstrap and package installation. Progress is written live to `runtime/python/install-output.log`;
 `runtime/python/install.log` retains outcomes, elapsed time and output tails,
 including failures and timeouts. Cancellation drains active

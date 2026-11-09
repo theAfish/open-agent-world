@@ -158,6 +158,8 @@ class PythonEnvironmentSpec:
     # File bytes contribute to identity, never absolute checkout/install paths.
     requirements_files: tuple[Path, ...] = ()
     resource_files: tuple[Path, ...] = ()
+    # Hashed requirements exported by uv; includes the transitive closure.
+    lockfile: Path | None = None
 
     @classmethod
     def from_declaration(cls, owner_id, environment_id, declaration, source_root):
@@ -165,8 +167,6 @@ class PythonEnvironmentSpec:
             raise ValueError("Only host-worker Python environments use this provider")
         if declaration.management != "managed":
             raise ValueError("External environments are configured, not installed")
-        if getattr(declaration, "lock", None):
-            raise ValueError("This Python provider does not yet support lockfile installation; use explicit pinned requirements")
         root = Path(source_root).resolve()
 
         def resource(relative):
@@ -179,11 +179,14 @@ class PythonEnvironmentSpec:
         return cls(owner_id, environment_id, tuple(declaration.python),
                    declaration.requires_python or ">=3.11", tuple(declaration.verify_imports),
                    resource(script) if script else None,
-                   resource_files=tuple(resource(item) for item in declaration.resources))
+                   resource_files=tuple(resource(item) for item in declaration.resources),
+                   lockfile=resource(declaration.lock) if declaration.lock else None)
 
     def identity(self) -> dict:
         if not self.owner_id or not self.environment_id:
             raise ValueError("A Pack environment needs an owner and environment ID")
+        if self.lockfile and self.requirements_files:
+            raise ValueError("Locked environments must declare direct requirements in requirements, not requirements_files")
         for module in self.verify_imports:
             if not re.fullmatch(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)*", module):
                 raise ValueError(f"Invalid verification module: {module}")
@@ -191,6 +194,7 @@ class PythonEnvironmentSpec:
                 "requirements": list(self.requirements), "requires_python": self.requires_python,
                 "requirement_digests": [_digest(path) for path in self.requirements_files],
                 "resource_digests": [_digest(path) for path in self.resource_files],
+                **({"lock_digest": _digest(self.lockfile)} if self.lockfile else {}),
                 "verify_imports": list(self.verify_imports),
                 "verify_script": _digest(self.verify_script) if self.verify_script else None,
                 "platform": sysconfig.get_platform(), "abi": sys.implementation.cache_tag}
@@ -272,41 +276,47 @@ class PackEnvironmentManager:
         interpreter and named requirements whose complete metadata is available
         inside the private packages directory. Other recipes reinstall normally.
         """
+        if relative != "host" or spec.requirements_files or spec.lockfile:
+            raise ValueError("Legacy recipe cannot be verified")
+        version = ".".join(map(str, sys.version_info[:3]))
+        PackEnvironmentManager._verify_requirements(spec, seed, version)
+
+    @staticmethod
+    def _verify_requirements(spec, seed, version):
         from importlib import metadata
         from packaging.requirements import Requirement
         from packaging.specifiers import SpecifierSet
         from packaging.utils import canonicalize_name
-        if relative != "host" or spec.requirements_files:
-            raise ValueError("Legacy recipe cannot be verified")
-        version = ".".join(map(str, sys.version_info[:3]))
+        marker_environment = {"python_full_version": version, "python_version": ".".join(version.split(".")[:2])}
         if version not in SpecifierSet(spec.requires_python):
-            raise ValueError("Legacy interpreter is incompatible")
+            raise ValueError("Worker interpreter is incompatible")
         installed = {}
         for distribution in metadata.distributions(path=[str(seed / "packages")]):
             name = canonicalize_name(distribution.metadata["Name"])
             if name in installed:
-                raise ValueError("Ambiguous legacy distribution")
+                raise ValueError("Ambiguous worker distribution")
             installed[name] = distribution
         pending, visited = [Requirement(value) for value in spec.requirements], set()
         while pending:
             requirement = pending.pop()
-            if requirement.marker and not requirement.marker.evaluate({"extra": ""}):
+            if requirement.marker and not requirement.marker.evaluate({**marker_environment, "extra": ""}):
                 continue
             name = canonicalize_name(requirement.name)
             distribution = installed.get(name)
-            # Direct URL provenance is absent in old environment receipts.
-            if requirement.url or distribution is None or distribution.version not in requirement.specifier:
-                raise ValueError("Legacy dependency does not match the declared recipe")
+            # Fresh locked installation checks URL hashes; legacy receipts cannot
+            # establish that provenance from distribution metadata alone.
+            if (requirement.url and not spec.lockfile) or distribution is None or distribution.version not in requirement.specifier:
+                raise ValueError("Worker dependency does not match the declared recipe")
             requires_python = distribution.metadata.get("Requires-Python", "")
             if version not in SpecifierSet(requires_python):
-                raise ValueError("Legacy dependency does not support this interpreter")
+                raise ValueError("Worker dependency does not support this interpreter")
             key = (name, tuple(sorted(requirement.extras)))
             if key in visited:
                 continue
             visited.add(key)
             for value in distribution.requires or ():
                 child = Requirement(value)
-                if not child.marker or any(child.marker.evaluate({"extra": extra}) for extra in ("", *requirement.extras)):
+                if not child.marker or any(child.marker.evaluate({**marker_environment, "extra": extra}) for extra in ("", *requirement.extras)):
                     child.marker = None
                     pending.append(child)
 
@@ -375,23 +385,26 @@ class PackEnvironmentManager:
         )
         result = self.root / "operations" / (handle.fingerprint + ".verify-" + uuid4().hex + ".json")
         result.parent.mkdir(parents=True, exist_ok=True)
-        self.runner([handle.python, "-I", "-S", "-B", "-c", probe, root,
-                     json.dumps(spec.verify_imports), result], env=env)
-        if spec.verify_script:
-            self.runner([handle.python, "-I", "-S", "-B", spec.verify_script, "--check", root], env=env)
-        if verifier:
-            verifier(handle)
-        verified = []
-        for item in json.loads(result.read_text(encoding="utf-8")):
-            path = Path(item).resolve()
-            if path.is_relative_to(root):
-                verified.append({"path": path.relative_to(root).as_posix(), "sha256": _digest(path)})
-        result.unlink()
-        return verified
+        try:
+            self.runner([handle.python, "-I", "-S", "-B", "-c", probe, root,
+                         json.dumps(spec.verify_imports), result], env=env)
+            if spec.verify_script:
+                self.runner([handle.python, "-I", "-S", "-B", spec.verify_script, "--check", root], env=env)
+            if verifier:
+                verifier(handle)
+            verified = []
+            for item in json.loads(result.read_text(encoding="utf-8")):
+                path = Path(item).resolve()
+                if path.is_relative_to(root):
+                    verified.append({"path": path.relative_to(root).as_posix(), "sha256": _digest(path)})
+            return verified
+        finally:
+            result.unlink(missing_ok=True)
 
     def prepare_python(self, spec: PythonEnvironmentSpec, *, verify: Callable | None = None,
                        seed_roots: tuple[Path, ...] = (),
                        previous_spec: PythonEnvironmentSpec | None = None) -> EnvironmentHandle:
+        from .lifecycle import ManagedResourceLedger, managed_environment_stages
         fingerprint = spec.fingerprint
         root = self.environment_root(spec)
         operation_path = self._operation_path(spec)
@@ -412,7 +425,11 @@ class PackEnvironmentManager:
                 previous_spec = None
             else:
                 seed_roots = (self.environment_root(previous_spec), *seed_roots)
-        with installation_lock(self.root / "locks" / (fingerprint + ".lock")):
+        with managed_environment_stages(self.root, fingerprint) as track_stage, installation_lock(self.root / "locks" / (fingerprint + ".lock")):
+            try:
+                previous = json.loads(operation_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                previous = {}
             try:
                 handle = self.read_python(spec)
                 # Explicit setup verifies cached environments, even offline.
@@ -420,44 +437,57 @@ class PackEnvironmentManager:
                 _json_write(operation_path, {"operation_id": handle.operation_id,
                     "fingerprint": fingerprint, "owner_id": spec.owner_id,
                     "environment_id": spec.environment_id, "status": "ready"})
+                if re.fullmatch(rf'{fingerprint}-[a-f0-9]{{32}}', previous.get('stage', '')):
+                    track_stage(self.root / 'staging' / previous['stage'])
                 return self._register(handle)
             except (RuntimeError, OSError, subprocess.SubprocessError):
                 pass
-            try:
-                previous = json.loads(operation_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                previous = {}
             operation_id = previous.get("operation_id") or uuid4().hex
+            previous_stage = previous.get("stage", "")
+            recovery = (self.root / "staging" / previous_stage
+                        if re.fullmatch(rf'{fingerprint}-[a-f0-9]{{32}}', previous_stage) else None)
             operation = {"operation_id": operation_id, "fingerprint": fingerprint,
                          "owner_id": spec.owner_id, "environment_id": spec.environment_id,
                          "attempt": int(previous.get("attempt", 0)) + 1, "status": "preparing",
                          "started_at": datetime.now(timezone.utc).isoformat()}
             stage = self.root / "staging" / (fingerprint + "-" + uuid4().hex)
             operation["stage"] = stage.name
+            operation['recovery_stage'] = recovery.name if recovery is not None else None
+            track_stage(stage)  # Journal ownership before any staging side effects.
+            track_stage(recovery)
             # Persist identity before subprocesses/download side effects.
             _json_write(operation_path, operation)
             stage.mkdir(parents=True)
             try:
-                previous_stage = previous.get("stage", "")
-                recovery = self.root / "staging" / previous_stage
-                if previous_stage and recovery.parent.resolve() == (self.root / "staging").resolve():
+                if recovery is not None:
                     seed_roots = (recovery, *seed_roots)
                 relative = self._populate(spec, stage, env, seed_roots, verify, previous_spec)
                 executable = str(Path(sys.executable) if relative == "host" else stage / relative)
                 handle = EnvironmentHandle(stage, executable, fingerprint, operation_id)
                 verified = self._verify(spec, handle, env, verify)
+                from importlib.metadata import distributions
+                resolved = {item.metadata['Name']: item.version
+                            for item in distributions(path=[str(stage / 'packages')])}
                 _json_write(stage / "ready.json", {"format": 1, "fingerprint": fingerprint,
-                            "python": relative, "operation_id": operation_id, "verified_files": verified})
+                            "python": relative, "operation_id": operation_id, "verified_files": verified,
+                            "resolved_packages": dict(sorted(resolved.items()))})
                 root.parent.mkdir(parents=True, exist_ok=True)
                 if root.exists():
-                    # Keep damaged versions for diagnosis; never edit a published
-                    # version in place. Different fingerprints remain untouched.
-                    root.rename(self.root / "staging" / (fingerprint + "-invalid-" + uuid4().hex))
+                    ManagedResourceLedger(self.root.parent).require_idle('environment:' + fingerprint)
+                    displaced = self.root / "staging" / (fingerprint + "-invalid-" + uuid4().hex)
+                    track_stage(displaced)
+                    root.rename(displaced)
                 stage.rename(root)
                 handle = self.read_python(spec)
-                _json_write(operation_path, {**operation, "status": "ready", "completed_at": datetime.now(timezone.utc).isoformat()})
+                _json_write(operation_path, {**operation, "status": "ready", 'recovery_stage': None,
+                                             "completed_at": datetime.now(timezone.utc).isoformat()})
                 return self._register(handle)
             except BaseException as exc:
+                # Only a verified stage can resume without another install.
+                # Keep that receipt; failure diagnostics live in the operation.
+                if not (stage / "ready.json").is_file():
+                    if recovery is not None and recovery.exists():
+                        operation['stage'] = recovery.name
                 # Do not record subprocess arguments: package URLs may contain credentials.
                 _json_write(operation_path, {**operation, "status": "failed", "error": type(exc).__name__,
                                             "completed_at": datetime.now(timezone.utc).isoformat()})
@@ -509,11 +539,21 @@ class PackEnvironmentManager:
                 env=env, text=True, timeout=60).strip()).resolve()
             relative = executable.relative_to(stage.resolve()).as_posix()
         (stage / "packages").mkdir(parents=True)
-        if spec.requirements or spec.requirements_files:
+        if spec.requirements or spec.requirements_files or spec.lockfile:
             if not uv:
                 raise RuntimeError("Preparing Pack dependencies requires uv on PATH")
             args = [uv, "pip", "install", "--python", executable, "--target", stage / "packages"]
+            if spec.lockfile:
+                # Hash checking also rejects missing/unpinned transitive dependencies.
+                args.extend(["--require-hashes", "-r", spec.lockfile])
+                constraints = stage / "declared-requirements.txt"
+                constraints.write_text("\n".join(spec.requirements), encoding="utf-8")
+                args.extend(["--constraint", constraints])
             for path in spec.requirements_files:
                 args.extend(["-r", path])
-            self.runner([*args, *spec.requirements], env=env)
+            self.runner([*args, *(() if spec.lockfile else spec.requirements)], env=env)
+            if spec.lockfile:
+                version = subprocess.check_output([str(executable), "-I", "-S", "-c",
+                    "import sys; print('.'.join(map(str, sys.version_info[:3])))"], env=env, text=True, timeout=30).strip()
+                self._verify_requirements(spec, stage, version)
         return relative

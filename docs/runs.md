@@ -167,12 +167,27 @@ inside their provider implementation.
 Run inspection and cancellation are available at:
 
 ```text
-GET  /api/runs
+GET  /api/runs?agent_id={agent_id}&limit=50&before={run_id}
 GET  /api/runs/{run_id}
 GET  /api/runs/{run_id}/children
 POST /api/runs/{run_id}/cancel
 ```
 
+
+`GET /api/runs` returns newest-first status summaries (default 50, maximum 200).
+Pass the last returned `run_id` as `before` to read older records; an empty page
+ends the history. `agent_id` and `task_id` filter the same ordered history.
+Full lifecycle details remain at `GET /api/runs/{run_id}`; append `?summary=true`
+for a single Run's status metadata without lifecycle bodies. Activity and reasoning
+bodies keep their existing lazy endpoints. `/api/lifecycle` includes all active
+executions and unresolved cleanup, plus at most 20 recent summaries. Its optional
+`agent_id` filter limits the Run list to that Agent without dropping older debt.
+
+Runtime providers retaining context sessions implement the optional
+`delete_context(agent_id, context_id)` hook. It must be idempotent. The host
+blocks new admission and verifies execution and cleanup have settled before
+releasing sessions, groups or their Conversation card. If provider cleanup fails,
+the durable context remains available for retry.
 
 ## Conversation timeline and sessions
 
@@ -325,3 +340,26 @@ message IDs only after including or accepting the input. Reads and acknowledgeme
 check the current Run, session membership and graph connection again. Inputs for
 other sessions or Agents are never returned. Optional `RuntimeProvider.notify_input`
 wakes event-driven adapters; it is not a delivery acknowledgement.
+
+## Indexed offline Run archives
+
+The native Run exporter is shared by host history tools and the local CLI.
+Automatic collection writes canonical JSON records plus `record catalog.json`
+and a streaming `timeline.jsonl`. Catalog entries use existing Run/tool/model IDs
+and JSON pointers into their original files; they are references, not a new log
+database. Model inputs/results, received thinking, conversation messages, native
+receipts and their completeness/redaction flags remain in the evidence files.
+Host collection omits duplicate legacy `.txt` views. The CLI's existing export
+keeps those views for local consumers.
+
+`run activity.json` exports the existing durable activity directory, including
+saved public progress/recovery events that have rotated out of lifecycle previews.
+Reading an export does not backfill or mutate the database. Native activity IDs
+also appear in the record catalog; complete tool/model bodies remain separate.
+
+`sandbox logs.json` preserves the bounded recent Sandbox cache as observed.
+`command evidence.json` resolves the same IDs against completed structured native
+tool responses, retaining source-file pointers and recording recovered or missing
+command results. A mentioned ID or a JSON-looking stdout string is not enough to
+create an execution record. Consumers use this common evidence resolution rather
+than treating presence of a recent-history file as proof of full coverage.

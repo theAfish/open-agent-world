@@ -82,6 +82,9 @@ def generate_structure_image(
     try:
         fig, ax = plt.subplots()
         plot_atoms(atoms, ax=ax, rotation=rotation)
+        # ASE supplies coordinates in physical units; automatic axes stretching
+        # otherwise turns atomic circles into ellipses and distorts the cell.
+        ax.set_aspect("equal", adjustable="box")
         ax.axis("off")
         plt.savefig(output_file_path, dpi=dpi, bbox_inches="tight")
         plt.close(fig)

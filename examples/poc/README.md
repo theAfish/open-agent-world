@@ -35,6 +35,12 @@ settings are shared by the Legions in this profile. For a small manual knowledge
 test, create a project and import [sample.md](sample.md); the data is synthetic.
 Model-based processing requires your own model connection.
 
+The shared starter uses the Sandbox's **Shared** workspace scope so its definition
+can run locally and on Alibaba. In the current Alibaba adapter, each user still
+has a dedicated VM and Volume; sessions within that user's workspace share files.
+Session/group write restrictions require a supporting local runtime and are rejected
+by the Alibaba adapter. Keep Shared selected when saving a scene for this deployment.
+
 All POC state lives under `.open-agent-world/development/profiles/poc/` in this
 checkout, already ignored by Git. Your personal/default profile is separate.
 Use `--profile another-name` on every command to keep a second independent POC.

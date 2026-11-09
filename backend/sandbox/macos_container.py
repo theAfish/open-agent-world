@@ -360,6 +360,7 @@ class MacosContainerSandboxBackend(SandboxBackend):
     intentionally no subprocess or path-only fallback.
     """
 
+    supports_workspace_scopes = True
     supports_invocation_environment = True
     supports_execution_policy = True
 
@@ -519,6 +520,7 @@ class MacosContainerSandboxBackend(SandboxBackend):
         invocation_env: Mapping[str, object] | None = None,
         runtime_mount: RuntimeMount | None = None,
         execution_policy: Mapping[str, Any] | None = None,
+        working_directory: str = "", workspace_write_directory: str | None = None,
     ) -> CommandResult:
         policy = execution_policy or {}
         if type(policy.get("network_enabled", False)) is not bool:
@@ -563,15 +565,17 @@ class MacosContainerSandboxBackend(SandboxBackend):
 
         container_id = self._execution_container_id(sandbox_id, execution.command_id)
         execution.container_id = container_id
+        from .files import working_path, command_path
+        working_path(owner.host_workspace, working_directory)
         container_argv = self._container_command(
             owner, mount, limits, container_id=container_id,
-            network_settings=network_settings)
+            network_settings=network_settings, workspace_write_directory=workspace_write_directory)
         request = json.dumps({
             "operation": "execute",
             "argv": list(command),
             "environment": environment,
             "timeout_seconds": timeout,
-            "cwd": "/workspace",
+            "cwd": command_path(working_directory),
         }, ensure_ascii=True).encode() + b"\n"
 
         started = time.monotonic()
@@ -652,7 +656,7 @@ class MacosContainerSandboxBackend(SandboxBackend):
     def _container_command(
         self, record: _Record, runtime_mount: tuple[Path, str] | None,
         limits: SandboxLimits, *, container_id: str | None = None,
-        network_settings: str | None = None,
+        network_settings: str | None = None, workspace_write_directory: str | None = None,
     ) -> list[str]:
         uid, gid = _host_identity()
         result = [
@@ -668,12 +672,17 @@ class MacosContainerSandboxBackend(SandboxBackend):
             "--cap-drop", "ALL",
             "--read-only", "--tmpfs", "/tmp",
             "--volume", (f"{record.host_workspace}:/workspace:ro"
-                if record.workspace_access == ResourceAccess.READ_ONLY
+                if record.workspace_access == ResourceAccess.READ_ONLY or workspace_write_directory is not None
                 else f"{record.host_workspace}:/workspace"),
             "--volume", f"{record.root / 'home'}:/sandbox/home",
             "--volume", f"{self.python_runtime.root}:{_PYTHON_RUNTIME_TARGET}:ro",
             "--workdir", "/workspace",
         ]
+        from .workspace_access import writable_path, mount_access
+        from .files import command_path
+        if workspace_write_directory and record.workspace_access != ResourceAccess.READ_ONLY:
+            writable = writable_path(record.host_workspace, workspace_write_directory)
+            result.extend(['--volume', f'{writable}:{command_path(workspace_write_directory)}'])
         if network_settings is not None:
             from .linux_network import PUBLIC_RESOLVERS
             # These are granted only to the trusted bootstrap. It installs
@@ -687,7 +696,7 @@ class MacosContainerSandboxBackend(SandboxBackend):
             result[3:3] = ["--name", container_id]
         for attachment in record.attachments.values():
             target = f"/sandbox/{attachment.relative_path}"
-            suffix = ":ro" if attachment.access == ResourceAccess.READ_ONLY else ""
+            suffix = ":ro" if mount_access(record.host_workspace, attachment.source, attachment.access, workspace_write_directory) == ResourceAccess.READ_ONLY else ""
             result.extend(["--volume", f"{attachment.source}:{target}{suffix}"])
         if runtime_mount is not None:
             source, key = runtime_mount

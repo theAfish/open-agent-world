@@ -24,6 +24,24 @@ def connect(client, agent, target, relationship):
     return response.json()
 
 
+def test_toolbox_read_and_execution_share_current_alias_after_card_rename(runtime_client):
+    client, _, _ = runtime_client
+    agent, sandbox, skill, toolbox, _ = setup_skill(client, toolbox=True)
+    value = client.get(f"/api/nodes/{skill['id']}/document").json()['value']
+    edit(client, skill, 'replace', {**value, 'name': 'legacy-skill'})
+    assert client.patch(f"/api/nodes/{skill['id']}", json={'name': 'renamed-skill'}).status_code == 200
+    provider = WorldAgentCapabilityProvider(client.app.state.services)
+    definitions = {tool.name: tool for tool in client.portal.call(provider.list_tools, agent['id'])}
+    execution = definitions['run_skill_script']
+    assert execution.input_schema['properties']['skill']['enum'] == ['renamed_skill']
+    read = client.portal.call(provider.invoke_tool, agent['id'], definitions['read_skills'].capability_id,
+        {'toolbox': toolbox['id'], 'skill_id': 'renamed_skill'})
+    assert read['skill']['name'] == 'legacy-skill'
+    result = client.portal.call(provider.invoke_tool, agent['id'], execution.capability_id,
+        {'sandbox': sandbox['id'], 'skill': 'renamed_skill', 'script': 'scripts/check.py'})
+    assert result['exit_code'] == 0
+
+
 def tools(client, agent):
     provider = WorldAgentCapabilityProvider(client.app.state.services)
     definitions = client.portal.call(provider.list_tools, agent["id"])
@@ -182,7 +200,7 @@ def test_sandbox_alone_does_not_expose_composite_tool(client):
     agent = create_node(client, "agent")
     sandbox = create_node(client, "sandbox")
     connect(client, agent, sandbox, "execute")
-    assert set(tools(client, agent)[1]) == {"execute_command", "write_sandbox_text_file", "inspect_sandbox", "install_python_packages", "cancel_command", "wait_sandbox_operation",
+    assert set(tools(client, agent)[1]) == {"list_sandbox_files", "read_sandbox_file", "execute_command", "write_sandbox_text_file", "inspect_sandbox", "install_python_packages", "cancel_command", "wait_sandbox_operation",
         "submit_background_job", "attach_background_job", "inspect_background_jobs", "wait_background_jobs", "control_background_job"}
 
 

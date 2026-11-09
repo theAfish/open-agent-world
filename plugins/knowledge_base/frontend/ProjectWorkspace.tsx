@@ -91,10 +91,12 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
   const filesInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const call = useCallback((action: string, args: Record<string, unknown> = {}, confirm?: boolean) => host.resourceAction(action, args, confirm), [host]);
-  const readAgentRuns = useCallback(async (agentId: string) => {
-    const response = await fetch(`${hostApiBase}/runs?agent_id=${encodeURIComponent(agentId)}`);
+  const readAgentRuns = useCallback(async (agentId: string, runId?: string) => {
+    const response = await fetch(runId ? `${hostApiBase}/runs/${encodeURIComponent(runId)}?summary=true`
+      : `${hostApiBase}/runs?agent_id=${encodeURIComponent(agentId)}`);
     if (!response.ok) throw new Error(t("Unable to read agent progress"));
-    const runs = await response.json() as { run_id: string; status: string; created_at: string; error?: string }[];
+    const value = await response.json();
+    const runs = (runId ? [value] : value) as { run_id: string; status: string; created_at: string; error?: string }[];
     if (!Array.isArray(runs)) throw new Error(t("Unable to read agent progress"));
     return runs;
   }, []);
@@ -150,7 +152,7 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
     let active = true;
     const timer = setTimeout(async () => {
       try {
-        const runs = await readAgentRuns(agentTask.agentId);
+        const runs = await readAgentRuns(agentTask.agentId, agentTask.runId);
         const run = agentTask.runId ? runs.find(r => r.run_id === agentTask.runId)
           : runs.filter(r => !agentTask.previousRunIds.includes(r.run_id) && Date.parse(r.created_at) >= Date.parse(agentTask.startedAt) - 1000).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
         if (!active) return;
@@ -314,11 +316,8 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
     try {
       abortRef.current?.abort();
       if (agent && !deployed) {
-        for (const run of await readAgentRuns(agent.id)) {
-          if (!LIVE_RUN.includes(run.status.toLowerCase())) continue;
-          const response = await fetch(`${hostApiBase}/runs/${encodeURIComponent(run.run_id)}/cancel`, { method: "POST" });
-          if (!response.ok) throw new Error(t("The run could not be stopped"));
-        }
+        const response = await fetch(`${hostApiBase}/agents/${encodeURIComponent(agent.id)}/stop`, { method: "POST" });
+        if (!response.ok) throw new Error(t("The run could not be stopped"));
       }
       const ids = new Map(running.map(r => [r.id, r.revision]));
       for (const id of agentTask?.projectionIds ?? []) if (!ids.has(id)) ids.set(id, 1);
@@ -330,7 +329,7 @@ export function ProjectWorkspace({ host, cardId, tab, visible, onTab, deployed, 
       await load();
     } catch (reason) { if (mounted.current) setError(message(reason)); }
     finally { if (mounted.current) setStopping(false); }
-  }, [agent, deployed, running, agentTask, call, load, readAgentRuns]);
+  }, [agent, deployed, running, agentTask, call, load]);
   const active = !!agentTask || !!progress || running.length > 0;
   const canStop = active && !stopping;
   const logAvailable = !!agentTask || (!deployed && !!agent) || progressLog.length > 0;

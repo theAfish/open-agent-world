@@ -1,5 +1,5 @@
 ---
-name: structure-inspect
+name: structure_inspect
 description: Read and validate atomic structures — summarize a file, dump raw text, measure inter-atomic distances, detect overlapping atoms.
 when_to_use: Use to confirm what is in a structure file before / after another step (atom count, formula, cell, PBC), to measure a specific bond distance, or to flag unrealistic close contacts.
 entry: scripts/structure_inspect.py
@@ -15,7 +15,7 @@ command/options in `argv`. Python is selected by the Sandbox automatically;
 the whole read-only bundle, including its imports, is projected for that
 command. Do not copy individual bundle files or infer host runtime paths.
 
-Inside the AtomSculptor Builder, prefer `validate_modelling_artifact(sandbox,
+When the staged AtomSculptor Builder exposes it, prefer `validate_modelling_artifact(sandbox,
 skill, structure_path, checks)` for a saved HOST artifact. It
 uses this same authorized inspector, waits for native receipts; it does not
 import or advance any stage.
@@ -29,7 +29,7 @@ and degree checks still apply. Labels survive
 translation and reordered atom rows; guessed index ranges and nearest points
 in unrelated frames do not establish identity.
 
-Builder modelling steps stage a Run-specific helper module via a native Sandbox
+In staged custom-modelling Runs, Builder steps stage a Run-specific helper module via a native Sandbox
 write. Import the module name in `HOST STABLE CONTEXT.modelling_io`: `load_inputs`
 returns a path-indexed list manifest (empty when absent), verifies bytes and
 offers `array`, `atoms`, `label_indices`, `json` and `receipt`. `constraint`,
@@ -37,8 +37,17 @@ offers `array`, `atoms`, `label_indices`, `json` and `receipt`. `constraint`,
 NumPy scalar values. Put controls inside constraints. Failed checks remain
 failed, and nonfinite values are rejected. `transform_points` requires the same
 explicit `frame.reference` in both coordinate systems; prefer saved labels.
-Use `read_modelling_source` with a script path and character offset/limit
-for repairs; it reads the last native-confirmed source snapshot without a command.
+The host frame includes diagnostic/candidate examples. Read
+`references/measurement-contract.json` through this authorized Skill for the full
+versioned schema, optional fields and limits. It is generated from the same
+`Measurement` types that validate stdout; examples are shapes, not measured facts.
+Each constraint with `check_ids` must include nonempty `regions` naming the
+actual populations counted in `coverage`; check IDs alone do not bind coverage.
+Use `read_modelling_source` with a script path and `query`, Python `symbol`, or
+1-based `start_line`/`end_line` to locate a repair. Character `offset`/`limit`
+provide bounded continuation. It returns raw text, line positions and the current
+native-confirmed saved version without running a command; avoid rereading a whole
+unchanged file when the needed region is already visible.
 
 `emit_measurements` saves oversized ordinary diagnostics to `.oaw-reports/` in
 the Sandbox and emits bounded references. Scalar facts and scientific checks
@@ -83,7 +92,12 @@ no built-in default carbon-junction potential or universal ring/force criterion.
   cells include image neighbors and nonzero self images; finite clusters use
   Cartesian distances. Explicit `finite`/`periodic` must agree with the PBC.
 - `validate_nanotube` — the above plus radius, unrolled graphene lattice,
-  chirality and complete axial windows for an **unrelaxed, open single-wall CNT**.
+  chirality and complete axial windows for a **finite, fully nonperiodic,
+  unrelaxed, open single-wall CNT**. Every PBC flag must be false; this validator
+  does not cover periodic tubes, nested tubes or junctions. For periodic files,
+  use `validate_structure` with PBC-consistent distance settings and any additional
+  task-specific checks. `nanotube_builder` defaults to periodic z; generate a
+  finite tube with `--pbc-z false` for this specialized validator.
   The tube axis must be Cartesian (`--axis 0`, `1` or `2`; default `2`).
 - `to_atomsculptor_document` — convert a structure file to the canonical
   StructureDocument JSON (stable atom IDs preserved when present).

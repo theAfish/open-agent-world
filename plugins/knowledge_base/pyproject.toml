@@ -11,6 +11,8 @@ dependencies = [
     # a .pth hook rejected by the shared-adapter wheel boundary.
     "pymupdf4llm>=0.0.17,<2; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "pymupdf4llm>=0.0.17,<0.4; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    # Keep Library's shared PDF engine contract; 2.x has no Intel macOS wheel.
+    "pymupdf>=1.25,<2",
     "openpyxl>=3.1,<4",
     "httpx>=0.28,<1",
 ]

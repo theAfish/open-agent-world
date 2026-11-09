@@ -1,3 +1,4 @@
+import { useWorkspaceContext, type WorkspaceContext } from '../state/workspaceContext';
 import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { ArrowLeft, Download, FileText, FolderOpen, History, RefreshCw, Settings, Square, Terminal } from "lucide-react";
@@ -18,9 +19,9 @@ import { useWorkspaceNavigation } from '../workspace/WorkspaceNavigation';
 import { WorkspaceEmptyState } from "../workspace/WorkspacePrimitives";
 import "./sandboxWorkspace.css";
 
-import { SandboxFileBrowser, type FileRoot as Root, type FileEntry as Entry, type FileSelection, type FileChange } from "./SandboxFileBrowser";
+import { SandboxFileBrowser, type FileRoot as Root, type FileEntry as Entry, type FileSelection, type FileChange, type WorkspacePicker } from "./SandboxFileBrowser";
 interface Files { entries?: Entry[]; truncated?: boolean; next_cursor?: string; state?: string; text?: string; data?: string; media_type?: string; message?: string }
-interface Receipt { id: string; caller: string; state: string; argv: string[]; stdout?: string; stderr?: string; error?: string; exit_code?: number; duration_seconds?: number; skill_id?: string; operation_kind?: string }
+interface Receipt { id: string; caller: string; state: string; argv: string[]; stdout?: string; stderr?: string; error?: string; exit_code?: number; duration_seconds?: number; skill_id?: string; operation_kind?: string; working_directory?: string }
 interface Bundle { cached?: boolean; current?: boolean; revision: number; files: string[]; status: string; note: string }
 
 function tabKeys(event: KeyboardEvent<HTMLElement>) {
@@ -41,6 +42,7 @@ function historyReceipt(value: unknown, index: number): Receipt | undefined {
   const item = value as Record<string, unknown>;
   const optionalText = (key: string) => typeof item[key] === "string" ? item[key] as string : undefined;
   return {
+    working_directory: optionalText("working_directory"),
     id: optionalText("id") ?? `legacy-${index}`,
     caller: optionalText("caller") ?? "unknown",
     state: optionalText("state") ?? "unknown",
@@ -55,6 +57,24 @@ function historyReceipt(value: unknown, index: number): Receipt | undefined {
 const receiptLabel = (receipt: Receipt) => receipt.argv.at(-1) ?? receipt.operation_kind ?? "Sandbox operation";
 
 export function SandboxWorkspace({ card }: { card: WorldCard }) {
+  useLocale();
+  const { value, error, reload } = useWorkspaceContext(card.id, !card.ephemeral);
+  if (card.ephemeral) return <SandboxWorkspaceView card={card} scope={{ key: 'ephemeral', directory: '', label: '', scope_type: 'session', scope_id: 'default', session_id: 'default', group_id: 'default', conversation_id: null, sandbox_id: card.id }} />;
+  if (!value) return <p role={error ? 'alert' : 'status'}>{error ?? t('Loading workspace…')}
+    {error && <button className="secondary-button" onClick={reload}>{t('Retry')}</button>}</p>;
+  return <SandboxWorkspaceBrowser key={value.key} card={card} currentScope={value} onWorkspaceChange={reload} />;
+}
+
+function SandboxWorkspaceBrowser({ card, currentScope, onWorkspaceChange }: { card: WorldCard; currentScope: WorkspaceContext; onWorkspaceChange: () => void }) {
+  const [choice, setChoice] = useSurfaceDraft<string | null>(surfaceDraftKey(card.id, 'sandbox-view', currentScope.key), null);
+  const overview = currentScope.bound === false || choice === '';
+  const scope = overview ? { ...currentScope, directory: '', key: JSON.stringify(['sandbox-browser', card.id, '']), label: t('Total workspace') } : currentScope;
+  const picker: WorkspacePicker = { value: overview ? '' : '@current', currentLabel: currentScope.conversation_id === null ? t(currentScope.label) : currentScope.label, currentAvailable: currentScope.bound !== false,
+    onChange: value => setChoice(value === '' ? '' : null) };
+  return <SandboxWorkspaceView key={scope.key} card={card} scope={scope} overview={overview} workspacePicker={picker} fileWorkspaceKey={currentScope.key} onWorkspaceChange={onWorkspaceChange} />;
+}
+
+function SandboxWorkspaceView({ card, scope, overview = false, workspacePicker, fileWorkspaceKey = scope.key, onWorkspaceChange }: { card: WorldCard; scope: WorkspaceContext; overview?: boolean; workspacePicker?: WorkspacePicker; fileWorkspaceKey?: string; onWorkspaceChange?: () => void }) {
   useLocale();
   const { deployed, permissions } = useWorkspaceAccess();
   const terminalAllowed = !deployed || permissions[card.id]?.includes("terminal");
@@ -74,7 +94,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const busy = useWorldStore(s => s.sandboxBusy[card.id]);
   const runtimeError = useWorldStore(s => s.sandboxErrors[card.id]);
   const socket = useWorldStore(s => s.socketState);
-  const draftKey = (name: string) => surfaceDraftKey(card.id, `sandbox-${name}`, card.config.runtime, card.config.workspace_path, card.config.workspace_access, deployed);
+  const draftKey = (name: string) => surfaceDraftKey(card.id, `sandbox-${name}`, card.config.runtime, card.config.workspace_path, card.config.workspace_access, deployed, scope.key);
   const cards = useWorldStore(s => s.cards);
   const loadRuntimes = useWorldStore(s => s.loadSandboxRuntimes);
   const tab = useNodeSurfaceStore(s => !deployed && s.drafts[`sandbox-tab:${card.id}`] === "settings" ? "settings" : "workspace");
@@ -82,8 +102,8 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const [settingsInteraction, setSettingsDirty] = useState(false);
   const draftDirty = useNodeSurfaceStore(s => sandboxSettingsDirty(card, s.drafts[`sandbox-settings:${card.id}`]));
   const settingsDirty = settingsInteraction || draftDirty;
-  const draft = useNodeSurfaceStore(s => s.drafts[`sandbox:${card.id}`] ?? "");
-  const setDraft = (value: string) => useNodeSurfaceStore.getState().setDraft(`sandbox:${card.id}`, value);
+  const draft = useNodeSurfaceStore(s => s.drafts[draftKey('command')] ?? "");
+  const setDraft = (value: string) => useNodeSurfaceStore.getState().setDraft(draftKey('command'), value);
   const [sidebarWidth, setSidebarWidth] = useState(() => boundedSize(Number(useNodeSurfaceStore.getState().drafts[`sandbox-sidebar:${card.id}`] ?? 224), 180, 420, 224));
   const sidebarElement = useRef<HTMLElement>(null);
   const resizing = useRef<{ x: number; width: number; scale: number }>();
@@ -114,6 +134,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const savedDraft = useRef("");
   const [commands, setCommands] = useSurfaceDraft<string[]>(draftKey('commands'), []);
   const [managedPython, setManagedPython] = useState(false);
+  const workspaceDirectory = scope.directory;
   const [terminalTab, setTerminalTab] = useSurfaceDraft(draftKey('terminal-tab'), 'terminal');
   const [selection, setSelection] = useSurfaceDraft<{ root: string; path: string; label: string } | undefined>(draftKey('selection'), undefined);
   const selectionRef = useRef(selection); selectionRef.current = selection;
@@ -132,13 +153,14 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const [filesError, setFilesError] = useState("");
   const [publishPaths, setPublishPaths] = useSurfaceDraft<string[]>(draftKey('publish-paths'), []);
   const binding = JSON.stringify([card.id, card.config.runtime, card.config.workspace_path, card.config.workspace_access,
-    info?.runtime_id, info?.workspace_path, info?.workspace_access, info?.workspace]);
+    info?.runtime_id, info?.workspace_path, info?.workspace_access, info?.workspace, scope.key]);
   const transfers = useTransferQueue(binding);
   useHydrationLease(card.id, 'sandbox-transfers', transfers.active);
-  const fileContext = useRef({ binding, live: true, generation: 0, requests: new Map<string, number>() });
-  if (fileContext.current.binding !== binding) {
+  const viewBinding = JSON.stringify([binding, scope.directory]);
+  const fileContext = useRef({ binding: viewBinding, live: true, generation: 0, requests: new Map<string, number>() });
+  if (fileContext.current.binding !== viewBinding) {
     fileContext.current.live = false;
-    fileContext.current = { binding, live: true, generation: 0, requests: new Map() };
+    fileContext.current = { binding: viewBinding, live: true, generation: 0, requests: new Map() };
   }
   const context = fileContext.current;
   function fileRequest(key: string) {
@@ -161,9 +183,9 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const activeCommands = history.filter(h => h.state === "running");
   const running = activeCommands.length === 1 ? activeCommands[0] : undefined;
   const occupied = !!busy || !!running || card.status === "running" || diagnosticBusy;
-  const ready = !!info?.available && info.state !== "error" && !busy && !diagnosticBusy && !settingsDirty;
-  const output = Array.isArray(card.config.output) && card.config.output.length
-    ? card.config.output.map(String).slice(-250).join("\n")
+  const ready = scope.bound !== false && !!info?.available && info.state !== "error" && !busy && !diagnosticBusy && !settingsDirty;
+  const output = !overview && card.config.output_directory === workspaceDirectory && Array.isArray(card.config.output) && card.config.output.length
+    ? card.config.output.map(String).slice(-250).join('\n')
     : history.map(h => [`$ ${receiptLabel(h)}`, h.stdout, h.stderr, h.error].filter(Boolean).join("\n")).join("\n");
   useEffect(() => {
     // An empty terminal starts at the top already. Reading scrollHeight while
@@ -174,7 +196,8 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   async function refreshHistory() {
     if (card.ephemeral || !terminalAllowed) return;
     const records = await worldApi.sandboxWorkspace<unknown>(card.id, "history");
-    setHistory(Array.isArray(records) ? records.map(historyReceipt).filter((receipt): receipt is Receipt => !!receipt) : []);
+    if (context.live) setHistory(Array.isArray(records) ? records.map(historyReceipt).filter((receipt): receipt is Receipt => !!receipt
+      && (overview || (receipt.working_directory ?? '') === workspaceDirectory)) : []);
   }
   async function refreshFiles() {
     if (card.ephemeral || !filesAllowed) return;
@@ -185,7 +208,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
       if (!current()) return;
       if (!Array.isArray(value)) throw new Error((value as Files).message ?? t("Workspace unavailable"));
       const open = { ...expandedRef.current };
-      if (!("workspace:" in open) && value.some(root => root.id === "workspace" && root.directory)) open["workspace:"] = true;
+      if (!(`workspace:${workspaceDirectory}` in open) && value.some(root => root.id === "workspace" && root.directory)) open[`workspace:${workspaceDirectory}`] = true;
       const directories = value.flatMap(root => Object.entries(open)
         .filter(([key, visible]) => visible && root.directory && key.startsWith(`${root.id}:`))
         .map(([key]) => ({ key, root: root.id, path: key.slice(root.id.length + 1) })));
@@ -246,7 +269,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     const current = fileRequest("preview");
     setSelection({ root, path, label }); setPreview(undefined);
     if (reveal) navigation?.activate({ card_id: card.id, section_id: 'preview' });
-    useOpenFiles.getState().open({ kind: "sandbox", source_id: card.id, root, path }, label, { reveal });
+    useOpenFiles.getState().open({ kind: "sandbox", source_id: card.id, root, path }, label, { reveal, workspaceKey: fileWorkspaceKey });
     try {
       const value = await worldApi.sandboxWorkspace<Files>(card.id, fileQuery("preview", root, path));
       if (current()) setPreview(value);
@@ -301,7 +324,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     recalled.current = -1;
     setCommands(current => [...current, command].slice(-100));
     setDraft(""); setError("");
-    try { await execute(card.id, command, managedPython ? "managed" : "auto"); await refreshHistory(); await refreshFiles(); }
+    try { await execute(card.id, command, managedPython ? "managed" : "auto", workspaceDirectory); if (scope.claimed === false) onWorkspaceChange?.(); await refreshHistory(); await refreshFiles(); }
     catch (e) { setError(apiErrorMessage(e)); }
     finally { submitting.current = false; }
   }
@@ -367,10 +390,16 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
       <WorkspaceSection id="files" title={t("Files")} layout={{ min_width: 240, min_height: 180, ideal_width: 320, ideal_height: 540 }} className={`sandbox-files-section${hasWorkArea ? "" : " is-only-section"}`} style={{ '--sandbox-sidebar-width': hasWorkArea ? `${sidebarWidth}px` : "100%" } as CSSProperties}>
       <SandboxFileBrowser key={binding} cardId={card.id} roots={roots} tree={tree} expanded={expanded}
         loading={loading} selection={selection} error={filesError} sidebarRef={sidebarElement}
+        workspaceDirectory={workspaceDirectory} workspaceLabel={scope.label} workspacePicker={workspacePicker}
         workspacePath={info?.workspace_path ?? info?.workspace ?? t("Managed workspace")}
-        writable={!deployed && !card.ephemeral && roots.some(root => root.id === 'workspace' && root.access === 'read_write') && info?.workspace_access !== 'read_only'}
+        writable={!deployed && !card.ephemeral && roots.some(root => root.id === 'workspace' && root.access === 'read_write') && info?.workspace_access !== 'read_only' && (!overview || scope.scope_type === 'shared')}
         onExpand={expand} onSelect={(root, path, label) => { if (previewInline) setCompactView('preview'); return select(root, path, label); }} onDownload={download} transfers={transfers} onLoadMore={loadDirectory} onChange={filesChanged}
-        onRefresh={async () => { await refreshFiles(); if (selection) await select(selection.root, selection.path, selection.label); }} />
+        onRefresh={async () => {
+          if (scope.claimed === false) onWorkspaceChange?.();
+          await refreshFiles();
+          if (!context.live) return;
+          if (selection) await select(selection.root, selection.path, selection.label);
+        }} />
       </WorkspaceSection>
       {filesInline && hasWorkArea && <div className="sandbox-file-divider" role="separator" aria-label={t("Resize file sidebar")} aria-orientation="vertical"
         aria-valuemin={180} aria-valuemax={420} aria-valuenow={sidebarWidth} tabIndex={0}
@@ -449,7 +478,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
               onScroll={e => { const el = e.currentTarget; followOutput.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32; }}
               onClick={() => { if (!window.getSelection()?.toString()) terminalInput.current?.focus(); }}>
               <div role="log" aria-live="polite" aria-label={t("Command output")}>
-                {output ? <pre>{output}</pre> : <span>{ready ? t("Ready for a command.") : occupied ? t("Command running?") : settingsDirty ? t("Save or reset settings before running commands.") : t("Execution environment unavailable.")}</span>}
+                {output ? <pre>{output}</pre> : <span>{scope.bound === false ? t('Select a connected Conversation session to use the current workspace.') : ready ? t("Ready for a command.") : occupied ? t("Command running?") : settingsDirty ? t("Save or reset settings before running commands.") : t("Execution environment unavailable.")}</span>}
               </div>
               <form className="sandbox-command-form" onSubmit={e => { e.preventDefault(); void run(); }}>
                 <span className="sandbox-prompt" aria-hidden="true">$</span>
@@ -463,6 +492,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
             {!history.length && <WorkspaceEmptyState title={t('No executions yet.')} description={t('Run a command to see its output and status here.')} actions={<button type="button" className="secondary-button" onClick={() => { setTerminalTab('terminal'); terminalInput.current?.focus(); }}>{t('Terminal')}</button>} />}
             {[...history].reverse().map(h => <article key={h.id}><header><strong>{h.caller} · {h.state}</strong><small>{t("Exit")} {h.exit_code ?? "—"} · {h.duration_seconds?.toFixed(2) ?? "—"}s</small></header>
               {h.state === "running" && <IconButton icon={Square} size="xs" quiet label={t("Cancel command")} onClick={() => void action(`cancel?command_id=${encodeURIComponent(h.id)}`)} />}
+              {h.working_directory && <small>{h.working_directory}</small>}
               <code>{h.argv.join(" ") || h.operation_kind || t("Unknown command")}</code><pre>{h.error || `${h.stdout ?? ""}${h.stderr ?? ""}`}</pre></article>)}
           </div>
         </section>

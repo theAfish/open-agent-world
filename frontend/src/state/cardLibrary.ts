@@ -5,7 +5,7 @@ import type { NodeTypeCatalogItem, PackDefinition, PluginCatalog } from "../type
 import { loadLegacyDecks } from "../palette/legacyDecks";
 import { useWorldStore } from "./worldStore";
 
-export interface DeckEntry { kind: "node" | "legion"; id: string }
+export interface DeckEntry { kind: "node" | "legion" | "legion_instance"; id: string }
 export interface CardDeck { id: string; name: string; icon: string; entries: DeckEntry[] }
 export type { PackDefinition } from "../types/world";
 export interface LibrarySnapshot {
@@ -22,6 +22,8 @@ export interface LibrarySnapshot {
   available_pack_ids: string[];
   /** Registry-owned preset provenance; older backend snapshots may omit it. */
   preset_pack_ids?: Record<string, string[]>;
+  /** References to existing world Legions, including completed migrations. */
+  legion_instances?: Record<string, { name: string; description: string }>;
 }
 export interface LibraryEdit {
   action: "open_pack" | "dismiss_pack" | "create_deck" | "update_deck" | "delete_deck" | "activate_deck" | "move_entry" | "import_legacy" | "set_plugin_enabled";

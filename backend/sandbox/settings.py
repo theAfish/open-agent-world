@@ -52,6 +52,7 @@ class SandboxSettingsUpdate(SandboxSettings):
 class SandboxSettingsStatus(SandboxSettings):
     secret_bindings: dict[str, bool] = Field(default_factory=dict)
     folder_bindings: dict[str, FolderBinding] = Field(default_factory=dict)
+    binding_errors: dict[str, str] = Field(default_factory=dict)
     backup_paths: list[str] = Field(default_factory=list)
 
 
@@ -82,10 +83,19 @@ class SandboxSettingsStore:
                 "SELECT value_json FROM application_settings WHERE key = 'sandbox_workspace_backups'"
             ).fetchone()
             settings = self.read()
-            bindings = {v.secret_ref: self.credentials.configured(None, v.secret_ref)
+            bindings = {v.secret_ref: self.credentials.readable(None, v.secret_ref)
                         for v in settings.environment_variables.values() if isinstance(v, SecretRequirement)}
+            folders, errors = {}, {}
+            for name, value in settings.environment_variables.items():
+                if isinstance(value, SecretRequirement) and self.credentials.configured(None, value.secret_ref) and not bindings[value.secret_ref]:
+                    errors[name] = "Re-enter the secret and save."
+                if isinstance(value, (FolderRequirement, FileRequirement, PathRequirement)) and self.folders.configured(None, value.reference):
+                    try:
+                        folders[value.reference] = self.folders.folder(None, value.reference)
+                    except (ResourceValidationError, ValueError):
+                        errors[name] = "Choose the file or folder again and save."
             return SandboxSettingsStatus(**settings.model_dump(), secret_bindings=bindings,
-                                         folder_bindings=self.folders.public(None, settings.environment_variables),
+                                         folder_bindings=folders, binding_errors=errors,
                                          backup_paths=json.loads(row["value_json"]) if row else [])
 
     def record_backups(self, paths: list[str]) -> None:
@@ -104,7 +114,7 @@ class SandboxSettingsStore:
         if set(secrets) - references:
             raise ResourceValidationError("Secret does not belong to this environment")
         for name, value in settings.environment_variables.items():
-            if isinstance(value, SecretRequirement) and value.secret_ref not in secrets and not self.credentials.configured(None, value.secret_ref):
+            if isinstance(value, SecretRequirement) and value.secret_ref not in secrets and not self.credentials.readable(None, value.secret_ref):
                 raise ResourceValidationError(f"Enter a secret for {name}, or remove the unused variable")
         return references
 

@@ -75,8 +75,8 @@ def doctor(source: Path, *, data_root: Path | None = None) -> dict:
                 state = ("needs_configuration" if declaration.management == "external"
                          else "on_use" if declaration.target == "sandbox" else "unchecked")
                 error = None
-                if declaration.target == "host-worker" and declaration.management == "managed" and declaration.lock:
-                    state, error = "unsupported", "This Python provider does not yet support lockfile installation"
+                if declaration.lock and not (declaration.target == "host-worker" and declaration.provider == "python"):
+                    state, error = "unsupported", "This environment provider does not support lockfile installation"
                 row = {"id": name, "state": state, "error": error, "target": declaration.target,
                        "provider": declaration.provider, "management": declaration.management}
             row["declaration"] = declaration.model_dump(mode="json")

@@ -48,11 +48,13 @@ class OperationReceiptMismatch(RuntimeError):
         super().__init__("Wait returned another operation; retain the original pending receipt")
 
 
-async def collect_operation_result(result, wait, stopped, *, before_wait=None):
+async def collect_operation_result(result, wait, stopped, *, before_wait=None, on_progress=None):
     """Collect one native operation. Never submit work or switch operation IDs.
 
     wait(operation_id, seconds) retains the caller's authorization and tracing
     callbacks. Errors/unknown receipts return to the caller without retrying.
+    on_progress receives each verified running receipt before the next wait;
+    observers must not treat preparation as command execution.
     """
     payload = tool_payload(result)
     operation_id = payload.get("operation_id")
@@ -61,6 +63,8 @@ async def collect_operation_result(result, wait, stopped, *, before_wait=None):
     while payload.get("status") == "running":
         if stopped.is_set():
             raise asyncio.CancelledError()
+        if on_progress is not None:
+            on_progress(payload)
         seconds = before_wait(operation_id) if before_wait is not None else 30
         previous = result
         result = await wait(operation_id, seconds)

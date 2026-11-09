@@ -1,5 +1,5 @@
 ---
-name: structure-image
+name: structure_image
 description: Render a PNG image of an atomic structure (rotation, DPI controllable) using ASE + matplotlib.
 when_to_use: Use to write a PNG file of a Sandbox structure when an image artifact is requested. For the live open Structure workspace, use the authorized observe_atom_structure capability instead.
 entry: scripts/structure_image.py

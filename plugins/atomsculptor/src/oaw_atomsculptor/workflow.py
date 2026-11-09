@@ -58,6 +58,13 @@ PLAN_RESULT_SCHEMA["properties"]["stages"]["items"]["properties"]["experiment"][
     "ONE literal workspace-relative Python script path, such as measurements/next step.py. "
     "Use letters, numbers, spaces, dots, underscores or hyphens in the filename. "
     "Put reuse instructions in method and retained data paths in input_paths; do not combine filenames or annotations here.")
+_stage_properties = PLAN_RESULT_SCHEMA["properties"]["stages"]["items"]["properties"]
+_stage_properties["checks"]["description"] = (
+    "Acceptance derived from the original user request. Keep optional method diagnostics in method_checks; do not add guessed thresholds as user requirements.")
+_stage_properties["method_checks"] = {**deepcopy(_stage_properties["checks"]), "minItems": 0,
+    "description": "Optional Planner-selected method/checker diagnostics, distinct from user acceptance. These do not create requirement IDs."}
+_stage_properties["experiment"]["description"] = (
+    "The next useful executable result, not the whole stage goal. A simple construction may finish in one action; otherwise name a measurable saved intermediate.")
 
 # Prose lengths are writing guidance. The existing whole-result boundary still
 # protects payload size; a two-character prose overrun is not a failed experiment.
@@ -86,6 +93,7 @@ for _field in ("objective",):
     EXPERIMENT_SCHEMA["properties"].pop(_field)
 EXPERIMENT_SCHEMA["required"] = ["scope", "artifact", "question", "method", "expected_output", "stop_condition"]
 EXPERIMENT_SCHEMA["additionalProperties"] = False
+SUBTASK_RESULT_FIELDS = frozenset({"status", "next_experiment", "command_id", "plan_revision", "subtask_id"})
 
 
 def script_target(value):
@@ -193,6 +201,14 @@ def validate_plan(value):
             for position, check in enumerate(checks):
                 text(check, f"{field}.checks[{position}]", PLAN_LIMITS["check_chars"])
         stage = {"id": expected, "goal": item.get("goal"), "checks": checks}
+        if "method_checks" in item:
+            diagnostics = item["method_checks"]
+            if not isinstance(diagnostics, list) or len(diagnostics) > PLAN_LIMITS["checks_per_stage"]:
+                issue(field + ".method_checks", "Use an array of optional method diagnostics within the stage check count bound.")
+            else:
+                for position, check in enumerate(diagnostics):
+                    text(check, f"{field}.method_checks[{position}]", PLAN_LIMITS["check_chars"])
+                stage["method_checks"] = list(diagnostics)
         if expected != "deliver":
             action = item.get("experiment")
             if not isinstance(action, Mapping):
@@ -393,7 +409,7 @@ class ModellingWorkflow:
         merged = {"status": value.get("status"), "delivery": value.get("delivery", self.delivery),
                   "assumptions": deepcopy(value.get("assumptions", self.assumptions)), "stages": deepcopy(self.plan)}
         for change in stages:
-            if (set(change) - {"id", "goal", "checks", "experiment"} or
+            if (set(change) - {"id", "goal", "checks", "method_checks", "experiment"} or
                     isinstance(change.get("experiment"), Mapping) and set(change["experiment"]) -
                     set(PLAN_RESULT_SCHEMA["properties"]["stages"]["items"]["properties"]["experiment"]["properties"])):
                 return None, [{"field": "result.stages", "message": "Use declared stage/experiment fields; omitted fields retain host values."}]
@@ -420,12 +436,11 @@ class ModellingWorkflow:
             registry = self.dependency_registry(evidence)
             for key, values in (("depends_on", [r["id"] for r in registry["completed_subtasks"]]),
                                 ("evidence_refs", registry["execution_refs"])):
-                field = schema["properties"][key]
                 if values:
+                    field = schema["properties"][key]
                     field["items"]["enum"] = values
                 else:
-                    field["maxItems"] = 0
-                field["description"] += " Only the HOST IDs listed here are available; omit when empty."
+                    schema["properties"].pop(key, None)
         return schema
 
     def validate_next_experiment(self, value, evidence, sandbox, *, assessing=None):
@@ -466,8 +481,8 @@ class ModellingWorkflow:
         if missing:
             return self.error("subtask_inputs",
                 "These planned input_paths have no HOST artifact receipts: " + ", ".join(missing) +
-                ". Fix by exactly ONE route: (1) rerun the producer step so it emits oaw_measurements "
-                "artifact records for those files (modelling_io emit_measurements/artifact); "
+                ". Fix by exactly ONE route: (1) collect the existing native Skill operation's completed "
+                "JSON output receipt, or make the producer report its saved files with emit_measurements/artifact; "
                 "(2) finish_task status=needs_plan_review to revise the plan so this subtask does not "
                 "consume them; (3) if an input is unrelated, correct next_experiment.input_paths. "
                 "Inspecting files cannot create a receipt.")
@@ -505,7 +520,14 @@ class ModellingWorkflow:
 
     def prepare_subtask_finish(self, value, evidence):
         self._pending_subtask = None
-        if set(value) - {"status", "next_experiment", "command_id", "plan_revision", "subtask_id"}:
+        ready = self.ready_execution(evidence)
+        if ready is not None:
+            response = self.error("subtask_evidence", "The current assessment is ready; subtask_complete requires continue. "
+                "Complete the current checkpoint with advance_modelling_stage and its actual candidate path. "
+                "Do not change the recorded assessment to bypass this state.")
+            response["error"].update(field="observation.outcome", actual_outcome="ready", expected_outcome="continue")
+            return response
+        if set(value) - SUBTASK_RESULT_FIELDS:
             return self.error("subtask_fields", "Return status=subtask_complete and next_experiment; the host fills the result facts.")
         item = evidence.latest_experiment()
         observation = evidence.experiment_observations.get(item.execution_sequence, {}) if item else {}
@@ -514,7 +536,7 @@ class ModellingWorkflow:
         if (self.current not in EXPERIMENT_SCOPES or not item or item.exit_code != 0
                 or item.execution_sequence <= self.anchor
                 or observation.get("plan_revision") != self.plan_revision or observation.get("outcome") != "continue"
-                or self.host_signal or self.protocol_issues(evidence) or not has_data):
+                or self.protocol_issues(evidence) or not has_data):
             return self.error("subtask_evidence", "A local return needs a successful, assessed execution with valid measurements in this stage; local completion never proves stage acceptance.")
         if (evidence.pending or evidence.executions or evidence.inline_pending or evidence.skill_operations
                 or evidence.delivery_uncertainty or evidence.steps.active):
@@ -547,7 +569,7 @@ class ModellingWorkflow:
     def requirements(self):
         """Stable identities survive reordering and unchanged checks across revisions."""
         return [{"id": stage["id"] + ":" + hashlib.sha256(check.encode()).hexdigest()[:12],
-                 "stage": stage["id"], "check": check}
+                 "stage": stage["id"], "check": check, "source": "planner_acceptance_interpretation"}
                 for stage in self.plan or [] for check in stage["checks"]]
 
     def requirement_coverage(self, evidence, *, execution=None):
@@ -563,10 +585,16 @@ class ModellingWorkflow:
             checks = [c for c in measured.get("constraints", []) if requirement["id"] in c.get("check_ids", [])]
             failed = any(not c["passed"] or any(not t["passed"] for t in c.get("controls", [])) or
                          any(measured.get("coverage", {}).get(r, 0) == 0 for r in c.get("regions", [])) for c in checks)
+            from .measurements import coverage_issue
+            issues = [{key: value for key, value in coverage_issue(region, measured.get("coverage", {}).get(region)).items()
+                       if key in {"code", "field", "reason"}}
+                      for region in dict.fromkeys(r for c in checks for r in c.get("regions", []))
+                      if measured.get("coverage", {}).get(region, 0) == 0]
             rows.append({"id": requirement["id"], "stage": requirement["stage"],
                 "status": "reported_fail" if failed else "reported_pass" if checks else "unknown",
                 "execution_sequence": item.execution_sequence if checks else None,
-                "checks": [c["name"] for c in checks]})
+                "checks": [c["name"] for c in checks],
+                **({"evidence_issues": issues} if issues else {})})
         return rows
 
     def protocol_issues(self, evidence):
@@ -575,12 +603,12 @@ class ModellingWorkflow:
                 if issue["code"] == "measurement_contract"] if item else []
 
     def probe_ready(self, evidence):
-        """A satisfied input checkpoint cannot become an open-ended research stage.
+        """Report passing input evidence without making a model stage decision.
 
         Reuse the existing current-execution coverage and checkpoint gates. This
         does not merge results from different candidates or infer a pass from exit 0.
         """
-        if (not self.active or self.current != "probe" or self.blocked or self.host_signal
+        if (not self.active or self.current != "probe" or self.blocked
                 or self.review_request is not None or self._pending_review is not None
                 or evidence.pending or evidence.executions or evidence.inline_pending
                 or evidence.skill_operations or evidence.delivery_uncertainty):
@@ -602,7 +630,7 @@ class ModellingWorkflow:
         return bool(checks) and all(row["status"] == "reported_pass" for row in checks)
 
     def observe_execution(self, evidence, item):
-        """Route real failures before another model request, including an unassessed last result."""
+        """Observe failures and stagnation, including an unassessed last result."""
         if not self.active or self.current not in {"probe", "build"}:
             return
         from .measurements import constraint_failures
@@ -684,7 +712,7 @@ class ModellingWorkflow:
         if item.exit_code == 0 and measured.get("assumption_invalid"):
             reason = "Executed method contradiction: " + measured["contradiction"]
         elif unchanged and category in {"constraint_repair", "diagnostic"}:
-            reason = "The same unresolved " + category + " recurred without changed inputs, environment or reported numeric/check evidence; review this cause and method."
+            reason = "The same unresolved " + category + " recurred without changed inputs, environment or reported numeric/check evidence."
         if item.exit_code == 0 and matching and not failed_checks and measured.get("kind") not in {"diagnostic", "baseline"}:
             key = (self.current, metric["name"], metric["direction"], metric.get("unit", ""),
                    measured.get("measurement_revision", "legacy"))
@@ -692,17 +720,18 @@ class ModellingWorkflow:
             improving = best is None or (metric["value"] < best if metric["direction"] == "minimize" else metric["value"] > best)
             self._progress[key] = (metric["value"] if improving else best, 0 if improving else stagnant + 1)
             if not improving and unchanged:
-                reason = "The same measured objective and evidence recurred without improvement; choose another method."
+                reason = "The same measured objective and evidence recurred without improvement."
+        # Heuristics are observations, never a Builder decision or an execution gate.
+        self.host_signal = None
         if reason:
-            self.recovery["next_action"] = "Return this native evidence for Planner review; preserve valid intermediate data."
-            self.host_signal = {"reason": reason, "outcome": "needs_plan_review", "recovery": deepcopy(self.recovery),
+            self.host_signal = {"reason": reason, "advisory": True,
                 "execution_sequence": item.execution_sequence, "plan_revision": self.plan_revision}
             evidence.notice("structure_builder", reason, workflow_event="execution_review_signal", **self.host_signal)
 
     def local_repair(self, evidence):
-        """An executed code/contract fault is repaired before designing another experiment."""
+        """Identify the current executed code/contract fault for the repair tools."""
         item = evidence.latest_experiment()
-        if (not item or self.current not in EXPERIMENT_SCOPES or self.review_request or self.host_signal
+        if (not item or self.current not in EXPERIMENT_SCOPES or self.review_request
                 or self.blocked or evidence.steps.current_input_blocker(evidence)
                 or item.execution_sequence <= self.anchor
                 or evidence.execution_receipts.get(item.execution_sequence, {}).get("plan_revision") != self.plan_revision):
@@ -713,7 +742,7 @@ class ModellingWorkflow:
         if item.exit_code != 0 or self.protocol_issues(evidence):
             return {"sandbox": item.sandbox, "script_path": item.path,
                     "execution_sequence": item.execution_sequence,
-                    "next_action": "Read the actual error/source and patch one cause. Keep the scientific method; first obtain a successful diagnostic/round-trip. Rewrite requires an explicit reason why exact edits cannot express the repair."}
+                    "next_action": "Read the actual error/source and patch one cause. Keep the scientific method; first obtain a successful diagnostic/round-trip. An explicit rewrite can replace the saved source when needed."}
         return None
 
     def configure_tools(self, names):
@@ -733,7 +762,7 @@ class ModellingWorkflow:
         if self.missing_tools:
             self.blocked = "Missing authorized tools: " + ", ".join(self.missing_tools)
             raise AgentRuntimeError("AtomSculptor capability preflight blocked: " + self.blocked +
-                ". Connect the Agent to a writable/executable Sandbox, the structure-inspect Skill "
+                ". Connect the Agent to a writable/executable Sandbox, the structure_inspect Skill "
                 "(Read + Run, paired with that Sandbox), and the requested Atom Structure "
                 "(Inspect + Modify), as applicable. No Builder task was dispatched; authorization was not bypassed.")
 
@@ -794,16 +823,24 @@ class ModellingWorkflow:
                         observation = evidence.experiment_observations.get(latest.execution_sequence) if latest else None
                         if latest and (observation is None or observation["plan_revision"] != self.plan_revision):
                             declaration.parameters_json_schema["required"].append("previous_assessment")
-                        if latest is None:
-                            # There is no execution to assess yet. Do not send
-                            # an irrelevant nested receipt contract in every
-                            # new-script declaration (or invite invented IDs).
+                        if latest is None or observation and observation["plan_revision"] == self.plan_revision:
                             declaration.parameters_json_schema["properties"].pop("previous_assessment")
                         else:
-                            declaration.parameters_json_schema["properties"]["previous_assessment"]["description"] = (
-                                "Record the latest unassessed execution once, or use stage=observe separately. "
-                                "If already recorded under this plan, OMIT this field: the host reuses its original assessment. "
-                                "A redundant matching receipt is accepted without overwriting the record.")
+                            assessment = declaration.parameters_json_schema["properties"]["previous_assessment"]
+                            for key in ("command_id", "sandbox", "script_path", "plan_revision"):
+                                assessment["properties"].pop(key)
+                            assessment["properties"]["next_experiment"] = self.action_schema(EXPERIMENT_SCHEMA, evidence)
+                            assessment["description"] = (
+                                "Assess the latest finished execution once. Omit receipt IDs to use host facts.")
+                        from .execution_steps import step_field_defaults, STEP_FIELDS
+                        defaults = step_field_defaults(evidence) if evidence is not None else {}
+                        for key in STEP_FIELDS:
+                            if key in defaults:
+                                declaration.parameters_json_schema["required"].remove(key)
+                            declaration.parameters_json_schema["properties"][key]["description"] = (
+                                "May be omitted for the matching current HOST target: the host inherits its full confirmed field. A different target requires its own value."
+                                if key in defaults else
+                                "Required: no current matching HOST field can be inherited. Supply this value in the tool arguments.")
                     if declaration.name == "finish_task" and self.current in EXPERIMENT_SCOPES:
                         declaration.parameters = None
                         declaration.parameters_json_schema = {"type": "object", "properties": {"result": {
@@ -815,12 +852,30 @@ class ModellingWorkflow:
                                 "limitations": {"type": "array", "items": {"type": "string"}}},
                             "required": ["status"], "description": "subtask_complete requires next_experiment and a valid measured local result; it does NOT complete the workflow. The host fills the local result from native receipts."}},
                             "required": ["result"], "additionalProperties": False}
-                        if evidence is not None and evidence.steps.available and self.local_repair(evidence):
-                            declaration.parameters_json_schema["properties"]["result"]["properties"]["status"]["enum"] = ["blocked", "failed"]
+                        result_schema = declaration.parameters_json_schema["properties"]["result"]
+                        result_schema["additionalProperties"] = False
+                        # Keep shared field types flat, then restrict each result
+                        # shape by status, as the native file tool does for edits.
+                        # Local return fields and runtime validation share this set.
+                        result_schema["oneOf"] = [
+                            {"properties": {key: ({"enum": ["subtask_complete"]} if key == "status" else {})
+                                            for key in sorted(SUBTASK_RESULT_FIELDS)},
+                             "required": ["status", "next_experiment"], "additionalProperties": False},
+                            {"properties": {"status": {"enum": ["needs_plan_review"]}}, "required": ["reason"]},
+                            {"properties": {"status": {"enum": ["blocked", "failed"]}}},
+                        ]
+                        if evidence is not None and self.ready_execution(evidence) is not None:
+                            result_schema = declaration.parameters_json_schema["properties"]["result"]
+                            result_schema["properties"]["status"]["enum"].remove("subtask_complete")
+                            result_schema["oneOf"].pop(0)
+                            result_schema["description"] = ("The current assessment is ready. Use advance_modelling_stage "
+                                "to finish this checkpoint after its remaining evidence checks. "
+                                "subtask_complete is only for a measured continue result, not a stage transition.")
                     if declaration.name == "advance_modelling_stage":
                         declaration.parameters = None
                         declaration.parameters_json_schema = {"type": "object", "properties": {
-                            "stage": {"type": "string", "enum": ["observe", *STAGES, "blocked"]},
+                            "stage": {"type": "string", "enum": ["observe", "refine", *STAGES, "blocked"],
+                                "description": "refine changes only the unstarted current action using reason and next_experiment; no execution or stage completion is claimed."},
                             **{key: {"type": "string", **({"description": (
                                 "Optional for stage=observe: the host fills the latest finished execution. "
                                 "Required with stage=probe/build receipts.")} if key in ("sandbox", "script_path") else {})}
@@ -830,7 +885,12 @@ class ModellingWorkflow:
                                for key, limit in OBSERVATION_LIMITS.items()},
                             "outcome": {"type": "string", "enum": ["continue", "ready", "needs_plan_review", "blocked"],
                                 "description": "Required for stage=observe; ready does not replace independent validation."}},
-                            "required": ["stage"]}
+                            "required": ["stage"], "additionalProperties": False,
+                            "oneOf": [
+                                {"properties": {"stage": {"enum": ["refine"]}, "reason": {"minLength": 1}},
+                                 "required": ["reason", "next_experiment"]},
+                                {"properties": {"stage": {"enum": ["observe", *STAGES, "blocked"]}}},
+                            ]}
                         from .execution_steps import ASSESSMENT_SCHEMA
                         for key in ("objective", "assumption_invalid", "next_experiment"):
                             declaration.parameters_json_schema["properties"][key] = deepcopy(ASSESSMENT_SCHEMA["properties"][key])
@@ -844,11 +904,25 @@ class ModellingWorkflow:
                                                 and not delivery_confirmed)
                         if needs_assessment:
                             schema = declaration.parameters_json_schema
+                            schema.pop("oneOf", None)
                             schema["properties"] = {key: schema["properties"][key] for key in
-                                ("stage", "sandbox", "script_path", "hypothesis", "measurement", "outcome", "next_step", "objective", "assumption_invalid", "next_experiment")}
+                                ("stage", "sandbox", "script_path", "structure_path", "hypothesis", "measurement", "outcome", "next_step", "objective", "assumption_invalid", "next_experiment")}
                             schema["properties"]["stage"]["enum"] = ["observe"]
                             schema["required"] = [k for k in schema["properties"] if k not in
-                                {"objective", "assumption_invalid", "sandbox", "script_path", "next_experiment"}]
+                                {"objective", "assumption_invalid", "sandbox", "script_path", "structure_path", "next_experiment"}]
+                            schema["additionalProperties"] = False
+                            schema["properties"]["structure_path"]["description"] = (
+                                "Optional candidate artifact path when outcome=ready. The host fills a unique "
+                                "current artifact binding; select explicitly when there are multiple outputs.")
+                        elif evidence is not None and (self.ready_execution(evidence) is not None
+                                                       or self.checkpoint_arguments(evidence) is not None):
+                            schema = declaration.parameters_json_schema
+                            schema["properties"] = {key: schema["properties"][key] for key in
+                                ("stage", "sandbox", "script_path", "structure_path", "reason")}
+                            schema["properties"]["stage"]["enum"] = [self.current, "blocked"]
+                            schema["properties"]["stage"]["description"] = (
+                                "Complete the CURRENT stage checkpoint using its existing execution/assessment/validation receipts. "
+                                "This is not the destination stage. Do not resubmit the assessment.")
                             schema["additionalProperties"] = False
                         if self.current == "deliver" and not needs_assessment:
                             schema = declaration.parameters_json_schema
@@ -857,6 +931,21 @@ class ModellingWorkflow:
                             schema["properties"]["target"]["description"] = "The exact Structure target already imported and read back; copy the native document_confirmations target."
                             schema["required"] = ["stage", "target"] if self.delivery == "document" else ["stage"]
                             schema["additionalProperties"] = False
+                        schema = declaration.parameters_json_schema
+                        modes = schema["properties"]["stage"]["enum"]
+                        modes[:] = [mode for mode in modes if mode not in STAGES or mode == self.current]
+                        if ("refine" in modes and (self.current not in EXPERIMENT_SCOPES or evidence is not None
+                                and (evidence.scripts or (evidence.continuation or {}).get("scripts")))):
+                            modes.remove("refine")
+                        if "refine" not in modes:
+                            schema.pop("oneOf", None)
+                        meanings = {"observe": "observe records an execution assessment",
+                                    "refine": "refine narrows an unstarted action",
+                                    "blocked": "blocked reports an actual blocker",
+                                    self.current: f"{self.current} COMPLETES the current checkpoint using existing receipts"}
+                        schema["properties"]["stage"]["description"] = (
+                            "; ".join(meanings[mode] for mode in modes) +
+                            ". The stage name is not a destination; delivery tools open after completing build.")
                     if declaration.name in {"run_delivery_step", "validate_modelling_artifact"}:
                         from .delivery import validation_schema
                         field = "validate" if declaration.name == "run_delivery_step" else "checks"
@@ -868,10 +957,16 @@ class ModellingWorkflow:
                             # so explicit acceptance keys/types survive adapters.
                             declaration.parameters_json_schema = schema.model_dump(mode="json", exclude_none=True)
                             declaration.parameters_json_schema["properties"][field] = validation_schema()
+                        if field == "validate":
+                            projected = declaration.parameters_json_schema or schema
+                            if isinstance(projected, dict):
+                                projected["properties"].setdefault("output_name", {"type": "string"})["description"] = (
+                                    "Optional workspace-relative output JSON filename, for example candidate.json; "
+                                    "not a display title. It must end in .json. Omit for the converter's default filename.")
                         if field == "checks":
                             projected = declaration.parameters_json_schema
                             if projected:
-                                projected["properties"][field]["description"] = "Explicit independent acceptance parameters; path are bound by the host."
+                                projected["properties"][field]["description"] = "Explicit independent acceptance parameters; paths are bound by the host."
                         if declaration.parameters_json_schema is not None:
                             declaration.parameters = None
                     if declaration.name == "resume_modelling_step":
@@ -1004,11 +1099,15 @@ class ModellingWorkflow:
                 args["result"] = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
         if not self.active or role not in {"structure_builder", "atom_sculptor"}:
             return None
+        if role == "structure_builder" and (self.review_request is not None or self._pending_review is not None):
+            from .actions import READ_DEPENDENCIES
+            if name not in READ_DEPENDENCIES | {"finish_task"}:
+                return self.error("plan_review_required", "Complete the model-requested Planner review before new execution.")
         if evidence is not None:
             repair = self.local_repair(evidence) if evidence.steps.available else None
             if repair and name == "write_sandbox_text_file" and not evidence.steps.active and str(args.get("path", "")).endswith(".py"):
                 if args.get("path") != repair["script_path"] or args.get("sandbox") != repair["sandbox"] or not args.get("edits"):
-                    return self.error("local_repair_required", "Repair the current saved source with exact edits; a full rewrite needs rewrite_modelling_step with rewrite_reason.")
+                    return self.error("local_repair_required", "Repair the current saved source with exact edits or explicitly replace it with rewrite_modelling_step.")
             pending = self.pending_experiment
             if (pending and pending["plan_revision"] == self.plan_revision and pending["stage"] == self.current
                     and role == "structure_builder" and pending.get("origin", "planner_review") != "stage"):
@@ -1028,10 +1127,6 @@ class ModellingWorkflow:
             latest = evidence.latest_experiment()
             from .delivery import is_independent_validation
             independent_validation = name == "run_skill_script" and is_independent_validation(args, evidence)
-            signal = self.host_signal
-            if signal and signal["plan_revision"] == self.plan_revision and name != "finish_task" and not (
-                    name == "advance_modelling_stage" and args.get("stage") == "observe"):
-                return self.error("plan_review_required", signal["reason"] + " Return the native evidence through finish_task.")
             observation = evidence.experiment_observations.get(latest.execution_sequence) if latest else None
             if observation and observation["outcome"] == "needs_plan_review" and observation["plan_revision"] == self.plan_revision and name not in {"finish_task"}:
                 return self.error("plan_review_required", "Return the measured contradiction through finish_task "
@@ -1042,9 +1137,13 @@ class ModellingWorkflow:
                                                           "import_atom_structure_file", "replace_atom_structure"}:
                 if independent_validation or name == "run_modelling_step" and isinstance(args.get("previous_assessment"), Mapping):
                     return None  # Composite validates and commits before native operations.
-                return self.error("experiment_observation_required", "First assess the finished script with "
-                    "advance_modelling_stage(stage='observe', sandbox, script_path, hypothesis, measurement, outcome, next_step). "
-                    "Record actual evidence before another experiment; exit_code=0 is not acceptance.")
+                assessment = ("Include previous_assessment in the next modelling-step action, or use "
+                              if evidence.steps.available else "Assess the finished script with ")
+                return self.error("experiment_observation_required", assessment +
+                    "advance_modelling_stage(stage='observe', hypothesis, measurement, outcome, next_step) "
+                    "for an assessment without another code action. Omitted receipt fields are filled from "
+                    "the latest finished execution; explicit fields must match it. "
+                    "Record actual evidence; exit_code=0 is not acceptance.")
         if name == "finish_task":
             value = report(args.get("result"))
             if value and value.get("status") == "subtask_complete":
@@ -1057,8 +1156,6 @@ class ModellingWorkflow:
                 return None
             if value and value.get("status") == "needs_plan_review":
                 self._pending_review = None
-                if evidence and evidence.steps.available and self.local_repair(evidence):
-                    return self.error("execution_repair_required", "The current execution/serialization fault needs a local code repair, not a scientific Planner review. Use patch_modelling_step or report blocked with the actual limitation.")
                 blocker = evidence.steps.current_input_blocker(evidence) if evidence else None
                 if blocker:
                     response = self.error("input_dependency_blocked", "The native input guard failed before modelling execution. "
@@ -1066,13 +1163,6 @@ class ModellingWorkflow:
                     response["error"]["diagnosis"] = blocker["diagnosis"]
                     return response
                 latest = evidence.latest_experiment() if evidence else None
-                observation = evidence.experiment_observations.get(latest.execution_sequence, {}) if latest else {}
-                if (evidence and self.protocol_issues(evidence) and not self.host_signal
-                        and not observation.get("assumption_invalid") and value.get("assumption_invalid") is not True):
-                    response = self.error("measurement_contract", "Repair the producer's listed measurement fields in Builder; "
-                        "this does not consume a scientific Planner review. Finish blocked only if the protocol cannot be repaired.")
-                    response["error"]["issues"] = self.protocol_issues(evidence)
-                    return response
                 if self.review_request is not None:
                     return self.error("plan_review_required", "Complete the pending Planner review before requesting another.")
                 reason = value.get("reason")
@@ -1104,9 +1194,10 @@ class ModellingWorkflow:
                     measurement_issues=deepcopy(evidence.measurement_issues.get(item.execution_sequence, [])),
                     working_decision=evidence.working_decision(),
                     assumptions_to_reconsider=deepcopy(self.assumptions),
-                    review_question="Which assumption or representation does this executed counterexample test? "
-                        "Preserve valid intermediate results; choose one experiment that changes that premise, "
-                        "rather than renaming the same algorithm. Untested assumptions remain hypotheses.")
+                    review_question="Builder requested review with this reason and native execution. "
+                        "Distinguish an implementation/protocol repair from a scientific contradiction; "
+                        "decide the appropriate next experiment or plan revision. Preserve valid intermediates "
+                        "and user requirements; untested assumptions remain hypotheses.")
                 args["result"] = json.dumps(value, ensure_ascii=False)
                 return None
             if value and value.get("status") in {"blocked", "failed"}:
@@ -1180,16 +1271,34 @@ class ModellingWorkflow:
             self.blocked = value.get("limitations") or value.get("status")
 
     def assess_previous(self, evidence, assessment, *, reuse_recorded=False):
-        from .execution_steps import ASSESSMENT_SCHEMA
-        if not isinstance(assessment, Mapping) or set(assessment) - set(ASSESSMENT_SCHEMA["properties"]):
-            return self.error("assessment_fields", "Supply the previous assessment fields only.")
-        if any(k not in assessment for k in ASSESSMENT_SCHEMA["required"]):
-            return self.error("assessment_fields", "Supply the required measured assessment fields.")
-        for key in ASSESSMENT_SCHEMA["required"]:
-            if not isinstance(assessment[key], str) or not assessment[key].strip():
-                return self.error("assessment_fields", "Required assessment fields must be nonempty strings.")
+        from .execution_steps import ASSESSMENT_SCHEMA, argument_error
+        def field_error(message, *fields):
+            rejected = self.error("assessment_fields", message)
+            rejected["error"].update(fields=list(fields), invalid_fields=list(fields),
+                field_paths=["previous_assessment." + key for key in fields])
+            return rejected
+
+        if not isinstance(assessment, Mapping):
+            rejected = self.error("assessment_fields", "Supply previous_assessment as an object.")
+            rejected["error"].update(invalid_fields=["previous_assessment"], field_paths=["previous_assessment"])
+            return rejected
+        assessment = dict(assessment)
+        # Empty legacy receipt copies have always meant host-fill, not a stale ID.
+        for key in ("command_id", "sandbox", "script_path"):
+            if key in assessment and (assessment[key] is None or isinstance(assessment[key], str) and not assessment[key].strip()):
+                assessment.pop(key)
+        # Revision copies are checked as receipt identity below, preserving the
+        # existing stale-receipt diagnostic even for a mistyped revision.
+        invalid = argument_error("previous_assessment", {k: v for k, v in assessment.items() if k != "plan_revision"}, ASSESSMENT_SCHEMA)
+        if invalid:
+            fields = invalid["error"]
+            rejected = self.error("assessment_fields", "Correct the listed previous_assessment fields; no execution ran.")
+            rejected["error"].update({key: fields[key] for key in
+                ("fields", "missing_fields", "unexpected_fields", "invalid_fields", "required_fields")})
+            rejected["error"]["field_paths"] = ["previous_assessment." + key for key in fields["fields"]]
+            return rejected
         if not isinstance(assessment.get("structure_path", ""), str):
-            return self.error("assessment_fields", "structure_path must be a string.")
+            return field_error("structure_path must be a string.", "structure_path")
         latest = evidence.latest_experiment()
         if latest is None:
             return self.error("execution_required", "No finished experiment is awaiting assessment; run a saved script first.")
@@ -1209,17 +1318,26 @@ class ModellingWorkflow:
                                   f"{latest.command_id}, sandbox={latest.sandbox}, script_path={latest.path}. "
                                   "Omit these receipt fields and the host fills them; stale results cannot be assessed.")
         if type(assessment.get("complete_stage", False)) is not bool:
-            return self.error("assessment_fields", "complete_stage must be boolean.")
+            return field_error("complete_stage must be boolean.", "complete_stage")
         if (assessment["outcome"] not in {"continue", "ready", "needs_plan_review", "blocked"}
                 or type(assessment.get("assumption_invalid", False)) is not bool):
-            return self.error("assessment_fields", "Use the declared outcome and boolean assumption_invalid.")
+            fields = [key for key in ("outcome", "assumption_invalid")
+                      if key == "outcome" and assessment[key] not in {"continue", "ready", "needs_plan_review", "blocked"}
+                      or key == "assumption_invalid" and type(assessment.get(key, False)) is not bool]
+            return field_error("Use the declared outcome and boolean assumption_invalid.", *fields)
         objective = assessment.get("objective")
-        if objective is not None and (not isinstance(objective, Mapping) or set(objective) - {"name", "value", "direction", "unit"}
-                or not isinstance(objective.get("name"), str) or not objective["name"].strip()
-                or len(objective["name"]) > 200 or not finite_number(objective.get("value"))
-                or objective.get("direction") not in {"minimize", "maximize"}
-                or not isinstance(objective.get("unit", ""), str) or len(objective.get("unit", "")) > 200):
-            return self.error("assessment_fields", "Use a finite measured objective with name, direction and optional unit.")
+        if objective is not None:
+            invalid = argument_error("objective", objective, ASSESSMENT_SCHEMA["properties"]["objective"])
+            if invalid:
+                rejected = field_error("Correct the listed objective fields.",
+                    *("objective." + key for key in invalid["error"]["fields"]))
+                for key in ("missing_fields", "unexpected_fields", "invalid_fields"):
+                    rejected["error"][key] = ["objective." + field for field in invalid["error"][key]]
+                return rejected
+            if not finite_number(objective.get("value")):
+                return field_error("Use a finite measured numeric objective value.", "objective.value")
+            if not isinstance(objective.get("unit", ""), str):
+                return field_error("objective.unit must be a string.", "objective.unit")
         if ("plan_revision" in assessment and (type(assessment["plan_revision"]) is not int
                 or assessment["plan_revision"] != self.plan_revision)):
             return self.error("assessment_receipt", "The assessed plan revision is stale. "
@@ -1248,11 +1366,167 @@ class ModellingWorkflow:
                                 structure_path=assessment.get("structure_path", ""), reason=result["observation"]["measurement"])
         return result
 
+    def execution_artifact_paths(self, evidence, item):
+        """Current native artifact bindings, shared by schema and checkpoint advice."""
+        measured = evidence.measurement_reports.get(item.execution_sequence, {}) if item else {}
+        return list(dict.fromkeys(a["path"] for a in measured.get("artifacts", [])
+            if (bound := evidence.artifact_handoffs.get((item.sandbox, a["path"])))
+            and bound.get("execution_sequence") == item.execution_sequence))
+
+    def checkpoint_arguments(self, evidence, structure_path=""):
+        """Offer the existing completion gate without changing an assessment."""
+        if self.current != "build" or self.delivery == "report" or not self.active:
+            return None
+        item = evidence.latest_experiment()
+        if item is None or evidence.executions or evidence.pending or evidence.inline_pending or evidence.skill_operations:
+            return None
+        paths = [path for (box, path), output in evidence.outputs.items()
+                 if box == item.sandbox and output.get("phase") == "validated"
+                 and output.get("execution_sequence", -1) >= item.execution_sequence
+                 and (not structure_path or path == structure_path)]
+        if len(paths) != 1:
+            return None
+        checked = self.experiment_checkpoint(evidence, self.current, item.sandbox, item.path, paths[0])
+        if not checked.get("ok"):
+            return None
+        return {"stage": self.current, "sandbox": item.sandbox, "script_path": item.path, "structure_path": paths[0]}
+
+    def ready_execution(self, evidence):
+        """The current stage's immutable ready assessment, never a prior checkpoint."""
+        item = evidence.latest_experiment()
+        observation = evidence.experiment_observations.get(item.execution_sequence, {}) if item else {}
+        if (self.active and self.current in EXPERIMENT_SCOPES and item and item.execution_sequence > self.anchor
+                and observation.get("plan_revision") == self.plan_revision
+                and observation.get("stage") == self.current and observation.get("outcome") == "ready"):
+            return item
+        return None
+
+    def experiment_checkpoint(self, evidence, stage, sandbox, script_path, structure_path=""):
+        """Read the existing checkpoint gates without committing state or dispatching tools.
+
+        Advance and next-action guidance share these checks, so a prompt cannot
+        recommend a local continuation when the recorded decision is ready.
+        """
+        import posixpath
+        if self.blocked or stage not in EXPERIMENT_SCOPES or stage != self.current:
+            return self.error("stage_order", "Advance only the current stage; blocked workflows cannot resume implicitly.")
+        if self.review_request is not None or self._pending_review is not None:
+            return self.error("plan_review_required", "Complete the current Planner review before advancing.")
+        proof = {"stage": stage}
+        item = evidence.scripts.get((sandbox, posixpath.normpath(script_path)))
+        if (not item or item.phase != "executed" or type(item.exit_code) is not int or item.exit_code != 0
+                or item.execution_sequence <= self.anchor):
+            return self.error("execution_required", "Save and successfully execute this stage's Python script. "
+                "An older stage's execution, failed command or unexecuted edit cannot advance it.")
+        observation = evidence.experiment_observations.get(item.execution_sequence)
+        if observation is None or observation["plan_revision"] != self.plan_revision:
+            return self.error("experiment_observation_required", "Record this execution with stage='observe' "
+                "before advancing. Keep numeric measurement in code and the assessment concise.")
+        if evidence.experiment_observations[item.execution_sequence]["outcome"] in {"needs_plan_review", "blocked"}:
+            return self.error("plan_review_required", "Resolve the reported contradiction/blocker before advancing.")
+        measured = evidence.measurement_reports.get(item.execution_sequence, {})
+        from .measurements import constraint_failures
+        if measured.get("assumption_invalid") or observation.get("assumption_invalid"):
+            return self.error("candidate_contradiction", "This execution reports an invalid planning assumption; resolve it in new evidence before claiming this checkpoint.")
+        if failures := constraint_failures(measured):
+            response = self.error("candidate_constraints", "This execution reports failed checks or untested populations. "
+                "Inspect the listed evidence; repair the record, repair the candidate, or request plan review as appropriate.")
+            response["error"]["evidence_issues"] = failures
+            return response
+        if evidence.measurement_issues.get(item.execution_sequence):
+            return self.error("measurement_contract", "Repair the malformed measurement record before claiming this stage checkpoint.")
+        # Versioned/typed evidence opts into requirement coverage. Retained
+        # legacy unstructured Runs keep their independent native gates.
+        typed = self.uses_measurement_contract(evidence)
+        if stage == "probe" and typed:
+            missing = [r["id"] for r in self.requirement_coverage(evidence, execution=item)
+                       if r["stage"] == stage and r["status"] != "reported_pass"]
+            if missing:
+                response = self.error("requirement_evidence", "The assessed PROBE execution has not covered every probe check. "
+                    "Use its actual populations and HOST check_ids; a later build result cannot replace this evidence.")
+                response["error"]["missing_check_ids"] = missing
+                return response
+        if stage == "build" and typed:
+            missing = [r["id"] for r in self.requirement_coverage(evidence, execution=item)
+                       if r["stage"] == "build" and r["status"] != "reported_pass"]
+            if measured.get("kind") != "candidate" or missing:
+                issues = []
+                if measured.get("kind") != "candidate":
+                    issues.append({"field": "measurements.kind", "actual": measured.get("kind"),
+                        "expected": "candidate", "message": "Diagnostic/baseline records do not complete build. "
+                        "Report candidate evidence only when the executed result is a candidate."})
+                if missing:
+                    issues.append({"field": "constraints.check_ids", "missing_check_ids": missing,
+                        "message": "Measure these unmet requirements on this candidate and use their HOST check_ids."})
+                response = self.error("requirement_evidence", " ".join(issue["message"] for issue in issues))
+                response["error"].update(issues=issues, missing_check_ids=missing,
+                                         actual_kind=measured.get("kind"), expected_kind="candidate")
+                return response
+            if self.delivery != "report":
+                paths = [artifact["path"] for artifact in measured.get("artifacts", [])]
+                if not paths:
+                    response = self.error("requirement_artifact", "The current measurements have no artifact binding. "
+                        "Record the actual saved candidate in measurements.artifacts, then pass its path as structure_path.")
+                    response["error"].update(field="measurements.artifacts", artifact_paths=[])
+                    return response
+                if not structure_path:
+                    response = self.error("structure_path_required", "Supply structure_path from the current artifact_paths. "
+                        "The artifact bindings already exist; do not regenerate them just to fill this argument.")
+                    response["error"].update(field="structure_path", artifact_paths=paths)
+                    return response
+                if structure_path not in paths:
+                    response = self.error("requirement_artifact", "structure_path does not match a current measurement artifact. "
+                        "Select the intended bound path, or report the actual candidate binding if it is missing.")
+                    response["error"].update(field="structure_path", actual=structure_path, artifact_paths=paths)
+                    return response
+        proof.update(sandbox=sandbox, script_path=item.path, script_version=item.version,
+                     command_id=item.command_id, execution_sequence=item.execution_sequence,
+                     requirement_evidence=[r for r in self.requirement_coverage(evidence, execution=item) if r["stage"] == stage],
+                     observations=evidence.execution_observations.get((sandbox, item.path), ""))
+        if stage == "build" and self.delivery != "report":
+            output = evidence.outputs.get((sandbox, posixpath.normpath(structure_path)))
+            if (not output or output.get("phase") != "validated"
+                    or output.get("execution_sequence", -1) < item.execution_sequence):
+                return self.error("validation_required", "Run the authorized structure_inspect validation "
+                    "on this candidate file before advancing build. Executing your own script is not independent validation.")
+            if typed and not any(a["path"] == output["path"]
+                                 for a in measured.get("artifacts", [])):
+                return self.error("requirement_artifact", "Requirement evidence and independent validation must refer to the same structure file.")
+            proof.update(structure_path=output["path"])
+        return {"ok": True, "checkpoint": proof}
+
     def advance(self, evidence, stage, sandbox="", script_path="", structure_path="", target="", reason="",
                 hypothesis="", measurement="", outcome="", next_step="", objective=None, assumption_invalid=False, next_experiment=None):
         import posixpath
         if not self.active:
             return self.error("workflow_not_active", "This operation has no staged custom-modelling workflow.")
+        if stage == "refine":
+            history = evidence.continuation or {}
+            if (self.current not in EXPERIMENT_SCOPES or self.blocked or evidence.block_reason
+                    or self.review_request is not None or self._pending_review is not None or evidence.closing_reason
+                    or any((evidence.executions, evidence.pending, evidence.inline_executions, evidence.inline_pending,
+                            evidence.skill_operations, evidence.delivery_uncertainty))
+                    or any(history.get(key) for key in ("pending_operations", "pending_skill_operations", "unknown_executions", "unknown_imports"))):
+                return self.error("refinement_unavailable", "Resolve the current blocker, review or native pending/unknown effects before refining an action.")
+            if evidence.scripts or history.get("scripts"):
+                return self.error("refinement_requires_unstarted_action", "Retain existing saved work. Execute/assess it and use next_experiment for the next action; refine is only for an action before saved source exists.")
+            if not isinstance(reason, str) or not reason.strip():
+                return self.error("refinement_reason_required", "Supply reason and next_experiment to narrow the unstarted action, keeping the stage goal and acceptance unchanged.")
+            action, rejected = self.validate_next_experiment(next_experiment, evidence, sandbox)
+            if rejected:
+                return rejected
+            previous = {key: value for key, value in (self.pending_experiment or {}).items()
+                        if key in EXPERIMENT_SCHEMA["properties"]}
+            changed = action != previous
+            if changed:
+                self.schedule_experiment(action, origin="refinement", evidence=evidence)
+                self.pending_experiment["refinement_reason"] = reason
+                evidence.notice("structure_builder", "Unstarted action refined; no command executed",
+                    workflow_event="modelling_action_refined", stage=self.current, plan_revision=self.plan_revision,
+                    reason=reason, subtask_id=self.pending_experiment["subtask_id"])
+            return {"ok": True, "action_refined": changed, "task_complete": False, "stage_completed": False,
+                    "current_subtask": deepcopy(self.pending_experiment), "next_stage": self.current,
+                    "next_action": "Execute the current action and inspect its result; the final stage goal and checks are unchanged."}
         if stage == "observe":
             if not sandbox.strip() or not script_path.strip():
                 # Same host-authoritative fill as assess_previous: the latest
@@ -1292,16 +1566,6 @@ class ModellingWorkflow:
                     "This is an execution assessment, not another derivation or independent validation.")
                 response["error"]["issues"] = issues
                 return response
-            if (evidence.steps.available and item.exit_code != 0 and self.local_repair(evidence)
-                    and (assumption_invalid or outcome == "needs_plan_review")):
-                return self.error("execution_repair_required", "This command failed before a successful diagnostic. Record the actual error with continue or blocked, then repair it locally; a scientific review needs executed diagnostic evidence.")
-            probe_completed = outcome in {"continue", "ready"} and not assumption_invalid and self.probe_ready(evidence)
-            if probe_completed:
-                # Complete the existing checkpoint before interpreting another
-                # proposed probe. Its checks are already satisfied; the committed
-                # build contract owns construction, not an invented extra input test.
-                outcome, next_experiment = "ready", None
-                next_step = "Input checks are satisfied. Construct the first candidate using the committed build experiment and retained artifacts."
             if next_experiment is not None:
                 if outcome != "continue":
                     return self.error("subtask_contract", "next_experiment is for continuing this stage; use ready/review for a stage decision.")
@@ -1314,24 +1578,11 @@ class ModellingWorkflow:
             if previous and previous["plan_revision"] == self.plan_revision:
                 return self.error("observation_already_recorded", "Keep the recorded assessment; execute a new version "
                                   "for new evidence or return the measured contradiction to Planner.")
-            # Signals guide replanning, never domain acceptance. New file names
-            # and exit 0 do not reset stagnation of the same measured objective.
-            review_reason = self.host_signal["reason"] if self.host_signal and self.host_signal["plan_revision"] == self.plan_revision else None
-            if assumption_invalid:
-                review_reason = "Executed evidence invalidates a planning assumption."
-            if outcome == "needs_plan_review" and self.protocol_issues(evidence) and not review_reason:
-                outcome = "continue"
-                next_step = "Repair the measurement fields in HOST current_experiment.measurement_issues; retain the scientific plan and saved data."
             reported_objective = objective
             measured = evidence.measured_objectives.get(item.execution_sequence)
             # A model's placeholder/guess is not a measured value. Native
             # stdout carries the named objective; no task-specific oracle.
             objective = measured
-            if review_reason and outcome in {"continue", "ready"}:
-                # A "ready" claim after measured failures or stagnation is the
-                # pathological case: the host forces the review path on real
-                # receipts instead of trusting the self-report.
-                outcome = "needs_plan_review"
             row = {"sandbox": sandbox, "script_path": item.path, "script_version": item.version,
                    "execution_sequence": item.execution_sequence, "exit_code": item.exit_code,
                    "command_id": item.command_id, "hypothesis": hypothesis, "measurement": measurement,
@@ -1343,7 +1594,9 @@ class ModellingWorkflow:
             measurement_report = evidence.measurement_reports.get(item.execution_sequence)
             if measurement_report:
                 from .measurements import constraint_failures
-                row["candidate_eligible"] = self.current == "build" and not constraint_failures(measurement_report) and measurement_report.get("kind") not in {"diagnostic", "baseline"}
+                row["candidate_eligible"] = (self.current == "build" and not assumption_invalid
+                    and not measurement_report.get("assumption_invalid") and not constraint_failures(measurement_report)
+                    and measurement_report.get("kind") not in {"diagnostic", "baseline"})
                 if measurement_report.get("measurement_revision"):
                     row["measurement_revision"] = measurement_report["measurement_revision"]
             if evidence.measurement_issues.get(item.execution_sequence):
@@ -1353,8 +1606,10 @@ class ModellingWorkflow:
             if reported_objective is not None:
                 row["reported_objective"] = dict(reported_objective)
                 row["objective_status"] = "native_stdout" if measured == reported_objective else "unavailable_or_mismatch"
-            if review_reason:
-                row["review_reason"] = review_reason
+            if structure_path:
+                row["structure_path"] = structure_path
+            if self.host_signal and self.host_signal["execution_sequence"] == item.execution_sequence:
+                row["host_advisory"] = deepcopy(self.host_signal)
             if next_experiment is not None and outcome == "continue":
                 row["next_experiment"] = deepcopy(next_experiment)
                 self.schedule_experiment(next_experiment, origin="assessment", evidence=evidence,
@@ -1366,21 +1621,24 @@ class ModellingWorkflow:
                 workflow_event="modelling_observation", **row)
             result = {"ok": True, "observation": row, "next_stage": self.current,
                     "next_action": "Return needs_plan_review through finish_task" if outcome == "needs_plan_review" else next_step}
-            if probe_completed:
-                result["probe_completed"] = True
             if outcome == "ready" and self.current in {"probe", "build"}:
+                if not structure_path and self.current == "build":
+                    paths = self.execution_artifact_paths(evidence, item)
+                    if len(paths) == 1:
+                        structure_path = paths[0]
+                assessed_stage = self.current
                 checkpoint = self.advance(evidence, self.current, sandbox, script_path,
                                           structure_path=structure_path, reason=measurement)
                 result["checkpoint_status"] = "completed" if checkpoint.get("ok") else "awaiting_evidence"
                 result["checkpoint_result"] = checkpoint
                 result["next_stage"] = self.current
+                if assessed_stage == "probe" and checkpoint.get("ok"):
+                    result["probe_completed"] = True
                 if not checkpoint.get("ok"):
-                    result["next_action"] = checkpoint["error"]["message"]
+                    result["next_action"] = evidence.actions.next_action(evidence)[0]
             return result
         if self.review_request is not None or self._pending_review is not None:
             return self.error("plan_review_required", "Complete Planner review before advancing; execution receipts remain available.")
-        if stage in STAGES and self.host_signal and self.host_signal["plan_revision"] == self.plan_revision:
-            return self.error("plan_review_required", self.host_signal["reason"] + " Return the executed evidence to Planner before advancing.")
         if stage == "blocked" and reason.strip():
             self.blocked = reason[:800]
             return {"ok": True, "status": "blocked", "reason": self.blocked}
@@ -1397,60 +1655,11 @@ class ModellingWorkflow:
             return self.error("stage_order", "Advance only the current stage; blocked workflows cannot resume implicitly.")
         proof = {"stage": stage}
         if stage in {"probe", "build"}:
-            item = evidence.scripts.get((sandbox, posixpath.normpath(script_path)))
-            if (not item or item.phase != "executed" or type(item.exit_code) is not int or item.exit_code != 0
-                    or item.execution_sequence <= self.anchor):
-                return self.error("execution_required", "Save and successfully execute this stage's Python script. "
-                    "An older stage's execution, failed command or unexecuted edit cannot advance it.")
-            observation = evidence.experiment_observations.get(item.execution_sequence)
-            if observation is None or observation["plan_revision"] != self.plan_revision:
-                return self.error("experiment_observation_required", "Record this execution with stage='observe' "
-                    "before advancing. Keep numeric measurement in code and the assessment concise.")
-            if evidence.experiment_observations[item.execution_sequence]["outcome"] in {"needs_plan_review", "blocked"}:
-                return self.error("plan_review_required", "Resolve the reported contradiction/blocker before advancing.")
-            measured = evidence.measurement_reports.get(item.execution_sequence, {})
-            from .measurements import constraint_failures
-            if constraint_failures(measured):
-                return self.error("candidate_constraints", "This executed candidate reports failed hard constraints. "
-                    "Do not promote its objective/best state; repair it or request review, then validate the actual new candidate.")
-            if evidence.measurement_issues.get(item.execution_sequence):
-                return self.error("measurement_contract", "Repair the malformed measurement record before claiming this stage checkpoint.")
-            # Versioned/typed evidence opts into requirement coverage. Retained
-            # legacy unstructured Runs keep their independent native gates.
-            typed = self.uses_measurement_contract(evidence)
-            if stage == "probe" and typed:
-                missing = [r["id"] for r in self.requirement_coverage(evidence, execution=item)
-                           if r["stage"] == stage and r["status"] != "reported_pass"]
-                if missing:
-                    response = self.error("requirement_evidence", "The assessed PROBE execution has not covered every probe check. "
-                        "Use its actual populations and HOST check_ids; a later build result cannot replace this evidence.")
-                    response["error"]["missing_check_ids"] = missing
-                    return response
-            if stage == "build" and typed:
-                missing = [r["id"] for r in self.requirement_coverage(evidence, execution=item)
-                           if r["stage"] == "build" and r["status"] != "reported_pass"]
-                if measured.get("kind") != "candidate" or missing:
-                    response = self.error("requirement_evidence", "The current candidate has not covered every BUILD requirement. "
-                        "Measure the unknown/failed checks on this candidate; emit constraints.check_ids from HOST requirements. "
-                        "Local tests and a connected graph alone do not complete a task.")
-                    response["error"].update(missing_check_ids=missing, expected_kind="candidate")
-                    return response
-                if self.delivery != "report" and not any(a["path"] == structure_path for a in measured.get("artifacts", [])):
-                    return self.error("requirement_artifact", "Bind these checks to the actual structure_path in measurements.artifacts before validating/delivering.")
-            proof.update(sandbox=sandbox, script_path=item.path, script_version=item.version,
-                         command_id=item.command_id, execution_sequence=item.execution_sequence,
-                         requirement_evidence=[r for r in self.requirement_coverage(evidence, execution=item) if r["stage"] == stage],
-                         observations=evidence.execution_observations.get((sandbox, item.path), ""))
-            if stage == "build" and self.delivery != "report":
-                output = evidence.outputs.get((sandbox, posixpath.normpath(structure_path)))
-                if (not output or output.get("phase") != "validated"
-                        or output.get("execution_sequence", -1) < item.execution_sequence):
-                    return self.error("validation_required", "Run the authorized structure-inspect validation "
-                        "on this candidate file before advancing build. Executing your own script is not independent validation.")
-                if typed and not any(a["path"] == output["path"]
-                                     for a in measured.get("artifacts", [])):
-                    return self.error("requirement_artifact", "Requirement evidence and independent validation must refer to the same structure file.")
-                proof.update(structure_path=output["path"])
+            checked = self.experiment_checkpoint(evidence, stage, sandbox, script_path, structure_path)
+            if not checked.get("ok"):
+                return checked
+            proof.update(checked["checkpoint"])
+            item = evidence.scripts[(sandbox, posixpath.normpath(script_path))]
         elif stage == "deliver":
             if self.delivery == "document":
                 if not target:
@@ -1476,6 +1685,7 @@ class ModellingWorkflow:
         if stage in EXPERIMENT_SCOPES:
             proof["subtask_id"] = self.execution_subtask(evidence, item)
         self.anchor = evidence.execution_sequence
+        self.host_signal = None
         self.checkpoints.append(proof)
         self.index += 1
         if self.current in EXPERIMENT_SCOPES:

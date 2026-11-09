@@ -20,6 +20,7 @@ async def assess_run(services: Any, agent_id: str, run_id: str) -> list[dict[str
         evidence = "read_only" if receipt["read_only"] else "unknown"
         hints = receipt["result_hints"]
         kind, target_id = receipt["capability_kind"], receipt["target_id"]
+        operation_facts = None
         if not receipt["read_only"]:
             try:
                 # An earlier capability must still be authorized before this
@@ -37,15 +38,35 @@ async def assess_run(services: Any, agent_id: str, run_id: str) -> list[dict[str
                                       and ((operation_id is not None and item.get("id") == operation_id)
                                            or item.get("tool_receipt_id") == receipt["receipt_id"])), None)
                     if operation is not None:
+                        argv = operation.get("argv", [])
+                        argv = argv if isinstance(argv, list) else []
+                        result = operation.get("tool_result")
+                        result = result if isinstance(result, dict) else {}
+                        output = {name: operation.get(name, result.get(name, "")) for name in ("stdout", "stderr")}
+                        operation_facts = {"command_id": operation.get("id"),
+                            "state": operation.get("state"), "exit_code": result.get("exit_code", operation.get("exit_code")),
+                            "argv": [str(arg)[:512] for arg in argv[:8]],
+                            "argv_truncated": len(argv) > 8 or any(len(str(arg)) > 512 for arg in argv[:8]),
+                            "output_reference": {"sandbox_id": sandbox_id, "command_id": operation.get("id"),
+                                "run_id": run_id, "reader": "wait_sandbox_operation",
+                                "arguments": {"sandbox": sandbox_id, "operation_id": operation.get("id"),
+                                              "wait_seconds": 1}},
+                            "output_preview": {name: str(output[name])[:1000]
+                                               for name in ("stdout", "stderr")},
+                            "output_truncated": any(len(str(output[name])) > 1000
+                                                    for name in ("stdout", "stderr"))}
                         state = operation.get("state")
                         if state == "running":
                             evidence = "pending"
                         elif state == "finished":
-                            result = operation.get("tool_result")
-                            result = result if isinstance(result, dict) else {}
                             exit_code = result.get("exit_code", operation.get("exit_code"))
                             if result.get("ok") is not False and exit_code in (None, 0):
                                 evidence = "confirmed"
+                elif kind in {"sandbox.start", "sandbox.stop"}:
+                    info = await services.get_sandbox(target_id)
+                    expected = {"ready", "running"} if kind == "sandbox.start" else {"stopped"}
+                    if info.state.value in expected:
+                        evidence = "confirmed"
                 elif receipt["state"] == "finished" and isinstance(hints.get("revision"), int):
                     from backend.node_documents import read_document
                     current = read_document(services, target_id)
@@ -63,6 +84,7 @@ async def assess_run(services: Any, agent_id: str, run_id: str) -> list[dict[str
             "target_id": target_id, "state": receipt["state"],
             "read_only": receipt["read_only"], "evidence": evidence,
             "result_hints": hints,
+            **({"operation": operation_facts} if operation_facts is not None else {}),
         })
     return assessments
 
@@ -92,8 +114,8 @@ async def recovery_state(database: Any, services: Any, agent_id: str, run_id: st
         else:
             visible = [{key: item[key] for key in (
                 "capability_kind", "target_id", "state", "read_only",
-                "evidence", "result_hints",
-            )} for item in assessed[-20:]]
+                "evidence", "result_hints", "operation",
+            ) if key in item} for item in assessed[-20:]]
             classification = ("completed_effects" if assessed and all(
                 item["read_only"] or item["evidence"] == "confirmed" for item in assessed
             ) else "reconcile_required")

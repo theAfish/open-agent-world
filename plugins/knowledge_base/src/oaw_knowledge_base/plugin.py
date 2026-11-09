@@ -45,6 +45,7 @@ DEPLOYMENT_FIELDS = {
     'experiments': frozenset(['experiment', 'experiments']),
     'experiment_update': frozenset(['experiment']),
     'experiment_review': frozenset(['deleted', 'experiment', 'message', 'reasons', 'status']),
+    'lineage': frozenset(['bundles', 'insights', 'records', 'root', 'sources']),
     'insights': frozenset(['insight', 'insights']),
     'insight_prompt': frozenset(['existing', 'group_id', 'has_more', 'instruction', 'kinds', 'next_offset', 'offset', 'record_count', 'records', 'roles', 'schema_ids', 'schemas']),
     'insight_save': frozenset(['insights', 'schema_ids', 'warnings']),
@@ -91,9 +92,9 @@ def _deployment():
             "schemas": _surface("schemas", "schema_manage"),
             "experiments": _surface("overview", "jobs", "schemas", "schema_manage", "experiment_bundles",
                 "experiment_bundle_manage", "experiment_ingest", "experiment_extract_prompt", "experiment_save",
-                "experiments", "experiment_update", "experiment_review", config_fields={"default_model"}),
+                "experiments", "experiment_update", "experiment_review", "lineage", config_fields={"default_model"}),
             "insights": _surface("overview", "schemas", "experiments", "insights", "insight_update",
-                "insight_review", "graph"),
+                "insight_review", "graph", "lineage"),
         },
     )
 

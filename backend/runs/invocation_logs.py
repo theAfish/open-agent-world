@@ -179,7 +179,7 @@ class RunInvocationLogs:
             "truncated": False, "redacted": True})
         return identity
 
-    def finish_model(self, identity, responses):
+    def finish_model(self, identity, responses, *, stream_metrics=None):
         safe, missing = archive_value(responses, self.secrets)
         usage = next((getattr(row, "usage_metadata", None) for row in reversed(responses)
                       if getattr(row, "usage_metadata", None) is not None), None)
@@ -192,15 +192,18 @@ class RunInvocationLogs:
             "output_tokens": getattr(usage, "candidates_token_count", None),
             "cached_input_tokens": getattr(usage, "cached_content_token_count", None),
             "reasoning_tokens": getattr(usage, "thoughts_token_count", None),
-            "usage_available": usage is not None})
+            "usage_available": usage is not None,
+            **({"stream_metrics": archive_value(stream_metrics, self.secrets)[0]} if stream_metrics is not None else {})})
 
-    def interrupt_model(self, identity, *, error_type=None):
+    def interrupt_model(self, identity, *, error_type=None, stream_metrics=None):
         updates = {"state": "interrupted", "interrupted_at": datetime.now(UTC).isoformat(),
                    "response_complete": False}
         # Generic Run cleanup may settle an already diagnosed interruption.
         # Absence of a new cause must not erase its original error type.
         if error_type is not None:
             updates["error_type"] = error_type
+        if stream_metrics is not None:
+            updates["stream_metrics"] = archive_value(stream_metrics, self.secrets)[0]
         return self._settle("models", identity, updates)
 
     def start_tool(self, role, call_id, run_attempt, name, arguments):

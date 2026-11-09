@@ -1,14 +1,14 @@
 ---
-name: interface-building
+name: interface_building
 description: Plan, select and validate coherent interfaces between two materials.
-when_to_use: Read before using the interface-builder Skill or writing custom interface-stacking code.
+when_to_use: Read before using the interface_builder Skill or writing custom interface-stacking code.
 ---
 
 # Interface building
 
 This is an instruction-only OAW Skill. There is no standalone
 `build_interface` Agent capability or old `structure_tools.py` in this
-Toolbox. The connected `interface-builder` Skill provides a ZSL-based script;
+Toolbox. The connected `interface_builder` Skill provides a ZSL-based script;
 read it and call `run_skill_script` with a separately authorized Sandbox.
 For a structured AtomSculptor interface request, use its typed values and
 the file-backed Structure/Sandbox bridge rather than copying atom arrays

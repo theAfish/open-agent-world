@@ -17,6 +17,9 @@ def test_old_run_and_text_data_remain_usable_after_additive_migration(tmp_path):
     text_id, run_id = asyncio.run(seed())
     services.close()
     with sqlite3.connect(settings.database_path) as connection:
+        # The pre-lifecycle schema had neither the column nor indexes using it.
+        connection.execute('DROP INDEX runs_cleanup_idx')
+        connection.execute('DROP INDEX runs_current_idx')
         connection.execute('ALTER TABLE runs DROP COLUMN lifecycle_json')
         connection.execute('DROP TABLE artifact_references')
         connection.execute('DROP TABLE artifact_versions')

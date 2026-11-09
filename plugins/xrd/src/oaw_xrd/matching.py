@@ -169,20 +169,23 @@ def match_patterns(inputs, options, *, run_dir=None):
         raise ValueError('不支持的谱库检索引擎')
     engine_runs = []
     streams = [iter(references)]
-    if libraries and engine == 'qualx':
+    managed = [item for item in libraries if item['value'].get('metadata', {}).get('managed')]
+    external = [item for item in libraries if item not in managed]
+    if external and engine == 'qualx':
         try:
             from .qualx import search_library
         except ImportError:
             from qualx import search_library
-        for index, item in enumerate(libraries):
-            progress(10 + 65 * index / len(libraries), "QualX 初筛", indeterminate=True, completed=index, total=len(libraries))
+        for index, item in enumerate(external):
+            progress(10 + 65 * index / len(external), "QualX 初筛", indeterminate=True, completed=index, total=len(external))
             ids, info = search_library(pattern, item, options, run_dir=run_dir, index=index)
-            progress(10 + 65 * (index + 1) / len(libraries), "QualX 初筛完成", completed=index + 1, total=len(libraries))
+            progress(10 + 65 * (index + 1) / len(external), "QualX 初筛完成", completed=index + 1, total=len(external))
             engine_runs.append(info)
             streams.append(iter_references(item, allowed, reference_ids=ids))
+        streams.extend(iter_references(item, allowed) for item in managed)
     else:
         streams.extend(iter_references(item, allowed) for item in libraries)
-    total_work = len(references) + (sum(i['candidate_count'] for i in engine_runs) if engine_runs else sum(i['value']['count'] for i in libraries))
+    total_work = len(references) + (sum(i['candidate_count'] for i in engine_runs) + sum(i['value']['count'] for i in managed) if engine_runs else sum(i['value']['count'] for i in libraries))
     start_percent = 75 if engine_runs else 10
     progress(start_percent, "候选比对", completed=0, total=total_work)
     last_progress = time.monotonic()
@@ -264,7 +267,7 @@ def match_patterns(inputs, options, *, run_dir=None):
             "parameters": {**{k: options[k] for k in ("wavelength", "tolerance_deg", "prominence_fraction", "min_peak_distance", "smoothing_deg", "reference_min_intensity")}, 'cell_scale_percent':scale_percent},
             "observed_peaks": observed, "candidates": candidates,
             'library_search': {'enabled':bool(libraries),'scanned':scanned,'invalid_records':invalid,
-                'engine':engine if libraries else 'native',
+                'engine':'qualx' if engine_runs else 'native',
                 'total_records':sum(i['value']['count'] for i in libraries),
                 'screened_candidates':sum(i['candidate_count'] for i in engine_runs) if engine_runs else scanned,
                 'scored_records':scanned - invalid - excluded,

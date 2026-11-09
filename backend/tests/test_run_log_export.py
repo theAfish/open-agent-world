@@ -89,6 +89,24 @@ def fixture_database(tmp_path):
     return database, store, run
 
 
+def test_indexed_export_keeps_durable_activity_after_live_preview_rotation(tmp_path):
+    from backend.runs.history import RunActivityHistory
+    database, store, run = fixture_database(tmp_path)
+    try:
+        RunActivityHistory(database, run.run_id).public('agent_progress',
+            {'kind': 'status', 'text': 'Early execution progress retained beyond the live preview'},
+            'early-progress', run.created_at.isoformat())
+        folder = exporter().export_run(database.path, tmp_path / 'indexed', run_id=run.run_id, include_legacy_views=False)
+        activity = json.loads((folder / 'run activity.json').read_text())
+        assert activity[0]['metadata']['text'] == 'Early execution progress retained beyond the live preview'
+        catalog = json.loads((folder / 'record catalog.json').read_text())
+        assert any(row['kind'] == 'activity' and row['source'] == {'path': 'run activity.json', 'pointer': '/0'} for row in catalog['records'])
+        assert json.loads((folder / 'manifest.json').read_text())['durable_activity_records'] == 1
+        assert not (folder / 'agent logs.txt').exists()
+    finally:
+        database.close()
+
+
 def test_export_keeps_native_execution_checkpoint_and_database_read_only(tmp_path):
     import hashlib
     from backend.plugins import create_builtin_registry

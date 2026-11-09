@@ -1,4 +1,18 @@
-# 安装 Open Agent World
+# Open Agent World v0.7.1
+
+## 相比 v0.6.0 的更新
+
+- 重做卡包与卡牌库，加入统一插画、卡牌分组、动态卡包预览，并改进安装与重启提示。
+- 支持工作区切换和发布、按工作区隔离的 Sandbox 会话，以及托管工作区的管理员卡包安装。
+- CLI Harness 执行提供方支持声明式环境、资源校验，并复用 OAW 模型连接。
+- 新增可安装的 Office Skills 和 Time & Count 卡包；改进知识库结构编辑，以及 AtomSculptor 和 XRD 科学工作流。
+- 对话附件上限提升至 512 MiB，支持向隔离执行工作区流式传入文件，直接显示上传错误，并在 Agent 完成后保留交付文件入口。
+- 改进中断任务恢复、托管升级、托管科学运行时，以及后端断线重连。
+- 将共享 PDF 引擎限制在 PyMuPDF 1.x，确保 Intel macOS 可使用预编译包。
+
+[完整变更](https://github.com/theAfish/open-agent-world/compare/v0.6.0...v0.7.1)
+
+## 安装 Open Agent World
 
 ## 下载
 

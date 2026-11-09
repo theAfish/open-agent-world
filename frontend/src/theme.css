@@ -2,8 +2,8 @@
   /* Only typography uses rem; canvas coordinates and panel geometry stay in px. */
   font-size: calc(100% * var(--text-scale, 1));
   font-family: "Segoe UI Variable", "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
-  color: #35332e;
-  background: #e3e1db;
+  color: var(--ink);
+  background: var(--canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --canvas: #e3e1db;
@@ -75,8 +75,6 @@
 }
 
 :root[data-theme="dark"] {
-  color: #e9e6de;
-  background: #22211e;
   --canvas: #22211e;
   --canvas-deep: #1a1917;
   --surface: rgba(44, 43, 39, 0.96);
@@ -218,7 +216,8 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .world-canvas .react-flow__pane { cursor: grab; }
 .world-canvas .react-flow__pane:active { cursor: grabbing; }
 
-/* Terrain */
+/* Canvas backgrounds never intercept interaction with cards or the pane. */
+.canvas-background,
 .terrain-webgl-background {
   position: absolute;
   inset: 0;

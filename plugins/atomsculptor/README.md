@@ -37,6 +37,21 @@ Supported import/export formats include JSON, XYZ, ExtXYZ, LXYZ, CIF, POSCAR, PD
 SDF and MOL2. **Follow opened files** can connect a Sandbox file source to the
 Structure card; importing into its document is explicit.
 
+Sandbox **Workspace sharing** offers **Global shared**, **Session** (default),
+and **Group**. Global uses the workspace root; session/group use folders named
+after the session/group, with other workspace files read-only. The Structure
+document and view drafts follow the session's saved binding. Changes apply only
+to new sessions; existing sessions keep their historical files and document
+scope. **View workspace** offers Total workspace and Current session. Changing
+these settings does not prepare another Python environment.
+
+## Log review Agent
+
+The Pack also includes **Report Agent**. Connect Read run history to the source Agent and authorize a Sandbox to generate
+a simple structure → brief decision/action → structure report, with original
+structure files, previews and CSV/JSON data for a later article. It uses the native Agent runtime and
+its own private Skill toolbox. See [setup, outputs and provenance](docs/log-review.md).
+
 ## Boundaries
 
 The diagonal supercell action is deterministic. Surface, interface, SMILES and

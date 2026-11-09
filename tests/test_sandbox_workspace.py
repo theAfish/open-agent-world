@@ -213,8 +213,9 @@ class WindowsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         original = self.native.grant_workspace
 
         def slow_grant(*args, **kwargs):
-            entered.set()
-            finish.wait(2)
+            if Path(args[0]) == self.project:
+                entered.set()
+                finish.wait(2)
             original(*args, **kwargs)
 
         with patch.object(self.native, "grant_workspace", side_effect=slow_grant):
@@ -230,6 +231,29 @@ class WindowsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.state, SandboxState.STOPPED)
         self.assertFalse(record.workspace_authorized)
         self.assertIsNone(record.workspace_handle)
+
+    async def test_cancelled_start_finishes_managed_root_acl_before_returning(self):
+        entered, finish = threading.Event(), threading.Event()
+        original = self.native.grant_workspace
+
+        def slow_grant(*args, **kwargs):
+            entered.set()
+            finish.wait(2)
+            original(*args, **kwargs)
+
+        with patch.object(self.native, 'grant_workspace', side_effect=slow_grant):
+            task = asyncio.create_task(self.backend.start('workspace'))
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+                task.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(task.done())
+            finally:
+                finish.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertEqual(self.backend._records['workspace'].state, SandboxState.STOPPED)
+        self.assertEqual(self.native.workspace_grants, [(self.info.workspace, self.backend._records['workspace'].profile.sid, False)])
 
     async def test_missing_or_replaced_authorized_root_is_never_reported_revoked(self):
         await self.bind()

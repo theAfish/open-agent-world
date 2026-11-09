@@ -1,5 +1,5 @@
 ---
-name: crystal-builder
+name: crystal_builder
 description: Build common bulk crystal structures (FCC/BCC/HCP/diamond/zincblende/...) using ASE.
 when_to_use: Use when the user asks to construct a bulk crystal from scratch given an element (or compound such as NaCl) and a crystal structure type. Not for surfaces, slabs, or molecules.
 entry: scripts/crystal_builder.py

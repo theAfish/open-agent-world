@@ -11,6 +11,8 @@ from .history import actions as history_actions
 from .sql_history import HistoryAgentBehavior
 from .multiphase_object import register_harness
 from .results_context import register_results_context
+from .pattern_import import register_pattern_import
+from .run_control import register_run_control
 from .documents import InputDocument, import_input, associate
 from open_agent_world.plugin_api import (NodeDocumentDefinition, NodeDocumentAction, NodeDocumentDownload,
     CapabilityDefinition, CapabilityGrantDefinition, RelationshipDefinition)
@@ -19,6 +21,7 @@ import asyncio
 from pathlib import Path
 import sqlite3
 from .library import inspect_library, configured_library_path, library_catalog
+from .managed_library import add_cards, add_structures, remove_entries, list_entries
 from .structures import MatchDocument, prepare_cod_structure, apply_cod_structure, download_structure
 from open_agent_world.plugin_api import ResourceValidationError
 
@@ -34,6 +37,7 @@ class LibraryDocument(BaseModel):
     points: list = Field(default_factory=list)
     peaks: list = Field(default_factory=list)
     slots: list[dict | None] = Field(default_factory=list)
+    managed: dict | None = None
 
 def _library_slots(value, args):
     slot = args.get('slot', 0)
@@ -50,7 +54,7 @@ def unmount_library(value, args):
         return value
     slots[slot] = None
     primary = next((drive for drive in slots if drive), {})
-    return {**LibraryDocument().model_dump(mode='json'), **primary, 'slots': slots}
+    return {**LibraryDocument().model_dump(mode='json'), **primary, 'slots': slots, 'managed': value.get('managed')}
 
 
 def configure_library(value, args):
@@ -67,7 +71,7 @@ def configure_library(value, args):
                 return value
         mounted = inspect_library(path)
         slots[slot] = mounted
-        return {**next(d for d in slots if d), 'slots': slots}
+        return {**next(d for d in slots if d), 'slots': slots, 'managed': value.get('managed')}
     except (ValueError, OSError, sqlite3.Error) as exc:
         raise ResourceValidationError(str(exc)) from exc
 
@@ -76,6 +80,18 @@ async def prepare_library(value, args):
     # SQLite counts and hashing large libraries must not hold the graph gate or
     # occupy the worker event loop. The host rechecks the revision before saving.
     return {'document': await asyncio.to_thread(configure_library, value, args)}
+
+
+async def prepare_add_cards(value, args):
+    return {'document': await asyncio.to_thread(add_cards, value, args)}
+
+
+async def prepare_add_structures(value, args):
+    return {'document': await asyncio.to_thread(add_structures, value, args)}
+
+
+async def prepare_remove_entries(value, args):
+    return {'document': await asyncio.to_thread(remove_entries, value, args)}
 
 class MatchWorkspaceDocument(LibraryDocument, MatchDocument):
     pass
@@ -131,7 +147,7 @@ class CanvasConfig(BaseModel):
     source_node_id: str = ''
 
 class XRDPlugin:
-    descriptor = PluginDescriptor(id="research.xrd",version="0.3.1",plugin_api_version="1.41",
+    descriptor = PluginDescriptor(id="research.xrd",version="0.3.1",plugin_api_version="1.51",
         requires_plugins=("science.structure-viewer", "data.sqlite"),
         name="XRD / OAW_XRDfit",description="Reference-card screening and candidate-CIF whole-pattern fitting")
     def __init__(self, context=None):
@@ -148,6 +164,8 @@ class XRDPlugin:
         registration.register_runtime_provider("research.xrd",XRDRuntime)
         register_harness(registration)
         register_results_context(registration)
+        register_run_control(registration)
+        register_pattern_import(registration)
         registration.register_relationship(RelationshipDefinition(
             id='xrd.history-store', label='XRD 运行数据库', short_label='运行记录',
             description='结构化保存运行、Jev 决策、评估、Agent 报告和结果文件；只连接一个 SQL database',
@@ -158,7 +176,7 @@ class XRDPlugin:
                 default_name=label, default_size=(600,420), default_status='available', statuses=frozenset({'available'}),
                 config_model=CanvasConfig, templateable=True, template_remap_config=remap_config, traits=frozenset({'xrd.frame-canvas', *({'xrd.readable'} if kind == 'spectrum' else set())}),
                 document=NodeDocumentDefinition(model=InputDocument, initial_value={'kind':'pattern'}, max_size_bytes=40*1024*1024, capture=lambda v: {'kind':'pattern'},
-                    actions={'import':NodeDocumentAction(lambda v,a:import_input({**v,'kind':'pattern'},a)), 'read':NodeDocumentAction(lambda v,a:{**v,'kind':'pattern'},read_only=True,capability_kind='xrd.read')},
+                    actions={'import':NodeDocumentAction(lambda v,a:import_input({**v,'kind':'pattern'},a),capability_kind='xrd.pattern.import'), 'inspect_import':NodeDocumentAction(lambda v,a:{},read_only=True,project=True,capability_kind='xrd.pattern.import'), 'read':NodeDocumentAction(lambda v,a:{**v,'kind':'pattern'},read_only=True,capability_kind='xrd.read')},
                     downloads={'source':lambda v:NodeDocumentDownload(v['filename'] or 'input.txt',base64.b64decode(v['source_base64']))}) if kind == 'spectrum' else NodeDocumentDefinition(model=InputDocument, initial_value={'kind':'canvas'}, capture=lambda v:{'kind':'canvas'}, actions={'read':NodeDocumentAction(lambda v,a:v,read_only=True,capability_kind='xrd.read')}),
                 frontend={'body':'frame-canvas','workspace':'frame-canvas','preview':'frame-canvas'},
                 surfaces={'preview':True,'inspector':True,'workspace':True}))
@@ -191,6 +209,10 @@ class XRDPlugin:
                 actions={'configure':NodeDocumentAction(lambda v,a:{**a['document'], 'structure':v.get('structure')}, prepare=prepare_library),
                     'unmount':NodeDocumentAction(lambda v,a:{**unmount_library(v,a), 'structure':v.get('structure')}),
                     'catalog':NodeDocumentAction(library_catalog, read_only=True, project=True),
+                    'add_cards':NodeDocumentAction(lambda v,a:a['document'], prepare=prepare_add_cards),
+                    'add_structures':NodeDocumentAction(lambda v,a:a['document'], prepare=prepare_add_structures),
+                    'remove_entries':NodeDocumentAction(lambda v,a:a['document'], prepare=prepare_remove_entries),
+                    'entries':NodeDocumentAction(list_entries, read_only=True, project=True),
                     'fetch_cod': NodeDocumentAction(apply_cod_structure, prepare=prepare_cod_structure)},
                 downloads={'structure': download_structure},
                 summarize=lambda v: {'cod_id': v['structure']['cod_id']} if v.get('structure') else {})))
@@ -202,7 +224,7 @@ class XRDPlugin:
                 frontend={"body": "input", "workspace": "input", "preview": "input"},
                 surfaces={"preview": True, "inspector": True, "workspace": True},
                 document=NodeDocumentDefinition(model=InputDocument, initial_value={"kind": kind}, capture=lambda v: {"kind": v["kind"]}, max_size_bytes=40*1024*1024,
-                    actions={"import": NodeDocumentAction(import_input), "associate": NodeDocumentAction(associate),
+                    actions={"import": NodeDocumentAction(import_input, capability_kind="xrd.pattern.import"), "inspect_import": NodeDocumentAction(lambda v, a: {}, read_only=True, project=True, capability_kind="xrd.pattern.import"), "associate": NodeDocumentAction(associate),
                              "read": NodeDocumentAction(lambda v, a: v, read_only=True, capability_kind="xrd.read")},
                     summarize=lambda v: {"filename": v["filename"], "sha256": v["sha256"], "points": len(v["points"]), "peaks": len(v["peaks"])},
                     remap_references=lambda v, ids: {**v, "reference_node_id": ids.get(v.get("reference_node_id", ""), "")},

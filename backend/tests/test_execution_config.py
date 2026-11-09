@@ -63,11 +63,44 @@ def test_global_environment_is_live_for_existing_and_new_sandboxes(runtime_clien
 @pytest.mark.parametrize('variables', [
     {'PATH': '/unsafe'}, {'OAW_TARGET_CONFIG_JSON': '{}'}, {'A': '1', 'a': '2'},
     {'BAD-NAME': 'x'}, {'VALUE': 'nul\0'}, {'VALUE': 12}, {'VALUE': 'x' * 24000},
+    {'UV_PYTHON': '/unsafe'}, {'PIP_TARGET': '/unsafe'},
 ])
 def test_global_environment_validation(client, variables):
     response = client.put('/api/settings/sandbox', json={'environment_variables': variables})
     assert response.status_code == 422, response.text
     assert client.get('/api/settings/sandbox').json()['environment_variables'] == {}
+
+
+@pytest.mark.parametrize('scope', ['global', 'profile', 'sandbox'])
+def test_installer_options_save_and_reach_commands_through_existing_environment_scopes(runtime_client, scope):
+    client, _, native = runtime_client
+    agent, sandbox, *_ = setup_skill(client)
+    variables = {
+        'UV_DEFAULT_INDEX': 'https://pypi.tuna.tsinghua.edu.cn/simple',
+        'UV_INDEX_URL': 'https://pypi.tuna.tsinghua.edu.cn/simple',
+        'PIP_INDEX_URL': 'https://pypi.tuna.tsinghua.edu.cn/simple',
+        'UV_HTTP_TIMEOUT': '120', 'UV_REQUEST_TIMEOUT': '120',
+        'PIP_TIMEOUT': '120', 'PIP_DEFAULT_TIMEOUT': '120',
+        'UV_HTTP_CONNECT_TIMEOUT': '30', 'UV_HTTP_RETRIES': '5', 'PIP_RETRIES': '5',
+        'UV_CONCURRENT_DOWNLOADS': '4', 'UV_CONCURRENT_INSTALLS': '4', 'UV_OFFLINE': 'false',
+    }
+    if scope == 'global':
+        saved = client.put('/api/settings/sandbox', json={'environment_variables': variables})
+        assert saved.status_code == 200, saved.text
+        assert client.get('/api/settings/sandbox').json()['environment_variables'] == variables
+    else:
+        owner = create_node(client, 'environment') if scope == 'profile' else sandbox
+        path = f"/api/nodes/{owner['id']}"
+        revision = client.get(path + '/document').json()['revision']
+        saved = client.put(path + '/environment', json={'value': {'variables': variables},
+            'secrets': {}, 'expected_revision': revision})
+        assert saved.status_code == 200, saved.text
+        assert client.get(path + '/document').json()['value']['variables'] == variables
+        if scope == 'profile':
+            connect(client, owner, sandbox, 'environment.default')
+    provider, definitions = tools(client, agent)
+    invoke(client, provider, agent, definitions['execute_command'], sandbox=sandbox['id'], argv=['cmd.exe'])
+    assert {name: native.last_environment[name] for name in variables} == variables
 
 
 @pytest.mark.parametrize("node_type", ["environment", "compute-target"])
@@ -243,7 +276,8 @@ def test_all_scopes_rechecked_after_handler_exposure_before_secret_resolution(ru
 
 
 @pytest.mark.parametrize("key", ["OAW_TARGET_CONFIG_JSON", "oaw_target_config_json", "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES",
-    "PATH", "home", "COMSPEC", "SystemRoot", "BASH_ENV", "ENV", "PYTHONPATH", "NODE_OPTIONS", "WSLENV", "SANDBOX_RESOURCES"])
+    "PATH", "home", "COMSPEC", "SystemRoot", "BASH_ENV", "ENV", "PYTHONPATH", "NODE_OPTIONS", "WSLENV", "SANDBOX_RESOURCES",
+    "uv_python", "UV_SYSTEM_PYTHON", "PIP_TARGET", "UV_CONFIG_FILE", "UV_INSECURE_HOST", "PIP_TRUSTED_HOST", "UV_UNKNOWN_OPTION"])
 def test_reserved_profile_variables_rejected_before_storage(client, key):
     env = create_node(client, "environment")
     response = client.post(f"/api/nodes/{env['id']}/actions/replace", json={"arguments": {"variables": {key: "unsafe"}}, "expected_revision": 0})
@@ -509,6 +543,58 @@ def test_real_execution_environment_reaches_only_command_and_children(tmp_path):
         assert "test-private-token-742" not in result["stdout"]
         assert result["exit_code"] != 0 if runtime == "windows" else result["exit_code"] == 0
         assert client.delete(f"/api/nodes/{sandbox['id']}").status_code == 200
+
+
+def test_unreadable_global_bindings_can_be_inspected_and_explicitly_rebound(runtime_client, tmp_path):
+    from cryptography.fernet import Fernet
+    from backend.execution_config import resolve_sandbox_configuration
+    from tests.test_sandbox_workspace import WorkspaceNativeApi
+    client, backend, _ = runtime_client
+    native = WorkspaceNativeApi()
+    backend._native = native
+    services = client.app.state.services
+    agent, sandbox, *_ = setup_skill(client)
+    models = tmp_path / 'models'
+    models.mkdir()
+    variables = {'ACCESS_KEY': {'secret_ref': 'access'}, 'MP_API_KEY': {'secret_ref': 'mp'},
+        'DEEPMD_MODEL_PATH': {'folder_ref': 'model'}, 'PMG_VASP_PSP_DIR': {'folder_ref': 'psp'}, 'REGION': 'keep'}
+    payload = {'environment_variables': variables, 'secrets': {'access': 'private-access', 'mp': 'private-mp'},
+        'folders': {ref: {'path': str(models)} for ref in ('model', 'psp')}}
+    assert client.put('/api/settings/sandbox', json=payload).status_code == 200
+    alien = Fernet(Fernet.generate_key()).encrypt(b'old-host-private-value').decode()
+    def saved_rows():
+        with services.database.locked() as db:
+            return [tuple(row) for row in db.execute("SELECT key,value_json FROM application_settings WHERE key='sandbox' OR key LIKE 'global_execution_%' ORDER BY key")]
+    with services.database.transaction() as db:
+        db.execute("UPDATE application_settings SET value_json=? WHERE key LIKE 'global_execution_%'", (json.dumps(alien),))
+    before = saved_rows()
+    response = client.get('/api/settings/sandbox')
+    assert response.status_code == 200, response.text
+    assert set(response.json()['binding_errors']) == set(variables) - {'REGION'}
+    assert response.json()['secret_bindings'] == {'access': False, 'mp': False}
+    assert response.json()['folder_bindings'] == {} and response.json()['environment_variables'] == variables
+    summary = client.get(f"/api/sandboxes/{sandbox['id']}/configuration").json()
+    assert summary['ready'] is False
+    assert all(v['status'] == 'rebind_required' for v in summary['variables'] if v['name'] != 'REGION')
+    provider, definitions = tools(client, agent)
+    inspected = invoke(client, provider, agent, definitions['inspect_sandbox'], sandbox=sandbox['id'])
+    assert inspected['state'] == 'ready' and inspected['configuration']['ready'] is False
+    failed = client.post(f"/api/sandboxes/{sandbox['id']}/execute", json={'argv': ['cmd.exe']})
+    assert failed.status_code == 422 and 'ACCESS_KEY' in failed.text
+    assert native.runs == []
+    assert client.put('/api/settings/sandbox', json={'environment_variables': variables}).status_code == 422
+    assert saved_rows() == before
+    for data in (response.text, json.dumps(summary), json.dumps(inspected), failed.text):
+        assert alien not in data and 'old-host-private-value' not in data and 'private-access' not in data
+    rebound = client.put('/api/settings/sandbox', json=payload)
+    assert rebound.status_code == 200, rebound.text
+    assert rebound.json()['binding_errors'] == {}
+    assert client.get(f"/api/sandboxes/{sandbox['id']}/configuration").json()['ready'] is True
+    environment, _ = resolve_sandbox_configuration(services, sandbox['id'], folder_mounts=[])
+    assert environment['ACCESS_KEY'] == payload['secrets']['access'] and environment['REGION'] == 'keep'
+    executed = client.post(f"/api/sandboxes/{sandbox['id']}/execute", json={'argv': ['cmd.exe']})
+    assert executed.status_code == 200, executed.text
+    assert native.runs[-1]['argv'] == ('cmd.exe',)
 
 
 def test_global_secret_lifecycle_and_resolution(client):

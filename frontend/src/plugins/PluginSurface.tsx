@@ -1,11 +1,12 @@
-import { startXrdWorkflow } from './xrdWorkflowImport';
+import { loadPackFrontendService } from './frontendServices';
 import { useCardStateSession } from "../state/cardState";
+import { useWorkspaceContext } from '../state/workspaceContext';
 import { t, useLocale } from "../i18n";
 import { Component, Suspense, useMemo, type ReactNode } from "react";
 import { worldApi, nodeDocumentDownloadUrl } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { surfaceDraftKey, useNodeSurfaceStore } from "../state/nodeSurfaces";
-import { useOpenFiles } from "../state/openFiles";
+import { FileWorkspaceContext, useOpenFiles } from "../state/openFiles";
 import type { WorldCard } from "../types/world";
 import { pluginView } from "./registry";
 import { xrdCanvasSource } from './xrdCanvasSource';
@@ -22,10 +23,11 @@ import { registerPluginVisualCapture } from "./visualCapture";
 import { AuthoringCardView } from '../factory/AuthoringCardView';
 
 function subscribeToDocumentChanges(listener: (change: PluginDocumentChange) => void): () => void {
-  // Events are prepended and bounded by the world store. Snapshot existing IDs
-  // so mounting a view never replays a mutation that happened before it existed.
-  const seen = new Set(useWorldStore.getState().events.map((event) => event.id));
-  return useWorldStore.subscribe((state) => {
+  // Compare bounded store windows rather than retaining every ID ever observed.
+  // Mounting a view never replays mutations that happened before it existed.
+  return useWorldStore.subscribe((state, previous) => {
+    if (state.events === previous.events) return;
+    const seen = new Set(previous.events.map((event) => event.id));
     for (const event of state.events) {
       if (seen.has(event.id)) continue;
       seen.add(event.id);
@@ -72,11 +74,17 @@ export function PluginSurface({ card, slot, level, children }: {
   const stateless = definition?.state?.mode === 'none';
   const credentialConfiguration = Boolean(definition?.traits.some(trait => trait === 'core.environment' || trait === 'core.sandbox'));
   const configurablePersistence = Boolean(definition?.state?.mode === 'scoped' && definition.state.userConfigurable && definition.state.supportedScopes.length > 1);
+  const followsWorkspace = definition?.state?.mode === 'scoped' && definition.state.followWorkspace;
+  const followsFiles = useWorldStore(state => state.edges.some(edge => edge.source === card.id
+    && edge.relationship === 'core.file-preview' && state.catalog.node_types.find(type => type.id === state.cards.find(node => node.id === edge.target)?.type)?.traits.includes('core.sandbox')));
+  const scopedView = followsWorkspace || followsFiles;
+  const workspace = useWorkspaceContext(card.id, !!scopedView && !card.ephemeral);
+  const viewKey = scopedView ? workspace.value?.key : sessionId;
   const runtime = useWorldStore((s) => definition ? s.catalog.frontend_modules?.[definition.plugin_id] : undefined);
   const updateCard = useWorldStore((s) => s.updateCard);
   const source = useWorldStore(s=>xrdCanvasSource(card,s.cards,s.edges));
   const viewCard = useMemo(()=>source?{...card,config:{...card.config,source_node_id:source}}:card,[card,source]);
-  const host = useMemo<PluginViewProps["host"]>(() => ({
+  const host: PluginViewProps["host"] = useMemo<PluginViewProps["host"]>(() => ({
     credentials: !access.deployed && credentialConfiguration ? {
       status: () => worldApi.getCredentialBindings(card.id),
       set: (reference, value, expectedRevision) => worldApi.bindCredential(card.id, reference, value, expectedRevision),
@@ -103,12 +111,12 @@ export function PluginSurface({ card, slot, level, children }: {
     },
     draft: {
       get: () => {
-        const value = useNodeSurfaceStore.getState().drafts[surfaceDraftKey(card.id, 'plugin', card.state_scope, sessionId)];
+        const value = useNodeSurfaceStore.getState().drafts[surfaceDraftKey(card.id, 'plugin', card.state_scope, viewKey)];
         return value ? JSON.parse(value) as Record<string, unknown> : undefined;
       },
-      set: value => useNodeSurfaceStore.getState().setDraft(surfaceDraftKey(card.id, 'plugin', card.state_scope, sessionId), value ? JSON.stringify(value) : ''),
+      set: value => useNodeSurfaceStore.getState().setDraft(surfaceDraftKey(card.id, 'plugin', card.state_scope, viewKey), value ? JSON.stringify(value) : ''),
       subscribe: listener => {
-        const key = surfaceDraftKey(card.id, 'plugin', card.state_scope, sessionId);
+        const key = surfaceDraftKey(card.id, 'plugin', card.state_scope, viewKey);
         return useNodeSurfaceStore.subscribe((state, previous) => { if (state.drafts[key] !== previous.drafts[key]) listener(); });
       },
     },
@@ -124,23 +132,12 @@ export function PluginSurface({ card, slot, level, children }: {
     ...multiphaseHost(source ?? card.id),
     ...xrdConversationHost(card.id),
     getInputs: async (nodeId = card.id) => {
-      const {capabilities}=await worldApi.getAgentCapabilities(nodeId);
-      const targets=capabilities.filter(c=>c.kind==='xrd.read'&&c.target_id);
-      const owner=useWorldStore.getState().cards.find(n=>n.id===nodeId);
-      if(owner?.type==='xrd.match')targets.push({target_id:owner.id,target_name:'参考谱库'} as typeof targets[number]);
-      return (await Promise.all(targets.map(async c=>{
-        const base={id:c.target_id!,name:c.target_name};
-        try {
-          const {value}=await worldApi.getNodeDocument(c.target_id!);
-          const doc=value as {kind:string;points?:unknown[];peaks?:unknown[];count?:number;filename?:string;slots?:({count:number}|null)[]};
-          const count=doc.kind==='pattern'?doc.points?.length:doc.kind==='reference'?doc.peaks?.length:doc.kind==='library'?doc.slots?.reduce((n,d)=>n+(d?.count??0),0)??doc.count:undefined;
-          return {...base,kind:doc.kind,ready:doc.kind==='cif'?Boolean(doc.filename):Boolean(count),detail:doc.kind==='cif'?'候选结构':count?`${count.toLocaleString()} ${doc.kind==='pattern'?'个点':doc.kind==='reference'?'条峰':'条参考谱'}`:'尚未导入数据'};
-        } catch {return {...base,kind:'unknown',ready:false,detail:'无法读取输入'};}
-      }))).filter(input=>['pattern','library','reference','cif','unknown'].includes(input.kind));
+      const service = await loadPackFrontendService<{ getInputs(host: PluginViewProps['host'], nodeId: string): ReturnType<NonNullable<PluginViewProps['host']['getInputs']>> }>('research.xrd', 'workflow');
+      return service.getInputs(host, nodeId);
     },
     runAnalysis: async () => { await worldApi.runAgent(card.id, "Run configured analysis"); await useWorldStore.getState().refreshWorld(); },
     stopAnalysis: async () => { await worldApi.stopAgent(card.id); await useWorldStore.getState().refreshWorld(); },
-    updateConfig: async (config) => { await updateCard(card.id, { config }, { throwOnError: true }); },
+    updateConfig: async (config, nodeId = card.id) => { await updateCard(nodeId, { config }, { throwOnError: true }); },
     getAgentInfo: (nodeId = card.id) => worldApi.getAgentInfo(nodeId),
     getAgentCapabilities: async (nodeId) => (await worldApi.getAgentCapabilities(nodeId)).capabilities,
     openLinkedCanvas: async (type, name) => {
@@ -164,7 +161,11 @@ export function PluginSurface({ card, slot, level, children }: {
       await state.refreshWorld();
       useNodeSurfaceStore.getState().openWorkspace(target.id);
     },
-    startXrdWorkflow: file => startXrdWorkflow(source ?? card.id, card.id, file, sessionId ?? null),
+    startXrdWorkflow: async file => {
+      const service = await loadPackFrontendService<{ startWorkflow(host: PluginViewProps['host'], owner: string, canvas: string, file: File): Promise<void> }>('research.xrd', 'workflow');
+      await service.startWorkflow(host, source ?? card.id, card.id, file);
+      await useWorldStore.getState().refreshWorld();
+    },
     ensureXrdInput: async (kind) => {
       const state=useWorldStore.getState();
       const world=await worldApi.getWorld();
@@ -206,14 +207,14 @@ export function PluginSurface({ card, slot, level, children }: {
       useWorldStore.getState().selectCards([nodeId], { syncCanvas: true });
       useNodeSurfaceStore.getState().openWorkspace(nodeId);
     },
-    runAgent: (nodeId, prompt, freshContext) => useWorldStore.getState().runAgent(nodeId, prompt, freshContext),
+    runAgent: (nodeId, prompt, freshContext) => useWorldStore.getState().requestAgentRun(nodeId, prompt, freshContext),
     onDocumentChange: subscribeToDocumentChanges,
     registerVisualCapture: (captureKind, capture) => registerPluginVisualCapture(card.id, captureKind, capture),
     delegationAction: (action, arguments_) => worldApi.nodeDelegationAction(card.id, action, arguments_, sessionId ?? null),
     resourceAction: (action, arguments_, confirm) => worldApi.nodeResourceAction(card.id, action, arguments_, confirm, sessionId ?? null),
     resourceFileAction: (action, arguments_, files, confirm) => worldApi.nodeResourceFileAction(card.id, action, arguments_, files, confirm, sessionId ?? null),
     readFile: (reference, signal) => worldApi.readFilePreview(card.id, reference, signal),
-    openFile: (reference, name, options) => useOpenFiles.getState().open({ ...reference, source_id: card.id }, name, options),
+    openFile: (reference, name, options) => useOpenFiles.getState().open({ ...reference, source_id: card.id }, name, { ...options, workspaceKey: scopedView ? viewKey : undefined }),
     openInputNode: async (type, name, source, relationship) => {
       // Reuse an imported source by exact bytes, including after a page reload.
       const state = useWorldStore.getState();
@@ -247,16 +248,21 @@ export function PluginSurface({ card, slot, level, children }: {
       state.selectCards([target.id], { syncCanvas: true });
     },
     clearOpenedFile: () => useOpenFiles.getState().clear(card.id),
-  }), [card.id, card.state_scope, source, updateCard, access, stateless, configurablePersistence, credentialConfiguration, sessionId, inWorkspace, navigation, executionSources]);
+  }), [card.id, card.state_scope, source, updateCard, access, stateless, configurablePersistence, credentialConfiguration, sessionId, viewKey, scopedView, inWorkspace, navigation, executionSources]);
   const reference = definition?.frontend?.[slot];
   if (covered && !inWorkspace && card.type.startsWith('xrd.')) return null;
   if (!reference || !definition) return <>{children}</>;
+  if (scopedView && !card.ephemeral && !workspace.value) return <p role={workspace.error ? 'alert' : 'status'}>{workspace.error ?? t('Loading workspace…')}
+    {workspace.error && <button className="secondary-button" onClick={workspace.reload}>{t('Retry')}</button>}</p>;
+  if (scopedView && workspace.value?.bound === false) return <p>{t('Select a connected Conversation session to use the current workspace.')}</p>;
   const View = definition.authoring && reference === 'oaw.authoring-card' ? AuthoringCardView
     : definition.traits.includes('ui.factory-card.v1') && reference === 'factory-card'
     ? PrintedCardView : pluginView(definition.plugin_id, reference, runtime);
-  return <PluginBoundary key={`${card.id}:${definition.plugin_id}:${runtime?.version}:${reference}:${card.state_scope}:${sessionId ?? ""}`}>
+  return <PluginBoundary key={`${card.id}:${definition.plugin_id}:${runtime?.version}:${reference}:${card.state_scope}:${viewKey ?? ""}`}>
     <Suspense fallback={<p role="status">{t("Loading Pack view...")}</p>}>
-      <View card={viewCard} definition={definition} level={level} host={host} />
+      <FileWorkspaceContext.Provider value={scopedView ? viewKey : undefined}>
+        <View card={viewCard} definition={definition} level={level} host={host} />
+      </FileWorkspaceContext.Provider>
     </Suspense>
   </PluginBoundary>;
 }
