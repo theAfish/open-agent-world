@@ -1,5 +1,6 @@
 """Real private workers and durable environment lifecycle, without network."""
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import json
 from pathlib import Path
 import shutil
@@ -369,6 +370,38 @@ def test_preparation_automatically_reuses_verified_application_bundle(tmp_path, 
     current = runtime.PackEnvironmentManager(tmp_path / "profile").prepare_python(declaration)
     assert current.root != bundled.root
     assert bundled.root.is_dir()
+
+
+@pytest.mark.parametrize('damage', ['dependency_change', 'resource_change', 'modified_payload', 'failing_verifier'])
+def test_predecessor_reuse_requires_matching_dependencies_intact_receipt_and_new_verification(tmp_path, monkeypatch, damage):
+    seed, declaration = legacy_fixture(tmp_path, monkeypatch)
+    old_script = tmp_path / 'old.py'
+    old_script.write_bytes(b'import json\r\n')
+    old = replace(declaration, verify_script=old_script)
+    manager = runtime.PackEnvironmentManager(tmp_path / 'profile')
+    handle = manager.prepare_python(old)
+    # The explicit predecessor is the only remaining seed, not a legacy path.
+    monkeypatch.setattr(runtime.sys, 'prefix', str(tmp_path / 'empty-host'))
+    monkeypatch.setattr(runtime.shutil, 'which', lambda _: None)
+    new_script = tmp_path / 'new.py'
+    new_script.write_bytes(b'import json\n')
+    current = replace(old, verify_script=new_script)
+    if damage == 'dependency_change':
+        current = replace(current, requirements=('legacy-fixture==2',))
+    elif damage == 'resource_change':
+        resource = tmp_path / 'model.dat'
+        resource.write_bytes(b'new required model')
+        current = replace(current, resource_files=(resource,))
+    elif damage == 'modified_payload':
+        (handle.root / 'packages/legacy_fixture.py').write_text('value = "changed"\n')
+    else:
+        new_script.write_text('raise RuntimeError("candidate verification failed")\n')
+    with pytest.raises(RuntimeError, match='requires uv'):
+        manager.prepare_python(current, previous_spec=old)
+    assert not manager.environment_root(current).exists()
+    assert manager.status(current)['status'] == 'failed'
+    if damage != 'modified_payload':
+        assert manager.read_python(old) == handle
 
 
 def test_preparation_preserves_configured_uv_download_cache(tmp_path, monkeypatch):

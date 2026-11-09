@@ -390,7 +390,8 @@ class PackEnvironmentManager:
         return verified
 
     def prepare_python(self, spec: PythonEnvironmentSpec, *, verify: Callable | None = None,
-                       seed_roots: tuple[Path, ...] = ()) -> EnvironmentHandle:
+                       seed_roots: tuple[Path, ...] = (),
+                       previous_spec: PythonEnvironmentSpec | None = None) -> EnvironmentHandle:
         fingerprint = spec.fingerprint
         root = self.environment_root(spec)
         operation_path = self._operation_path(spec)
@@ -399,6 +400,18 @@ class PackEnvironmentManager:
         # Download caches are not installed dependencies. Reuse uv's configured
         # cache (also used by host sync) rather than downloading it per profile.
         seed_roots = tuple(dict.fromkeys((*seed_roots, *self._seed_roots(spec))))
+        # A changed verification script (including CRLF/LF checkout changes)
+        # does not require downloading unchanged dependencies. Only an explicit
+        # predecessor with the same dependency/resource identity can seed it;
+        # its receipt is checked below and the candidate verifier still runs.
+        if previous_spec is not None:
+            def identity(recipe):
+                return {key: value for key, value in recipe.identity().items() if key != "verify_script"}
+            if ((previous_spec.owner_id, previous_spec.environment_id) != (spec.owner_id, spec.environment_id)
+                    or identity(previous_spec) != identity(spec)):
+                previous_spec = None
+            else:
+                seed_roots = (self.environment_root(previous_spec), *seed_roots)
         with installation_lock(self.root / "locks" / (fingerprint + ".lock")):
             try:
                 handle = self.read_python(spec)
@@ -429,7 +442,7 @@ class PackEnvironmentManager:
                 recovery = self.root / "staging" / previous_stage
                 if previous_stage and recovery.parent.resolve() == (self.root / "staging").resolve():
                     seed_roots = (recovery, *seed_roots)
-                relative = self._populate(spec, stage, env, seed_roots, verify)
+                relative = self._populate(spec, stage, env, seed_roots, verify, previous_spec)
                 executable = str(Path(sys.executable) if relative == "host" else stage / relative)
                 handle = EnvironmentHandle(stage, executable, fingerprint, operation_id)
                 verified = self._verify(spec, handle, env, verify)
@@ -450,13 +463,15 @@ class PackEnvironmentManager:
                                             "completed_at": datetime.now(timezone.utc).isoformat()})
                 raise
 
-    def _populate(self, spec, stage, env, seed_roots, verify):
+    def _populate(self, spec, stage, env, seed_roots, verify, previous_spec=None):
         for seed in seed_roots:
             try:
                 receipt = json.loads((seed / "ready.json").read_text(encoding="utf-8"))
                 relative = receipt["python"]
                 if receipt.get("format") == 1:
-                    self._read(spec, seed)
+                    predecessor = (previous_spec if previous_spec is not None
+                                   and seed == self.environment_root(previous_spec) else spec)
+                    self._read(predecessor, seed)
                 elif receipt.get("format") == 2:
                     self._verify_legacy_requirements(spec, seed, relative)
                 else:
