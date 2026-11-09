@@ -25,6 +25,7 @@ import zipfile
 
 ROOT = Path('/opt/oaw-preview-controller')
 STATE = Path('/var/lib/oaw-preview-controller')
+HOST_LOCK = Path('/run/oaw-deployment-controller.lock')
 REPOSITORY = 'theAfish/open-agent-world'
 REPOSITORY_ID = 1351393176
 BASE = 'feat/aliyun-agentcore-poc'
@@ -601,7 +602,9 @@ def commit_status(api, candidate, state, description):
 @contextlib.contextmanager
 def host_lease():
     import fcntl
-    with (STATE / '.host.lock').open('a') as stream:
+    # Preview and integration have separate state but share this host lease.
+    descriptor = os.open(HOST_LOCK, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield
 
