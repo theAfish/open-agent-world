@@ -508,8 +508,12 @@ def test_competing_older_pr_is_rejected_before_download_or_deployment(reporting,
 
 @pytest.mark.skipif(os.name != 'posix', reason='Linux controller flock boundary')
 def test_shared_slot_host_lease_rejects_another_controller(tmp_path, monkeypatch):
-    monkeypatch.setattr(controller, 'STATE', tmp_path)
+    monkeypatch.setattr(controller, 'HOST_LOCK', tmp_path / 'host.lock')
+    monkeypatch.setattr(controller, 'STATE', tmp_path / 'preview')
     with controller.host_lease():
+        monkeypatch.setattr(controller, 'STATE', tmp_path / 'integration')
         with pytest.raises(BlockingIOError):
             with controller.host_lease():
                 pytest.fail('Competing controller acquired the lease')
+    with controller.host_lease():
+        pass  # The next deployment can acquire it after the previous one exits.

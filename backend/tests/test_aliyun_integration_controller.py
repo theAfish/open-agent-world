@@ -14,6 +14,23 @@ from backend.tests.test_aliyun_preview_controller import BASE, HEAD, TRUSTED, Gi
 RECEIPT = 'f' * 64
 
 
+def test_native_approval_workflow_is_opt_in_and_never_executes_candidate_code():
+    import yaml
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / '.github/workflows/ci.yml').read_text())
+    jobs = workflow['jobs']
+    for key in ('aliyun-gates', 'aliyun-approval'):
+        assert "github.event_name == 'push'" in jobs[key]['if']
+        assert "refs/heads/feat/aliyun-agentcore-poc" in jobs[key]['if']
+        assert "vars.OAW_ALIYUN_GITHUB_DEPLOYMENT == 'enabled'" in jobs[key]['if']
+        assert all('uses' not in step for step in jobs[key]['steps'])
+    assert jobs['aliyun-gates']['needs'] == 'required'
+    assert jobs['aliyun-approval']['needs'] == 'aliyun-gates'
+    assert jobs['aliyun-approval']['environment'] == 'aliyun-integration-approval'
+    assert jobs['aliyun-approval']['permissions'] == {}
+    assert jobs['aliyun-approval']['steps'][0]['run'].startswith('echo ')
+    assert 'aliyun-approval' not in jobs['required']['needs']
+
+
 class PushGitHub(GitHubFixture):
     def __init__(self):
         super().__init__()
@@ -51,6 +68,67 @@ def test_push_admission_uses_exact_resulting_commit_and_never_reads_pr_merge_ref
         'event': 'push', 'head_sha': HEAD, 'base_ref': controller.BASE, 'tested_commit': HEAD,
         'run_id': 100, 'run_attempt': 1}
     assert all('pulls/' not in suffix and 'pull/' not in suffix for _, suffix in api.calls)
+
+
+def github_approval_fixture(cfg):
+    api = PushGitHub()
+    state, candidate, baseline = approval_fixture(cfg, mode='github')
+    api.permission = 'maintain'
+    api.jobs[100].append({**api.jobs[100][0], 'name': 'Ali deployment approval'})
+    environment = {'name': 'aliyun-integration-approval', 'id': 5, 'can_admins_bypass': False,
+                   'protection_rules': [{'type': 'required_reviewers', 'reviewers': [{'type': 'User', 'reviewer': {'id': 1}}]}]}
+    reviews = [{'state': 'approved', 'user': {'login': 'trusted-author'},
+                'environments': [{'id': 5, 'name': 'aliyun-integration-approval'}]}]
+    original = api.get
+
+    def get(path):
+        if path == 'environments/aliyun-integration-approval':
+            return deepcopy(environment)
+        if path == 'actions/runs/100/approvals':
+            return deepcopy(reviews)
+        return original(path)
+
+    api.get = get
+    return api, state, candidate, baseline, environment, reviews
+
+
+def test_native_github_approval_allows_reviewed_backend_change_after_controlled_acceptance(integration_cfg):
+    api, state, candidate, baseline, _, _ = github_approval_fixture(integration_cfg)
+    api.comparison['files'] = [{'filename': 'backend/poc.py', 'status': 'modified'}]
+    binding = controller.production_approval(api, integration_cfg, state, candidate, baseline)
+    assert binding == {'run_id': 100, 'run_attempt': 1, 'baseline_commit': BASE, 'baseline_receipt': RECEIPT}
+    # Approval is re-read before switching; it cannot survive a revoked gate.
+    api.jobs[100][-1]['conclusion'] = 'cancelled'
+    with pytest.raises(controller.Rejected, match='successful GitHub approval'):
+        controller.production_approval(api, integration_cfg, state, candidate, baseline)
+
+
+@pytest.mark.parametrize('fault', ['no_reviewers', 'bypass', 'skipped', 'old_attempt', 'wrong_commit',
+                                  'wrong_environment', 'rejected', 'not_maintainer', 'no_acceptance', 'wrong_baseline'])
+def test_github_deployment_approval_fails_closed(integration_cfg, fault):
+    api, state, candidate, baseline, environment, reviews = github_approval_fixture(integration_cfg)
+    if fault == 'no_reviewers': environment['protection_rules'] = []
+    elif fault == 'bypass': environment['can_admins_bypass'] = True
+    elif fault == 'skipped': api.jobs[100][-1]['conclusion'] = 'skipped'
+    elif fault == 'old_attempt': api.jobs[100][-1]['run_attempt'] = 2
+    elif fault == 'wrong_commit': api.jobs[100][-1]['head_sha'] = BASE
+    elif fault == 'wrong_environment': reviews[0]['environments'][0]['id'] = 99
+    elif fault == 'rejected': reviews[0]['state'] = 'rejected'
+    elif fault == 'not_maintainer': api.permission = 'write'
+    elif fault == 'no_acceptance': state['controlled_revision'] = None
+    elif fault == 'wrong_baseline': baseline = {**baseline, 'receipt': '0' * 64}
+    with pytest.raises(controller.Rejected):
+        controller.production_approval(api, integration_cfg, state, candidate, baseline)
+
+
+def test_disabled_optional_approval_jobs_do_not_break_pr_or_push_ci_admission(integration_cfg):
+    api = PushGitHub()
+    for name in ('Ali required gates', 'Ali deployment approval'):
+        api.jobs[100].append({**api.jobs[100][0], 'name': name, 'conclusion': 'skipped'})
+    assert controller.admit(api, integration_cfg, 100, 1)['candidate']['tested_commit'] == HEAD
+    api.jobs[100].append({**api.jobs[100][0], 'name': 'Unexpected skipped security check', 'conclusion': 'skipped'})
+    with pytest.raises(controller.Rejected, match='Required gate'):
+        controller.admit(api, integration_cfg, 100, 1)
 
 
 @pytest.mark.parametrize('mutation,expected', [

@@ -1,4 +1,4 @@
-"""Developer POC workflow; run --help for commands. Never installs dependencies."""
+"""Developer POC workflow. Only the explicit setup command installs dependencies."""
 from pathlib import Path
 import subprocess
 import sys
@@ -7,9 +7,21 @@ from setup import ROOT, backend_python
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "setup":
+        # A documented recipe over existing setup; normal startup never installs.
+        import argparse
+        parser = argparse.ArgumentParser(description="Prepare the shared Knowledge Base POC once")
+        parser.add_argument("--profile", default="poc")
+        args = parser.parse_args(sys.argv[2:])
+        from setup import main as setup
+        result = setup(["--profile", args.profile, "--plugin-path", "plugins/knowledge_base", "--runtime", "adk", "--skip-build"])
+        if result:
+            return result
+        return subprocess.call([str(backend_python()), str(Path(__file__).resolve()), "init", "--profile", args.profile,
+                               "--template", str(ROOT / "examples/poc/legion.json")], cwd=ROOT)
     python = backend_python()
     if not python.is_file():
-        raise SystemExit("Run python scripts/setup.py --profile poc --skip-build first.")
+        raise SystemExit("Run python scripts/poc.py setup first.")
     if Path(sys.executable).resolve() != python.resolve():
         return subprocess.call([str(python), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=ROOT)
     sys.path.insert(0, str(ROOT))

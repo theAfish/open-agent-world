@@ -290,14 +290,16 @@ def test_check_skips_uninstalled_packs_and_reports_missing_profile_environment(s
     assert not (tmp_path / "profile").exists()
 
 
-def test_repeated_dev_starts_prepare_once_then_run_vite_and_propagate_failure(scripts, monkeypatch, tmp_path):
+@pytest.mark.parametrize("published", [False, True])
+def test_repeated_dev_starts_prepare_once_then_run_vite_and_propagate_failure(scripts, monkeypatch, tmp_path, published):
     _, _, dev = scripts
     python = tmp_path / "python"
     python.touch()
     monkeypatch.setattr(dev, "backend_python", lambda root: python)
     monkeypatch.setattr(dev, "prerequisites", lambda **kw: {"node": "node", "npm": "npm"})
     monkeypatch.setattr(dev, "available_port", lambda port: port)
-    monkeypatch.setattr(sys, "argv", ["dev.py", "--profile", "fixture", "--plugin-path", "extra plugin"])
+    monkeypatch.setattr(sys, "argv", ["dev.py", "--profile", "fixture", "--plugin-path", "extra plugin"]
+                        + (["--deployment", str(tmp_path / "runtime")] if published else []))
     commands, children, stopped = [], [], []
     monkeypatch.setattr(dev.subprocess, "run", lambda command, **kwargs: commands.append(command))
     probes = []
@@ -308,6 +310,7 @@ def test_repeated_dev_starts_prepare_once_then_run_vite_and_propagate_failure(sc
 
     def popen(command, **kwargs):
         commands.append(command)
+        assert kwargs["env"]["OAW_DEV_PUBLISHED_RUNTIME"] == ("1" if published else "0")
         code = 2 if command[0] == "node" else None
         process = SimpleNamespace(poll=lambda: code, returncode=code)
         children.append(process)
@@ -328,6 +331,9 @@ def test_repeated_dev_starts_prepare_once_then_run_vite_and_propagate_failure(sc
     assert commands[3][2:4] == ["--host", "127.0.0.1"]
     assert stopped[:2] == list(reversed(children[:2]))
     assert probes == ["http://127.0.0.1:8000/health/ready"] * 2
+    if published:
+        assert commands[2][1:] == ["-m", "backend.deploy", "--serve", str((tmp_path / "runtime").resolve()),
+                                   "--api-only", "--port", "8000", "--desktop"]
 
 
 def test_failed_preflight_never_launches_processes(scripts, monkeypatch, tmp_path):

@@ -10,6 +10,17 @@ ECS controller deploys the **tested PR merge commit** to one shared, private
 Preview slot. The preview is accessible only through each reviewer's own
 authorized SSH tunnel. No developer needs to build/upload a release manually.
 
+For the team POC, start with the [local development recipe](../examples/poc/README.md).
+It provides editable Knowledge Base/Legion/Workspace data and a separate published
+user-view snapshot, both running locally with Vite. Do not deploy each edit just
+to test it. Git-managed scenes join the hosted admin's normal release selector.
+
+After production activation, merge CI presents a native GitHub deployment review
+for `aliyun-integration-approval`. A maintainer approves; the separate ECS
+controller installs the validated artifact and reports **Ali integration
+deployment**. The approval job alone is not evidence of installation. See the
+[activation plan](../deploy/aliyun/POST_MERGE.md#github-approval-mode).
+
 ## 1. Open an Ali PR
 
 1. Start from the latest `origin/feat/aliyun-agentcore-poc` in your own branch

@@ -75,12 +75,16 @@ def _structure(template):
     nodes = {}
     for node in template["blueprint"]["nodes"]:
         nodes[source[node["key"]]] = {
-            key: _references(node.get(key), source) for key in (
+            key: node.get(key) for key in (
                 "type", "plugin_id", "parent_key", "owner_key", "equipment_relationship",
                 "state_scope", "payload_version", "payload", "plugin_defaults", "finish",
             )
         }
-    edges = [{key: _references(edge[key], source) for key in (
+        # Only reference-bearing fields use the node-key map. A portable key
+        # such as "agent" must not rewrite the node type or a relationship name.
+        for key in ("parent_key", "owner_key", "payload", "plugin_defaults"):
+            nodes[source[node["key"]]][key] = _references(node.get(key), source)
+    edges = [{key: source[edge[key]] if key in {"source", "target"} else edge[key] for key in (
         "source", "target", "relationship", "plugin_id", "direction")}
         for edge in template["blueprint"]["edges"]]
     return {"nodes": nodes, "edges": sorted(edges, key=lambda edge: json.dumps(edge, sort_keys=True)),
