@@ -13,14 +13,16 @@ export function isLocalManagementRequest(request) {
   return loopback && !forwarded;
 }
 
-export function localManagementProxy(target, ws = false) {
+export function localManagementProxy(target, ws = false, preserveHost = false) {
   // http-proxy otherwise uses agent:false and Connection:close, allocating a
   // new Windows ephemeral port for every API request (including profile polls).
   // WebSocket upgrades own their sockets and must not consume this HTTP pool.
   const Agent = new URL(target).protocol === "https:" ? HttpsAgent : HttpAgent;
   const agent = ws ? undefined : new Agent({ keepAlive: true, maxSockets: 8, maxFreeSockets: 8 });
   return {
-    target, ws, changeOrigin: !ws,
+    // Published cookie authentication compares Origin with Host. Preserve the
+    // browser's Host through the local proxy; never rewrite/relax Origin checks.
+    target, ws, changeOrigin: !ws && !preserveHost,
     ...(agent ? { agent } : {}),
     // Upgrade events have multiple listeners. Refuse in the proxy itself as
     // well as closing the incoming socket in our first upgrade listener.

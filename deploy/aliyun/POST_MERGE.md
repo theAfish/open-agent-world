@@ -12,6 +12,11 @@ controlled acceptance deployment; approve unattended updates separately afterwar
 4. Review its automatic [private Preview](PR_PREVIEW.md) and required checks.
 5. Merge after review and checks pass, using the existing branch protections.
 
+The team can develop and try a published user view entirely locally using the
+[POC recipe](../../examples/poc/README.md). Local changes do not require a cloud
+deployment. The GitHub approval mode below is the preferred team delivery path;
+the older controlled/routine policies remain available for existing installations.
+
 The merge triggers fresh CI, Native, and Docs checks on the resulting branch
 commit. CI packages the frontend and Pack outputs already used by its acceptance
 checks into immutable `oaw-integration-<run_id>-<run_attempt>`. An earlier PR
@@ -92,11 +97,104 @@ Modes in [integration-controller.example.json](integration-controller.example.js
 | `disabled` | No admission or deployment. Initial installation state. |
 | `controlled` | Root approves one exact run/attempt and current installed commit/receipt. Required for first acceptance and later higher-risk changes. |
 | `routine` | Root records an accepted controlled revision already present in controller history. Only complete, forward diffs from its current installed receipt and the conservative path allowlist qualify. |
+| `github` | After the same controlled acceptance, require the pinned CI run's successful native environment approval job and an actual maintainer review. Backend changes may qualify; trusted pipeline and host compatibility guards still apply. |
 
 All CI archives retain `routine:false`: even unattended updates use the full
 existing per-profile migration and verification transaction. An artifact cannot
 request a reduced verification path. Dependency/service generator compatibility
 guards continue to reject updates needing a separately planned host upgrade.
+
+## GitHub approval mode
+
+The CI workflow contains two optional jobs, enabled only for **pushes to the Ali
+branch** with repository variable `OAW_ALIYUN_GITHUB_DEPLOYMENT=enabled`:
+
+1. `Ali required gates` waits for CI required, Native and Docs on the merged SHA.
+2. `Ali deployment approval` targets environment `aliyun-integration-approval`.
+   A maintainer clicks **Review deployments → Approve and deploy**. This job has
+   no checkout, SSH credentials, candidate execution, or deployment permissions.
+
+The ECS controller still admits the latest push run/attempt and immutable
+artifact independently. In `github` mode it additionally checks that the approval
+environment has required reviewers and disallows administrator bypass, the exact
+attempt's approval job succeeded, and GitHub records an approval for that
+environment from a repository maintainer/admin. It rechecks approval and the
+installed receipt immediately before switching. GitHub's approval-job success is
+only permission; **Ali integration deployment** reports actual installation or
+rollback. Never use the approval environment as the controller's output environment:
+`aliyun-integration` remains the status destination, without job protections.
+
+PRs, `dev`, `main`, and an unset repository variable skip both jobs. This does not
+weaken any required CI job. Changed trusted workflow/build entrypoints still need
+an independently reviewed controller pin update. A dependency/systemd/provisioner
+upgrade remains an explicit host operation; approval cannot bypass those guards.
+Expired artifacts require a fresh CI attempt and approval, not a manual SHA.
+
+### Reviewed activation plan for the existing ECS
+
+Read-only inspection on 2026-11-09 found production at
+`59255fc14fab13bc13c3846423b71df7e080addd`, with the independent production operator,
+build/verify execution runtime and sealed provisioner already installed. Private
+Preview is active. The integration controller is absent; the root filesystem has
+about 7.6 GiB free. The older installation inventory below describes 2026-11-03,
+not the current host. **No installation or restart was performed by this change.**
+
+After this PR passes required CI and its exact activation is approved:
+
+1. Merge the reviewed PR, wait for the new Ali **push** CI, Native and Docs gates,
+   and select the run/attempt automatically from that resulting branch head. Keep
+   the GitHub opt-in variable unset during initial controlled acceptance.
+2. Create GitHub environment `aliyun-integration-approval`, restrict it to the Ali
+   branch, set `theAfish` as required reviewer and `can_admins_bypass=false`.
+   Self-review may remain allowed for the initial single-maintainer team. Require
+   a normal environment approval even for administrators. Do not change branch
+   protections, repository secrets, the `preview` environment or its credentials.
+   Also create the status-only `aliyun-integration` environment with no protection
+   rules or branch policy (it is absent in the inspected repository). The two
+   environments deliberately separate permission from the deployment result.
+3. Install only the reviewed `preview_controller.py` and `preview_deploy.py` under
+   `/opt/oaw-integration-controller`; code is root-owned `0644`, directory `0700`.
+   Install the exact file hashes and reviewed producer revision in root-private
+   `config.json`. Provision a separate root-private GitHub token with the existing
+   controller permissions (Actions/Contents/Environments read; Deployments and
+   Commit statuses write; collaborator permission visibility). Never place it in
+   Actions or an application-readable path. Reuse authorized credentials only
+   if their scope and lifetime are suitable; otherwise request a token from the
+   repository administrator through the existing private configuration directory.
+4. Create `/var/lib/oaw-integration-controller` as root `0700`. Install the existing
+   controller service/timer, adding `ReadOnlyPaths` for every unrelated current
+   `/opt` entry. Leave the timer disabled. Do not replace the trusted publisher,
+   execution runtime or sealed provisioner, and retain the shared host lease.
+   Under that same lease and with no in-flight Preview transaction, update the
+   existing Private Preview controller's two reviewed files, file inventories and
+   trusted producer revision to this merge. Its admission must understand the two
+   optional skipped CI jobs. Preserve its environment, state/history, token and
+   Core/mock isolation. Restore its existing timer afterward; do not replay PRs
+   previously excluded by the older trust pin.
+5. Bind `controlled` mode to the selected successful run/attempt and current
+   installed commit/receipt, then run one controller transaction. This reuses
+   nonroot preparation/migration/verification and the existing restore path.
+   Verify the resulting receipt, login and the admin's **Git: Lab Manager** entry.
+   Do not assign/reset user workspaces, create Sandbox VMs or call a paid model.
+6. Only after successful controlled acceptance, retain its accepted revision and
+   set mode `github`, then set the GitHub opt-in variable and enable the timer.
+   Future eligible merges await a maintainer's native GitHub approval. Report
+   completion of the first real approval/installation separately from local tests.
+7. If initial acceptance fails, keep the timer and opt-in variable disabled and
+   report the publisher's actual restored revision. Disable new admissions with
+   `systemctl disable --now oaw-integration-controller.timer`; never interrupt or
+   replay an in-flight transaction. Its existing reconciliation handles recovery.
+
+This plan creates two GitHub environments, sets one opt-in variable, installs the
+integration controller and updates the existing Preview controller on the ECS.
+It does not change Nginx, DNS/TLS, firewall, cloud resources, user
+accounts, model/environment settings, user data or Sandbox/Volume bindings. The
+first controlled application deployment briefly restarts the existing services.
+
+Git scenes arrive inside the validated application bundle and are exposed by the
+nonroot builder using existing publication/queue APIs. Choosing target accounts
+is still an admin action. Legacy online-authored workspaces have different source
+lineage: importing a Git scene must not silently adopt, reset or replace them.
 
 ## Installation plan: approval required
 

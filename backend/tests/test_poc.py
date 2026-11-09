@@ -9,7 +9,7 @@ import pytest
 from backend import development, poc
 from backend.application import write_setting
 from backend.conversations.models import ConversationSessionCreate
-from backend.errors import ConflictError, PluginCompatibilityError
+from backend.errors import ConflictError, DomainError, PluginCompatibilityError
 from backend.plugins.builtin import create_builtin_registry
 from backend.services import ApplicationServices, create_services
 from backend.storage_location import file_lock
@@ -19,8 +19,8 @@ from backend.world.models import CardCreate, CardPatch, EdgeCreate
 @pytest.fixture(autouse=True)
 def isolated_profiles(tmp_path, monkeypatch):
     monkeypatch.setattr(development, "PROFILES", tmp_path / "profiles")
-    monkeypatch.setattr(poc, "create_services", lambda settings:
-        create_services(settings, plugins=create_builtin_registry()))
+    monkeypatch.setattr(poc, "create_services", lambda settings, **kwargs:
+        create_services(settings, plugins=kwargs.get("plugins") or create_builtin_registry()))
 
     async def no_startup(self):
         raise AssertionError("Offline POC commands must not resume jobs or conversations")
@@ -46,7 +46,7 @@ def test_init_reuses_profile_and_apply_preserves_edited_instances(tmp_path):
         assert result["status"] == "reused"
         before = services.world.list_cards()
         updated = asyncio.run(poc.apply_definition(services, template=path))
-        assert updated["node_ids"]["node-1"] != ids["group"]
+        assert updated["node_ids"]["group"] != ids["group"]
         assert [services.world.get_card(card.id) for card in before] == before
         new_group = next(c for c in services.world.list_cards() if c.id not in {n.id for n in before} and c.type == "legion")
         assert new_group.position.x > max(c.position.x + c.size.width for c in before if not c.parent_id)
@@ -181,9 +181,68 @@ def test_knowledge_starter_uses_installed_card_contract_and_closes_clients(monke
     from oaw_knowledge_base.client import _clients
     registry = create_builtin_registry()
     registry.install(create_plugin())
-    monkeypatch.setattr(poc, "create_services", lambda settings: create_services(settings, plugins=registry))
+    monkeypatch.setattr(poc, "create_services", lambda settings, **kwargs: create_services(settings, plugins=registry))
     path = poc.ROOT / "examples/poc/legion.json"
     assert poc.main(["init", "--template", str(path)]) == 0
     result = json.loads(capsys.readouterr().out)
     assert set(result["node_ids"]) == {"group", "agent", "conversation", "knowledge", "sandbox"}
     assert result["node_ids"]["knowledge"] not in _clients
+    assert poc.main(["check", "--template", str(path)]) == 0
+    checked = json.loads(capsys.readouterr().out)
+    assert checked["cards"] == 5 and checked["panels"] > 0
+
+
+def test_colleagues_keep_stable_template_keys_and_hosted_lineage(tmp_path):
+    from backend.hosting.scenarios import template_from_definition
+    path = tmp_path / "legion.json"
+    with poc.open_profile("author", initialize=True) as services:
+        ids = init(services)
+        asyncio.run(poc.save_definition(services, ids["group"], path))
+    first = poc.read_template(path)
+    with poc.open_profile("colleague", initialize=True) as services:
+        ids = asyncio.run(poc.apply_definition(services, template=path))["node_ids"]
+        services.world.update_card(ids["agent"], CardPatch(name="Improved agent"))
+        asyncio.run(poc.save_definition(services, ids["group"], path))
+    second = poc.read_template(path)
+    before, after = template_from_definition(first), template_from_definition(second)
+    assert before["source_nodes"] == after["source_nodes"]
+    assert before["source_identity"] == after["source_identity"]
+    assert before["source_release_id"] != after["source_release_id"]
+    assert second.revision == first.revision + 1
+
+
+def test_local_preview_is_real_published_snapshot_with_independent_writes(tmp_path):
+    from backend.deploy import validate_manifest
+    with poc.open_profile("poc", initialize=True) as services:
+        ids = init(services)
+        note = asyncio.run(services.create_card(CardCreate(type="text", parent_id=ids["group"], content="Source document")))
+    result = asyncio.run(poc.prepare_preview("poc", ids["group"]))
+    root = Path(result["path"])
+    manifest = json.loads((root / "deployment.json").read_text())
+    validate_manifest(manifest)
+    assert manifest["id"] == result["release_id"]
+    assert manifest["secure_cookie"] is False
+    assert result["password"] not in (root / "deployment.json").read_text()
+    assert root.parent.name == "poc" and root.parent.parent.name == "previews"
+    with sqlite3.connect(root / "database/world.sqlite3") as db:
+        db.execute("UPDATE cards SET name='Only the preview changed' WHERE id=?", (note.id,))
+    with poc.open_profile("poc") as services:
+        assert services.world.get_card(note.id).name != "Only the preview changed"
+        assert not (services.settings.data_root / "deployment.json").exists()
+
+
+def test_check_rejects_unpublishable_git_scene_without_editing_author(tmp_path):
+    path = tmp_path / "legion.json"
+    with poc.open_profile("poc", initialize=True) as services:
+        ids = init(services)
+        asyncio.run(poc.save_definition(services, ids["group"], path))
+        count = len(services.world.list_cards())
+    assert asyncio.run(poc.check_definition(path))["status"] == "ready"
+    value = json.loads(path.read_text())
+    group = next(node for node in value["blueprint"]["nodes"] if node["type"] == "legion")
+    group["config"].pop("workspace_layout", None)
+    path.write_text(json.dumps(value))
+    with pytest.raises((ValueError, DomainError), match="[Ll]ayout|[Ww]orkspace"):
+        asyncio.run(poc.check_definition(path))
+    with poc.open_profile("poc") as services:
+        assert len(services.world.list_cards()) == count

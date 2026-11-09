@@ -200,8 +200,12 @@ async def builder_mode():
 @router.get("/api/deployments")
 async def list_releases(services=Depends(get_services)):
     with services.database.locked() as db:
-        return [json.loads(row[0]) for row in db.execute(
+        releases = [json.loads(row[0]) for row in db.execute(
             "SELECT value_json FROM application_settings WHERE key LIKE ? ORDER BY key", (PREFIX + "%",))]
+    if services.settings.tenant_scope is not None:
+        from backend.hosting.scenarios import catalog
+        releases.extend(catalog())
+    return releases
 
 
 @router.post("/api/deployments", status_code=201)

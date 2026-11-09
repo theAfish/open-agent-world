@@ -75,6 +75,7 @@ def main() -> None:
     parser.add_argument("--backend-port", type=int, default=8000)
     parser.add_argument("--frontend-port", type=int, default=5173)
     parser.add_argument("--profile", type=profile_name, default="default")
+    parser.add_argument("--deployment", type=Path, help="Serve an existing local published snapshot with Vite")
     parser.add_argument("--plugin-path", action="append", type=Path, default=[])
     parser.add_argument("--startup-timeout-seconds", type=int, default=0,
                         help="Zero waits until ready or process exit, including long migrations")
@@ -100,14 +101,18 @@ def main() -> None:
     env["OPEN_AGENT_WORLD_MODE"] = "development"
     env["OAW_DEV_BACKEND_HTTP_URL"] = f"http://127.0.0.1:{backend_port}"
     env["OAW_DEV_BACKEND_WS_URL"] = f"ws://127.0.0.1:{backend_port}"
+    env["OAW_DEV_PUBLISHED_RUNTIME"] = "1" if args.deployment else "0"
     options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
     processes = []
     def interrupted(signum, frame):
         raise KeyboardInterrupt
     previous_termination = signal.signal(signal.SIGTERM, interrupted)
     try:
-        backend = subprocess.Popen([str(python), "-m", "backend.launcher", "--mode", "development",
-                                    "--profile", args.profile, "--port", str(backend_port), "--strict-port", "--desktop"], cwd=root, env=env, stdin=subprocess.PIPE, **options)
+        command = ([str(python), "-m", "backend.deploy", "--serve", str(args.deployment.resolve()),
+                    "--api-only", "--port", str(backend_port), "--desktop"] if args.deployment else
+                   [str(python), "-m", "backend.launcher", "--mode", "development",
+                    "--profile", args.profile, "--port", str(backend_port), "--strict-port", "--desktop"])
+        backend = subprocess.Popen(command, cwd=root, env=env, stdin=subprocess.PIPE, **options)
         processes.append(backend)
         started = time.monotonic()
         notice = started
@@ -133,7 +138,8 @@ def main() -> None:
                                     cwd=root / "frontend", env=env, **options)
         processes.append(frontend)
         print(f"Open Agent World: http://127.0.0.1:{frontend_port}", flush=True)
-        print(f"Development profile: {args.profile}; press F3 for debugging and reset controls.", flush=True)
+        print(f"Published local snapshot: {args.deployment}" if args.deployment else
+              f"Development profile: {args.profile}; press F3 for debugging and reset controls.", flush=True)
         while backend.poll() is None and frontend.poll() is None:
             time.sleep(0.3)
         for name, process in (("Backend", backend), ("Frontend", frontend)):

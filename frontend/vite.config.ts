@@ -8,6 +8,7 @@ import { reactFlowTouchInput } from './server/react-flow-touch.mjs';
 
 const backendHttpUrl = process.env.OAW_DEV_BACKEND_HTTP_URL ?? "http://127.0.0.1:8000";
 const backendWsUrl = process.env.OAW_DEV_BACKEND_WS_URL ?? "ws://127.0.0.1:8000";
+const publishedRuntime = process.env.OAW_DEV_PUBLISHED_RUNTIME === "1";
 
 export default defineConfig(({ mode }) => ({
   css: { postcss: { plugins: [autoprefixer({ overrideBrowserslist: ["Chrome >= 109", "Firefox >= 115", "Safari >= 16.4"] })] } },
@@ -17,6 +18,6 @@ export default defineConfig(({ mode }) => ({
     alias: [{ find: "@oaw/plugin-api", replacement: fileURLToPath(new URL("./src/plugins/sdk.ts", import.meta.url)) }],
   },
   plugins: [reactFlowTouchInput(), localControlPlaneProxy(), ...(mode === "test" ? [] : [sourcePackArtifacts()]), react()],
-  server: { proxy: { "/api": localManagementProxy(backendHttpUrl), "/auth": { target: backendHttpUrl }, "/ws": localManagementProxy(backendWsUrl, true) } },
+  server: { proxy: { "/api": localManagementProxy(backendHttpUrl, false, publishedRuntime), "/auth": { target: backendHttpUrl }, "/ws": localManagementProxy(backendWsUrl, true) } },
   test: { setupFiles: ["./src/test/setup.ts"] },
 }));

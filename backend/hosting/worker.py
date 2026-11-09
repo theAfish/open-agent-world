@@ -255,6 +255,10 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
         async def hosted_template(release_id: UUID, services=Depends(get_services)):
             from .templates import capture_template
             try:
+                from .scenarios import resolve
+                shared = resolve(str(release_id), services)
+                if shared is not None:
+                    return shared
                 return await capture_template(services, str(release_id))
             except ValueError as error:
                 raise HTTPException(409, str(error)) from None

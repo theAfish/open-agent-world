@@ -1866,7 +1866,7 @@ class ApplicationServices:
         blueprint, _ = await self._capture_subgraph_locked(request)
         return self._legion_summary(self.legions.create(request.name, request.description, blueprint))
 
-    async def _capture_subgraph_locked(self, request):
+    async def _capture_subgraph_locked(self, request, *, node_keys=None):
         selected_ids = list(request.node_ids)
         for node_id in request.node_ids:
             selected_ids.extend(m.id for m in self.world.owned_descendants(node_id))
@@ -1893,9 +1893,10 @@ class ApplicationServices:
         }
         from backend.node_documents import read_document
         documents = {card.id: read_document(self, card.id) for card in cards if self.plugins.node_type(card.type).document is not None}
-        node_keys = {
-            card.id: f"node-{index + 1}" for index, card in enumerate(cards)
-        }
+        if node_keys is None:
+            node_keys = {card.id: f"node-{index + 1}" for index, card in enumerate(cards)}
+        elif set(node_keys) != {card.id for card in cards} or len(set(node_keys.values())) != len(cards):
+            raise ValueError("Capture keys must identify every selected card uniquely")
         for card in cards:
             definition = self.plugins.node_type(card.type)
             if not definition.templateable:

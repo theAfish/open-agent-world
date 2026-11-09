@@ -135,7 +135,7 @@ def configuration(path):
     if integration(cfg):
         activation = cfg['activation']
         require(isinstance(activation, dict) and set(activation) == {'mode', 'approved_run', 'accepted_revision'}
-                and activation['mode'] in {'disabled', 'controlled', 'routine'}, 'Invalid integration activation policy')
+                and activation['mode'] in {'disabled', 'controlled', 'routine', 'github'}, 'Invalid integration activation policy')
         approved = activation['approved_run']
         require(approved is None or isinstance(approved, dict) and set(approved) ==
                 {'run_id', 'run_attempt', 'baseline_commit', 'baseline_receipt'}
@@ -146,7 +146,7 @@ def configuration(path):
         accepted = activation['accepted_revision']
         require(accepted is None or isinstance(accepted, str) and SHA.fullmatch(accepted), 'Invalid accepted integration revision')
         require(activation['mode'] != 'controlled' or approved is not None, 'Controlled deployment approval is missing')
-        require(activation['mode'] != 'routine' or accepted is not None and approved is None,
+        require(activation['mode'] not in {'routine', 'github'} or accepted is not None and approved is None,
                 'Routine deployment requires completed acceptance and no pending controlled approval')
     require(isinstance(cfg['trusted_revision'], str) and SHA.fullmatch(cfg['trusted_revision']),
             'Controller must pin an independently reviewed revision')
@@ -289,8 +289,9 @@ def successful_run(api, run, workflow_id, pr, *, event='pull_request'):
     jobs = api.pages(f'actions/runs/{run["id"]}/attempts/{attempt}/jobs', 'jobs')
     require(jobs and all(job.get('run_attempt') == attempt and job.get('head_sha') == pr['head']['sha']
                          and job.get('status') == 'completed'
-                         and (job.get('conclusion') == 'success' or workflow_id == 363172125
-                              and job.get('name') == 'deploy' and job.get('conclusion') == 'skipped') for job in jobs)
+                         and (job.get('conclusion') == 'success' or job.get('conclusion') == 'skipped' and (
+                              workflow_id == 363172125 and job.get('name') == 'deploy'
+                              or workflow_id == CI and job.get('name') in {'Ali required gates', 'Ali deployment approval'})) for job in jobs)
             and sum(job.get('name') == WORKFLOWS[workflow_id][1] for job in jobs) == 1,
             'Required gate or workflow jobs did not all succeed in this attempt')
     return actual
@@ -447,7 +448,7 @@ def production_approval(api, cfg, state, candidate, baseline):
     if mode == 'controlled':
         require(activation['approved_run'] == binding, 'Controlled approval differs from this run or installed baseline')
         return binding
-    require(mode == 'routine' and activation['accepted_revision'] == state.get('controlled_revision'),
+    require(mode in {'routine', 'github'} and activation['accepted_revision'] == state.get('controlled_revision'),
             'Complete controlled deployment acceptance before enabling routine updates')
     previous = state.get('slot')
     require(previous and previous.get('installed_commit') == baseline['commit']
@@ -457,6 +458,9 @@ def production_approval(api, cfg, state, candidate, baseline):
     require(comparison.get('status') == 'ahead'
             and comparison.get('merge_base_commit', {}).get('sha') == baseline['commit'],
             'Routine deployment must advance the exact installed baseline without conflicting history')
+    if mode == 'github':
+        github_approval(api, candidate)
+        return binding
     files = comparison.get('files')
     require(isinstance(files, list) and 0 < len(files) < 300,
             'Routine diff is empty or exceeds the complete GitHub comparison limit; explicit review required')
@@ -466,6 +470,38 @@ def production_approval(api, cfg, state, candidate, baseline):
                 and (item.get('status') != 'renamed' or routine_path(item.get('previous_filename'))),
                 'Change requires explicit maintainer approval: ' + str(item.get('filename')))
     return binding
+
+
+def github_approval(api, candidate):
+    """Native environment approval on the pinned CI job, for this exact attempt.
+
+    This grants no workflow SSH/root access and never replaces push admission,
+    host compatibility checks, or the separately sealed provisioner boundary.
+    """
+    name = 'aliyun-integration-approval'
+    environment = api.get('environments/' + name)
+    reviewers = [rule for rule in environment.get('protection_rules', []) if rule.get('type') == 'required_reviewers']
+    require(environment.get('name') == name and type(environment.get('id')) is int and environment['id'] > 0
+            and environment.get('can_admins_bypass') is False
+            and len(reviewers) == 1 and reviewers[0].get('reviewers'),
+            'GitHub approval environment requires reviewers and must disallow administrator bypass')
+    jobs = api.pages(f'actions/runs/{candidate["run_id"]}/attempts/{candidate["run_attempt"]}/jobs', 'jobs')
+    selected = [job for job in jobs if job.get('name') == 'Ali deployment approval']
+    if not selected or selected[0].get('status') != 'completed':
+        raise Pending('Waiting for GitHub deployment approval')
+    require(len(selected) == 1 and selected[0].get('head_sha') == candidate['tested_commit']
+            and selected[0].get('run_attempt') == candidate['run_attempt']
+            and selected[0].get('conclusion') == 'success', 'This attempt has no successful GitHub approval job')
+    reviews = api.get(f'actions/runs/{candidate["run_id"]}/approvals')
+    approvals = [review for review in reviews if review.get('state') == 'approved'
+                 and any(env.get('id') == environment.get('id') and env.get('name') == name
+                         for env in review.get('environments', []))]
+    require(approvals, 'GitHub has no recorded approval for the deployment environment')
+    # GitHub enforces environment membership. Also require repository maintainer
+    # authority; an approved environment review from a read-only collaborator is
+    # not permission to replace the integration service.
+    require(any(api.get('collaborators/' + quote(review['user']['login'], safe='') + '/permission').get('permission')
+                in {'maintain', 'admin'} for review in approvals), 'Deployment requires a maintainer approval')
 
 
 def unpack(archive, destination, admission):

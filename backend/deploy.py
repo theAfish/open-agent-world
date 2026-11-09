@@ -211,9 +211,13 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=38474)
     parser.add_argument("--open", action="store_true")
+    parser.add_argument("--api-only", action="store_true", help="Loopback backend for the local Vite development launcher")
+    parser.add_argument("--desktop", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("Port must be between 1 and 65535")
+    if args.api_only and args.host != "127.0.0.1":
+        parser.error("--api-only requires the loopback host 127.0.0.1")
     if args.reset_password and not args.serve:
         parser.error("--reset-password requires --serve")
     if args.serve:
@@ -253,8 +257,8 @@ def main():
     selected = replace(selected, agent_runtime=runtime["agent_runtime"], sandbox_runtime=runtime["sandbox_runtime"],
                        plugin_directories=tuple(Path(p) for p in runtime["plugin_directories"]))
     configure_logs(selected)
-    frontend = Path(__file__).resolve().parents[1] / "frontend/dist"
-    if not (frontend / "index.html").is_file():
+    frontend = None if args.api_only else Path(__file__).resolve().parents[1] / "frontend/dist"
+    if frontend is not None and not (frontend / "index.html").is_file():
         parser.error("Frontend build missing; run setup or npm --prefix frontend run build")
     listener = socket.socket()
     if os.name == "nt":
@@ -266,7 +270,7 @@ def main():
     listener.setblocking(False)
     print(f"Runtime listener: {args.host}:{args.port} · release {manifest['id']}", flush=True)
     try:
-        asyncio.run(serve(selected, listener, frontend=frontend, open_browser=args.open))
+        asyncio.run(serve(selected, listener, frontend=frontend, desktop=args.desktop, open_browser=args.open))
     finally:
         listener.close()
 

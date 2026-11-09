@@ -256,6 +256,49 @@ jobs:
         run: |
           python -c 'import json,os; results=json.loads(os.environ["RESULTS"]); assert all(job["result"] == "success" for job in results.values()), results'
 
+  aliyun-gates:
+    name: Ali required gates
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/aliyun-agentcore-poc' && vars.OAW_ALIYUN_GITHUB_DEPLOYMENT == 'enabled'
+    needs: required
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: read
+    steps:
+      # No checkout, candidate execution, SSH or deployment credentials here.
+      - name: Wait for the same commit's Native and Docs workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REVISION: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, time
+          for workflow in (363172125, 368742567):
+              for _ in range(120):
+                  path = f'repos/{os.environ["REPOSITORY"]}/actions/workflows/{workflow}/runs?event=push&head_sha={os.environ["REVISION"]}&per_page=100'
+                  runs = json.loads(subprocess.check_output(['gh', 'api', path]))['workflow_runs']
+                  run = max(runs, key=lambda r: (r['run_started_at'], r['id'], r['run_attempt'])) if runs else None
+                  if run and run['status'] == 'completed':
+                      if run['conclusion'] != 'success':
+                          raise SystemExit(f'Required workflow {workflow} did not succeed: {run["html_url"]}')
+                      break
+                  time.sleep(10)
+              else:
+                  raise SystemExit(f'Required workflow {workflow} did not complete; rerun all CI jobs for a fresh attempt-bound artifact')
+          PY
+
+  aliyun-approval:
+    name: Ali deployment approval
+    needs: aliyun-gates
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/aliyun-agentcore-poc' && vars.OAW_ALIYUN_GITHUB_DEPLOYMENT == 'enabled'
+    runs-on: ubuntu-24.04
+    environment: aliyun-integration-approval
+    permissions: {}
+    steps:
+      - name: Record approval for the trusted ECS controller
+        run: echo 'Approved. The Ali integration deployment status reports actual installation or recovery; this job does not deploy.'
+
   version:
     name: Application version consistency
     runs-on: ubuntu-24.04

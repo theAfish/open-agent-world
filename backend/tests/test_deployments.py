@@ -21,6 +21,14 @@ from backend.world.models import CardCreate, CardPatch, EdgePatch
 PASSWORD = "test-operator-password-93841"
 
 
+def test_developer_api_only_runtime_rejects_non_loopback_listener(monkeypatch, capsys):
+    from backend.deploy import main
+    monkeypatch.setattr(sys, "argv", ["deploy", "--api-only", "--host", "0.0.0.0"])
+    with pytest.raises(SystemExit):
+        main()
+    assert "requires the loopback host 127.0.0.1" in capsys.readouterr().err
+
+
 def settings(path):
     return replace(Settings.for_data_root(path), agent_runtime="core.mock", sandbox_runtime=None)
 

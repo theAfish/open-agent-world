@@ -9,14 +9,16 @@ const request = (peer, headers = {}) => ({
 });
 
 describe("local development proxy control-plane ingress", () => {
-  it("reuses an upstream connection across API polls and releases it on shutdown", async () => {
+  it.each([false, true])("reuses connections and preserves the requested Host policy (published=%s)", async (published) => {
     const sockets = new Set();
+    const forwarded = [];
     const upstream = createHttpServer((request, response) => {
       sockets.add(request.socket);
+      forwarded.push({ host: request.headers.host, origin: request.headers.origin });
       response.end("ok");
     });
     await new Promise(resolve => upstream.listen(0, "127.0.0.1", resolve));
-    const options = localManagementProxy(`http://127.0.0.1:${upstream.address().port}`);
+    const options = localManagementProxy(`http://127.0.0.1:${upstream.address().port}`, false, published);
     const client = new Agent({ keepAlive: true });
     const reservation = createHttpServer();
     await new Promise(resolve => reservation.listen(0, "127.0.0.1", resolve));
@@ -32,7 +34,8 @@ describe("local development proxy control-plane ingress", () => {
       const url = `http://127.0.0.1:${vite.httpServer.address().port}/api/application`;
       for (let i = 0; i < 12; i++) {
         await new Promise((resolve, reject) => {
-          const outgoing = httpRequest(url, { agent: client }, incoming => {
+          const origin = i === 11 ? "https://untrusted.example" : new URL(url).origin;
+          const outgoing = httpRequest(url, { agent: client, headers: { Origin: origin } }, incoming => {
             incoming.resume();
             incoming.on("end", () => { expect(incoming.statusCode).toBe(200); resolve(); });
           });
@@ -41,6 +44,13 @@ describe("local development proxy control-plane ingress", () => {
         });
       }
       expect(sockets.size).toBe(1);
+      expect(forwarded[0]).toEqual({
+        host: `127.0.0.1:${published ? listenPort : upstream.address().port}`,
+        origin: new URL(url).origin,
+      });
+      // A hostile Origin must reach the application unchanged so its existing
+      // same-origin guard rejects it; the proxy must not manufacture authority.
+      expect(forwarded.at(-1).origin).toBe("https://untrusted.example");
       const idle = Object.values(options.agent.freeSockets).flat();
       expect(idle).toHaveLength(1);
       client.destroy();
