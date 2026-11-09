@@ -81,6 +81,17 @@ def test_old_preoptimization_fit_is_marked_historical_without_metrics(tmp_path):
     assert 'candidates' not in result['single_phase']['fit']
 
 
+def test_result_tools_accept_any_core_agent_type_not_only_the_plain_agent(client):
+    owner = create_node(client, 'xrd.match')
+    for relationship in ('xrd.results-read', 'xrd.results-report'):
+        source = create_node(client, 'xrd.match')
+        edge = client.post('/api/edges', json={'source': source['id'], 'target': owner['id'], 'relationship': relationship})
+        assert edge.status_code == 201, edge.text
+    conversation = create_node(client, 'conversation')
+    rejected = client.post('/api/edges', json={'source': conversation['id'], 'target': owner['id'], 'relationship': 'xrd.results-read'})
+    assert rejected.status_code >= 400
+
+
 def test_result_analyst_capability_is_read_only_scoped_and_revocable(client, tmp_path, monkeypatch):
     monkeypatch.setenv('OAW_XRD_RUN_ROOT', str(tmp_path / 'runs'))
     owner = create_node(client, 'xrd.match')

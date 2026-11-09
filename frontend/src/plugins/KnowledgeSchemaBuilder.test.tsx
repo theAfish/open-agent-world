@@ -9,6 +9,7 @@ import { formatCell } from "../../../plugins/knowledge_base/frontend/RecordView"
 import {
   entryProperty, kindOf, propertiesOf, removeProperty, renameProperty, setChoices, setKind, setRequired,
 } from "../../../plugins/knowledge_base/frontend/schemaModel";
+import { childrenOf, extrasOf, setBound, setType, typeOf } from "../../../plugins/knowledge_base/frontend/jsonSchemaModel";
 import example from "../../../plugins/knowledge_base/examples/solid_electrolyte/schema.json";
 
 afterEach(cleanup);
@@ -104,6 +105,38 @@ describe("PropertyBuilder", () => {
     fireEvent.click(screen.getByRole("button", { name: "Form" }));
     expect(screen.getAllByLabelText("Name")).toHaveLength(1);
     expect(current().properties.only).toEqual({ value: "boolean" });
+  });
+});
+
+describe("general JSON Schema properties", () => {
+  it("reads nullable types and keeps keywords the form cannot edit", () => {
+    expect(typeOf({ type: ["string", "null"] })).toEqual({ type: "string", nullable: true });
+    expect(typeOf({ type: ["string", "number"] }).type).toBe("other");
+    const node = { type: "number", minimum: 0, pattern: "^1", enum: [1, null] };
+    expect(extrasOf(node)).toEqual({ pattern: "^1", enum: [1, null] });
+    expect(setType(node, "string", true)).toEqual({ type: ["string", "null"], pattern: "^1", enum: [1, null] });
+    expect(setBound({ type: "number" }, "maximum", "abc")).toBeUndefined();
+    expect(setType({ type: "string" }, "array", false)).toEqual({ type: "array", items: { type: "string" } });
+    expect(Object.keys(childrenOf({ type: "object", properties: { a: { type: "string" } } }))).toEqual(["a"]);
+  });
+
+  it("renders a JSON Schema property as a form and edits it without losing other keywords", () => {
+    const current = setup({ required: ["order_no"], properties: {
+      order_no: { type: ["string", "null"], description: "单号", format: "uuid" },
+      rows: { type: "array", items: { type: "object", required: ["gram"], properties: { gram: { type: "number", minimum: 0 } } } } } });
+    expect(screen.queryByLabelText("Property JSON")).toBeNull();
+    const types = screen.getAllByLabelText("Value type") as HTMLSelectElement[];
+    expect(types.map(select => select.value)).toEqual(["string", "array", "object", "number"]);
+    expect(screen.getAllByLabelText("Allow empty")[0]).toBeChecked();
+    expect(screen.getByLabelText("Other keywords (JSON)")).toHaveValue(JSON.stringify({ format: "uuid" }, null, 2));
+
+    fireEvent.change(screen.getAllByLabelText("Description")[0], { target: { value: "订单号" } });
+    fireEvent.click(screen.getAllByLabelText("Allow empty")[0]);
+    fireEvent.change(types[3], { target: { value: "integer" } });
+    const result = current();
+    expect(result.properties.order_no).toEqual({ type: "string", description: "订单号", format: "uuid" });
+    expect(result.properties.rows.items.properties.gram).toEqual({ type: "integer", minimum: 0 });
+    expect(result.properties.rows.items.required).toEqual(["gram"]);
   });
 });
 

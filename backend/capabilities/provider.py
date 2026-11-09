@@ -191,6 +191,38 @@ class _CapabilityContext:
     async def node_delegation_action(self, capability, action, arguments):
         return await self.services.node_execution.delegation_action(capability.target_id, action, arguments, capability=capability)
 
+    async def node_run_action(self, capability, action, arguments):
+        """Start, stop or read a direct-run node through the caller's live grant."""
+        from uuid import uuid4
+        from backend.errors import PermissionDeniedError
+        from backend.world.models import CardPatch
+        services = self.services
+        live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
+        if live.kind != capability.kind or live.target_id != capability.target_id:
+            raise PermissionDeniedError("Run capability was revoked")
+        target = services.world.get_card(capability.target_id)
+        if "ui.direct-run.v1" not in services.plugins.node_type(target.type).traits:
+            raise ResourceValidationError("This node cannot be run by a tool")
+        manager = services._require_run_manager()
+        if action == "start":
+            config = arguments.get("config", {})
+            if set(arguments) - {"config"} or not isinstance(config, dict):
+                raise ResourceValidationError("Run start accepts only a config object")
+            if config:
+                await services.update_card(target.id, CardPatch(config=config))
+            run = await manager.start_run(target.id, "Run", caller_kind="agent", caller_id=capability.agent_id,
+                                          detached=True, context_id="tool-run:" + uuid4().hex)
+            return {"run_id": run.run_id, "status": run.status.value}
+        if arguments:
+            raise ResourceValidationError("Only start accepts run arguments")
+        if action == "stop":
+            return await services.stop_agent(target.id)
+        if action == "read":
+            latest = max(manager.list_runs(agent_id=target.id), key=lambda run: run.created_at, default=None)
+            return {"node_status": target.status,
+                    "latest_run": {"run_id": latest.run_id, "status": latest.status.value, "error": latest.error} if latest else None}
+        raise ResourceValidationError("Unknown run action")
+
     async def node_document_action(self, capability, action, arguments, expected_revision=None):
         from backend.node_documents import DocumentActionRequest, invoke_document_action
         return await invoke_document_action(self.services, capability.target_id, action,

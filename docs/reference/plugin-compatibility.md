@@ -24,6 +24,14 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.51 adds `CapabilityContext.node_run_action(capability, action, arguments)`
+for a capability whose target node declares trait `ui.direct-run.v1`. `start` accepts
+only `{"config": {...}}`, merges it through the normal node update, and starts a
+detached Run owned by the calling Agent; `stop` and `read` take no arguments. The host
+re-checks the caller's live grant on every call, and the plugin remains responsible for
+validating the config patch. XRD uses this for `xrd_run_stage`, `xrd_run_stop` and
+`xrd_run_status`, and requires `1.51`.
+
 Plugin API 1.50 adds the explicit target in frontend `host.updateConfig(patch, nodeId?)`
 and managed Python host-worker lockfiles through `PythonEnvironmentSpec.lockfile`
 and the environment manifest's `lock` field. Packs requiring either feature must

@@ -319,10 +319,17 @@ it("routes empty results to projects and empty Spaces to an editable schema", as
   expect(screen.getByLabelText("Extraction instructions")).toBeTruthy();
 });
 
-it("uploads schema samples through the binary host contract", async () => {
+it("uploads schema samples through the binary host contract and has the connected agent draft the schema", async () => {
+  useWorldStore.setState({
+    cards: [{ id: "card-1", type: "knowledge.base", name: "Knowledge" }, { id: "lab", type: "agent", name: "Lab assistant" }] as unknown as WorldCard[],
+    edges: [{ id: "e1", source: "lab", target: "card-1", relationship: "knowledge.base.research" }] as unknown as WorldEdge[],
+    catalog: TEST_CATALOG,
+  });
   const resourceFileAction = vi.fn().mockResolvedValue({ markdown: '| a | b |', truncated: false });
+  const runAgent = vi.fn(async () => undefined);
   vi.stubGlobal('FileReader', class { constructor() { throw new Error('No inline sample bytes'); } });
-  open(async () => undefined, { host: { resourceFileAction } });
+  open(async () => undefined, { host: { resourceFileAction, runAgent,
+    getAgentInfo: vi.fn(async () => ({ session_id: "s", status: "running", active_run_id: "run-1" })) } });
   fireEvent.click(screen.getByRole('button', { name: 'Experiment' }));
   fireEvent.click(screen.getByRole('tab', { name: 'Schemas' }));
   fireEvent.click(await screen.findByRole('button', { name: /New schema/ }));
@@ -331,6 +338,24 @@ it("uploads schema samples through the binary host contract", async () => {
   await screen.findByText('ready');
   expect(resourceFileAction).toHaveBeenCalledWith('schema_sample',
     { filename: file.name, media_type: file.type }, { file });
+  fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'one batch per row' } });
+  fireEvent.click(screen.getByRole('button', { name: /Send/ }));
+  await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
+  const [agentId, prompt, freshContext] = runAgent.mock.calls[0] as unknown as [string, string, boolean];
+  expect(agentId).toBe('lab');
+  expect(freshContext).toBe(true);
+  expect(prompt).toContain('knowledge_schema_manage');
+  expect(prompt).toContain('| a | b |');
+  expect(prompt).toContain('REQUEST: one batch per row');
+  expect(await screen.findByText('Lab assistant is drafting the schema…')).toBeInTheDocument();
+});
+
+it("offers no schema drafting without a connected research agent", async () => {
+  open(async () => undefined, { host: { resourceFileAction: vi.fn(), runAgent: vi.fn() } });
+  fireEvent.click(screen.getByRole('button', { name: 'Experiment' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Schemas' }));
+  fireEvent.click(await screen.findByRole('button', { name: /New schema/ }));
+  expect(screen.queryByText('Draft with AI')).not.toBeInTheDocument();
 });
 
 it("searches converted project files and opens attributable source excerpts", async () => {

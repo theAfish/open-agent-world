@@ -102,3 +102,24 @@ Experiment record edits refuse published records. Insight evidence must belong t
 the selected published record scope; neither model path grants publication. Deleting
 the Knowledge base card removes its storage, including original files and results.
 No legacy Draft migration or adapter runs when the card opens.
+
+### Evidence chain
+
+The experiment workflow keeps one chain of links: an uploaded original (MKB source,
+identified by id **and** sha256) → the records read from it
+(`oaw_kb_experiment_record_source`, which stores the hash the link was made against)
+→ the Insights citing those records (`oaw_kb_insight_record`). Originals are never
+deleted or rewritten; replacing a file is a new source. `knowledge_lineage` walks the
+chain from any end — one `source_id`, `record_id` or `insight_id` — and returns the
+originals (hash, whether the bytes are still available), the records (each link marked
+`intact` when the retained bytes still match the hash) and the Insights. Records and
+Insights removed since are reported as `missing`, not dropped.
+
+### Where original bytes live
+
+By default MKB keeps original files and conversion artifacts inside `knowledge.db`.
+`OAW_KB_OBJECT_STORE_URL` moves them to `file:///absolute/root` or any S3-compatible
+service (`s3://bucket?endpoint=https://host`; credentials through the host credential
+store or `OAW_KB_OBJECT_STORE_ACCESS_KEY` / `OAW_KB_OBJECT_STORE_SECRET_KEY`). The
+choice is recorded in the database on first open and the card refuses to open against
+a different store afterwards; evidence is not migrated between stores automatically.

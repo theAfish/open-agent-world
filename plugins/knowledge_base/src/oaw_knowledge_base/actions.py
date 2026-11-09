@@ -625,7 +625,7 @@ def _bundle_files(kb, bundle):
             state = "pending"
         files.append({
             "source_id": str(source.id), "filename": source.filename,
-            "media_type": source.media_type, "size": source.size,
+            "media_type": source.media_type, "size": source.size, "sha256": source.sha256,
             "artifact_id": str(markdown.id) if markdown else None, "record_id": record_id,
             "engine": (markdown.metadata or {}).get("engine") if markdown else None,
             "state": state, "job_id": str(job.id) if job else None,
@@ -866,12 +866,14 @@ class ExperimentSave(Request):
 def _record_json(kb, record, *, sources=False):
     payload = dict(record)
     if sources:
-        names = {}
+        links = []
         for link in kb.oaw_experiments.sources_for(record["id"]):
             source = kb.sources.get(link["source_id"])
-            names[link["source_id"]] = source.filename if source else None
-        payload["sources"] = [{"source_id": source_id, "filename": filename}
-                              for source_id, filename in names.items()]
+            links.append({"source_id": link["source_id"],
+                          "filename": source.filename if source else None,
+                          "sha256": link.get("sha256") or (source.sha256 if source else None),
+                          "artifact_id": link.get("artifact_id")})
+        payload["sources"] = links
     return payload
 
 
@@ -920,7 +922,8 @@ def experiment_save(context, arguments):
             name=item.name, data=item.data, validation=check,
             note=item.note, created_by=_actor(context))
         kb.oaw_experiments.set_sources(record["id"], [
-            {"source_id": source_id, "artifact_id": files[source_id]["artifact_id"]}
+            {"source_id": source_id, "artifact_id": files[source_id]["artifact_id"],
+             "sha256": files[source_id]["sha256"]}
             for source_id in (cited or list(files))])
         saved.append(_record_json(kb, record, sources=True))
     kb.oaw_experiments.update_bundle(bundle["id"], status="extracted", run_id=None)

@@ -12,7 +12,13 @@ python -m pip install -e 'plugins/knowledge_base[service]'
 A store contains `knowledge.db` and `settings.json`. Select it with `--store` or
 `KB_SERVICE_STORE`; the default is `~/.local/share/oaw-knowledge`. One store is one
 knowledge base containing stable projects. Projects can hold reports, original
-data, experimental files, notes and supplementary material.
+data, experimental files, notes and supplementary material. Original bytes live in
+`knowledge.db` unless `OAW_KB_OBJECT_STORE_URL` names a `file:///` root or an
+S3-compatible bucket; once a store has been opened with one setting it must keep it.
+
+Any operation, including those without a dedicated subcommand, is reachable as
+`kb call OPERATION --file args.json` — for example `kb call lineage` with
+`{"insight_id": "..."}` to walk an Insight back to its original files.
 
 ## Import and convert
 

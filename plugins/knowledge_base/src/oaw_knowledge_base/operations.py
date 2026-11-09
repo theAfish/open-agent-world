@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from . import actions, insights, projects, schema_draft, spaces
+from . import actions, insights, lineage, projects, schema_draft, spaces
 
 
 @dataclass(frozen=True)
@@ -71,6 +71,8 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation("experiment_update", actions.experiment_update, actions.ExperimentUpdate,
         tool_name="knowledge_experiment_update",
         description="Edit one draft experiment record's name, data or note, when a person asks for the change. Refuses published records. Never publishes: that is the person's click."),
+    Operation("lineage", lineage.lineage, lineage.Lineage, tool_name="knowledge_lineage",
+        description="Trace the evidence chain of the experiment workflow from any end: give one source_id (an uploaded original file), record_id or insight_id and get the retained originals (id, filename, sha256, whether the bytes are still available), the records read from them (each naming its sources and whether that link is intact) and the insights resting on those records. Use it to answer where a record or insight came from, or what was concluded from one file."),
     Operation("insights", insights.insights, insights.Insights, tool_name="knowledge_insights",
         description="Read the insights of this knowledge base: meta-knowledge (anomaly, rule, trend, correlation, threshold, note) that was extracted from published experiment records — of one schema or across several — and reviewed by a person, each evidence-linked to the records it rests on. Use this whenever someone asks what the experiments show as a whole: any anomalies, what drives a property, which rules hold. Filter by schema_id, kind, status or a free-text query over titles and statements; a published insight is in the knowledge graph's experiment layer, a draft is still being reviewed. It does no calculation: to answer a numeric question about the records, read them with knowledge_experiments and compute with your own tools."),
     Operation("insight_prompt", insights.insight_prompt, insights.InsightPrompt,
@@ -163,7 +165,7 @@ AGENT_OPERATIONS: tuple[Operation, ...] = tuple(item for item in OPERATIONS if i
 
 READ_ACTIONS = ("overview", "sources", "markdown", "search", "schemas", "projects", "spaces", "projections",
                "projection_prompt", "projection_review_prompt", "experiments", "experiment_bundles",
-               "insights", "graph", "graph_index", "jobs")
+               "insights", "lineage", "graph", "graph_index", "jobs")
 EXTRACT_ACTIONS = READ_ACTIONS + ("projection_prepare", "projection_save", "projection_fail", "projection_revise")
 EXPERIMENT_ACTIONS = READ_ACTIONS + ("experiment_extract_prompt", "experiment_save",
     "experiment_update", "insight_prompt", "insight_save", "insight_update")

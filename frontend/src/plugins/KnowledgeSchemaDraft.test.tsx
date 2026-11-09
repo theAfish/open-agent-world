@@ -3,15 +3,13 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SchemaEditor } from "../../../plugins/knowledge_base/frontend/SchemaEditor";
+import { draftPrompt } from "../../../plugins/knowledge_base/frontend/SchemaDraftChat";
 import type { DraftApi } from "../../../plugins/knowledge_base/frontend/SchemaDraftChat";
 
 afterEach(cleanup);
 
-const draft = { name: "Batch", description: "One batch", system_prompt: "One row is one batch.",
-  definition: { required: ["batch_no"], properties: { batch_no: { value: "string", description: "Batch id" } } } };
-
 const setup = (api: Partial<DraftApi>) => {
-  const full: DraftApi = { ready: true, modelSelect: null, convert: vi.fn(), send: vi.fn(), ...api };
+  const full: DraftApi = { agentName: "Lab", convert: vi.fn(), send: vi.fn().mockResolvedValue(undefined), ...api };
   render(<SchemaEditor busy={false} schemas={[]} kind="experiment" call={vi.fn()} perform={work => work()}
     onSaved={vi.fn()} draft={full} />);
   fireEvent.click(screen.getByRole("button", { name: /New schema/ }));
@@ -22,41 +20,35 @@ const attach = (name: string) => fireEvent.change(screen.getByLabelText("Attach 
   { target: { files: [new File(["a,b\n1,2"], name, { type: "text/csv" })] } });
 
 describe("Draft with AI", () => {
-  it("sends the request with converted samples, applies the draft to the editor, and undoes it", async () => {
-    const send = vi.fn().mockResolvedValue({ reply: "Drafted a batch schema.", draft });
+  it("hands the request and converted samples to the connected agent and closes the editor", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
     setup({ convert: vi.fn().mockResolvedValue({ markdown: "| a | b |", truncated: false }), send });
+    expect(screen.getByText("Lab")).toBeInTheDocument();
     attach("log.csv");
     await screen.findByText("ready");
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "one batch per row" } });
     fireEvent.click(screen.getByRole("button", { name: /Send/ }));
-    await screen.findByText("Drafted a batch schema.");
-    expect(send).toHaveBeenCalledWith({ messages: [{ role: "user", content: "one batch per row" }],
+    await waitFor(() => expect(screen.queryByLabelText("Message")).not.toBeInTheDocument());
+    expect(send).toHaveBeenCalledWith({ message: "one batch per row",
       samples: [{ filename: "log.csv", markdown: "| a | b |" }], current: undefined });
-
-    fireEvent.click(screen.getByRole("button", { name: "Apply to editor" }));
-    expect(screen.getAllByLabelText("Name")[0]).toHaveValue("Batch");
-    expect(screen.getByLabelText("System prompt")).toHaveValue("One row is one batch.");
-    expect(screen.getAllByLabelText("Name")).toHaveLength(2);
-    fireEvent.click(screen.getByRole("button", { name: /Undo apply/ }));
-    expect(screen.getAllByLabelText("Name")[0]).toHaveValue("");
-    expect(screen.getAllByLabelText("Name")).toHaveLength(3);
   });
 
-  it("keeps a failed conversion visible, lets the person continue, and reports a failed draft", async () => {
-    const send = vi.fn().mockRejectedValue(new Error("The model's draft was not usable: no properties"));
+  it("keeps a failed conversion visible and the editor open when the agent cannot be started", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("Agent is busy"));
     setup({ convert: vi.fn().mockRejectedValue(new Error("Sample files are limited to 2 MiB")), send });
     attach("scan.pdf");
     await screen.findByText("Sample files are limited to 2 MiB");
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "draft it" } });
     fireEvent.click(screen.getByRole("button", { name: /Send/ }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("no properties"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Agent is busy"));
     expect(send.mock.calls[0][0].samples).toEqual([]);
     expect(screen.getByLabelText("Message")).toBeEnabled();
   });
 
-  it("does not send without a model", () => {
-    setup({ ready: false });
-    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "draft it" } });
-    expect(screen.getByRole("button", { name: /Send/ })).toBeDisabled();
+  it("names an existing schema so the agent updates it", () => {
+    expect(draftPrompt("kb-1", { message: "add moisture", samples: [], current: { schema_id: "s-1", name: "Old" } }))
+      .toContain("operation=update with schema_id=s-1");
+    expect(draftPrompt("kb-1", { message: "new", samples: [{ filename: "a.csv", markdown: "| x |" }] }))
+      .toMatch(/operation=create[\s\S]*<sample_file name="a.csv">/);
   });
 });

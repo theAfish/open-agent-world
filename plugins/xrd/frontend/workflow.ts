@@ -13,9 +13,9 @@ export async function getInputs(host: Host, nodeId: string) {
     const base = { id, name: id === nodeId ? '参考谱库' : cards.find(card => card.id === id)?.name ?? id };
     try {
       const { value } = await host.readDocument(id);
-      const doc = value as { kind: string; points?: unknown[]; peaks?: unknown[]; count?: number; filename?: string; slots?: ({ count: number } | null)[] };
+      const doc = value as { kind: string; points?: unknown[]; peaks?: unknown[]; count?: number; filename?: string; slots?: ({ count: number } | null)[]; managed?: { count: number } | null };
       const count = doc.kind === 'pattern' ? doc.points?.length : doc.kind === 'reference' ? doc.peaks?.length
-        : doc.kind === 'library' ? doc.slots?.reduce((sum, slot) => sum + (slot?.count ?? 0), 0) ?? doc.count : undefined;
+        : doc.kind === 'library' ? (doc.slots?.reduce((sum, slot) => sum + (slot?.count ?? 0), 0) ?? doc.count ?? 0) + (doc.managed?.count ?? 0) : undefined;
       return { ...base, kind: doc.kind, ready: doc.kind === 'cif' ? Boolean(doc.filename) : Boolean(count),
         detail: doc.kind === 'cif' ? '候选结构' : count ? `${count.toLocaleString()} ${doc.kind === 'pattern' ? '个点' : doc.kind === 'reference' ? '条峰' : '条参考谱'}` : '尚未导入数据' };
     } catch { return { ...base, kind: 'unknown', ready: false, detail: '无法读取输入' }; }

@@ -276,3 +276,14 @@ class InsightStore:
             EVIDENCE.c.record_id == str(record_id), INSIGHTS.c.status == "published")
         with self._engine.connect() as connection:
             return [row[0] for row in connection.execute(query).all()]
+
+    def links_for_records(self, record_ids):
+        """Every ``{insight_id, record_id, role}`` link that cites any of ``record_ids``,
+        whatever the insight's status."""
+        wanted = [str(value) for value in record_ids]
+        if not wanted:
+            return []
+        with self._engine.connect() as connection:
+            rows = connection.execute(select(EVIDENCE).where(
+                EVIDENCE.c.record_id.in_(wanted)).order_by(EVIDENCE.c.insight_id)).mappings().all()
+        return [dict(row) for row in rows]

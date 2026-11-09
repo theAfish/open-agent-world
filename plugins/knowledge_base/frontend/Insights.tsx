@@ -6,6 +6,7 @@ import { ArrowRight, Check, CheckCircle2, LoaderCircle, Network, Pencil, ScrollT
 import { GraphMap } from "./GraphMap";
 import type { Entity, Relation } from "./GraphMap";
 import { RunLogModal } from "./RunLogModal";
+import { LineagePanel } from "./Lineage";
 import "./ResultsFlow.css";
 
 /** One insight as ``knowledge_insights`` returns it, evidence included. */
@@ -61,6 +62,8 @@ export function InsightsSection({
   const [entity, setEntity] = useState("");
   const [kindFilter, setKindFilter] = useState<"" | InsightKind>("");
   const [editingId, setEditingId] = useState("");
+  // The insight whose evidence chain — records down to original files — is unfolded.
+  const [tracingId, setTracingId] = useState("");
   const [draft, setDraft] = useState<{ kind: InsightKind; title: string; statement: string; note: string }>();
   const [pending, setPending] = useState<Pending>();
   const [replace, setReplace] = useState(false);
@@ -218,7 +221,13 @@ export function InsightsSection({
       title={t("{v0} · open the record", { v0: link.role.replace("_", " ") })}
       data-stale={link.stale || undefined} onClick={() => onOpenRecord(link.record_id)}>
       {link.name ?? shortId(link.record_id)}{link.stale && <small>{t("unpublished")}</small>}</button>)}
+    <button type="button" className="knowledge-chip" aria-pressed={tracingId === item.id} disabled={busy}
+      title={t("Trace the records down to the original files")}
+      onClick={() => setTracingId(tracingId === item.id ? "" : item.id)}>{t("Trace")}</button>
   </span>;
+
+  const lineage = (item: Insight) => tracingId === item.id &&
+    <LineagePanel root={{ insight_id: item.id }} call={call} onOpenRecord={onOpenRecord} />;
 
   const kindBadge = (kind: InsightKind) => <span className={`knowledge-kind knowledge-kind-${kind}`}>{kindLabel(kind)}</span>;
 
@@ -332,6 +341,7 @@ export function InsightsSection({
               {t("revision {v0} · by {v1}", { v0: item.revision, v1: item.created_by ?? "—" })}{item.note ? ` · ${item.note}` : ""}
             </p>
             {evidenceChips(item)}
+            {lineage(item)}
             {pending?.ids.length === 1 && pending.ids[0] === item.id ? <div role="alert" className="knowledge-confirm">
               <strong>{t("Publish this insight?")}</strong>
               <p>{pending.reasons.join(" ")}</p>
@@ -378,6 +388,7 @@ export function InsightsSection({
                 {selectedInsight && <>
                   <p>{selectedInsight.statement}</p>
                   {evidenceChips(selectedInsight)}
+                  {lineage(selectedInsight)}
                   <div className="knowledge-formbar">
                     <button type="button" disabled={busy} onClick={() => expand(selectedEntity.id)}>{t("Show neighbours")}</button>
                     <button type="button" disabled={busy} onClick={() => void unpublish(selectedInsight)}>{t("Unpublish")}</button>
