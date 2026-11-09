@@ -246,6 +246,7 @@ def prepare_bundle(request, config):
     # application environments, tenant data and untracked files stay outside.
     previous = b / ('previous-' + uuid4().hex)
     previous.mkdir(mode=0o755)
+    previous.chmod(0o755)  # The read-only bind must remain traversable under UMask=0077.
     try:
         installed, _ = receipt(app)
         for name, expected in sorted(installed['source_files'].items()):
