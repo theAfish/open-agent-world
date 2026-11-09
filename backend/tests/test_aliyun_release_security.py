@@ -222,6 +222,47 @@ def test_prepare_dispatch_requires_registered_isolated_execution(authority, monk
     assert len(checks) == 1 and calls == [(checks[0], config)]
 
 
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX traversal and DAC permissions')
+def test_previous_pack_bind_is_readable_under_controller_umask(authority, monkeypatch):
+    import pwd
+    f = authority
+    app = Path(f.request['app'])
+    runtime = app / 'backend/.venv/oaw-runtime-bundle'
+    runtime.mkdir(parents=True)
+    (runtime / 'dependency.txt').write_text('already installed')
+    source = app / 'plugins/example/oaw.pack.toml'
+    source.parent.mkdir(parents=True)
+    source.write_text('trusted installed Pack metadata')
+    monkeypatch.setattr(remote, 'receipt', lambda path: ({'source_files': {
+        'plugins/example/oaw.pack.toml': remote.digest(source)}}, 'unused'))
+    monkeypatch.setattr(remote, 'trusted_metadata', lambda *args, **kwargs: None)
+    monkeypatch.setattr(pwd, 'getpwnam', lambda name: SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()))
+    monkeypatch.setattr(os, 'chown', lambda *args, **kwargs: None)
+    f.b.mkdir(parents=True, mode=0o700)
+    checks = []
+
+    def build(request, config, mode, arguments, *, writable, readonly, log):
+        previous, destination = readonly[-1]
+        assert destination == '/workspace/previous'
+        assert stat.S_IMODE(writable.stat().st_mode) == 0o700
+        for path in (previous, previous / 'plugins', previous / 'plugins/example'):
+            assert stat.S_IMODE(path.stat().st_mode) == 0o755
+        copied = previous / 'plugins/example/oaw.pack.toml'
+        assert stat.S_IMODE(copied.stat().st_mode) == 0o644
+        assert copied.read_bytes() == source.read_bytes()
+        checks.append(True)
+
+    monkeypatch.setattr(remote, 'run_sandbox', build)
+    previous_umask = os.umask(0o077)
+    try:
+        remote.prepare_bundle(f.request, {'build_user': 'fixture'})
+    finally:
+        os.umask(previous_umask)
+    assert checks == [True]
+    assert stat.S_IMODE(f.b.stat().st_mode) == 0o700
+    assert (f.b / 'prepared-runtime-bundle/dependency.txt').read_text() == 'already installed'
+
+
 def test_background_job_uses_installed_controller_not_legacy_payload(authority, monkeypatch):
     f = authority
     initialize(f)
