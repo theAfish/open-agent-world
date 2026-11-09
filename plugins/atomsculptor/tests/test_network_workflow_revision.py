@@ -39,14 +39,14 @@ async def test_successful_unchanged_rerun_reuses_receipt_without_new_science():
 
 
 @pytest.mark.asyncio
-async def test_search_must_change_actual_argv_and_repeated_search_reuses_result():
+async def test_scope_label_does_not_change_inputs_and_intentional_repeat_executes():
     e, calls, run = await setup()
     await run(argv=["--mode", "sample"])
     args = dict(source="",  action_mode="search",
                 execution_scope="search", previous_assessment=prior(e))
-    for argv in [None, [], ["--mode", "sample"]]:
-        rejected = await run(**args, argv=argv)
-        assert rejected["error"]["code"] == "step_search_arguments" and len(calls) == 2
+    reused = await run(**args, argv=["--mode", "sample"])
+    assert reused["reused_execution"] and reused["no_new_evidence"] and len(calls) == 2
+    assert reused["execution_scope"] == "sample"
     searched = await run(**args, argv=["--mode", "full"])
     assert searched["ok"] and searched["step"]["native_argv"] == ["python3", "step.py", "--mode", "full"]
     result = await run(**{**args, "previous_assessment": prior(e)}, argv=["--mode", "full"])
@@ -111,7 +111,13 @@ async def test_planner_revision_binds_next_experiment_without_stale_subtask():
     assert facts["values"] == {"rim_count": 8} and facts["saved_data_keys"] == ["array"]
     assert facts["metadata"] == {"execution_scope":"sample", "sample_count":36, "range":[0,1]}
     message, allowed = e.actions.next_action(e)
-    assert "minimal.py" in message and "run_modelling_step" in allowed
+    assert "minimal.py" in message and allowed is None
+    # The normal phase projection keeps native operations available; a revised
+    # script target must not create a special tool subset that drops them.
+    from test_execution_actions import request, prepare, declarations
+    req = request({'run_modelling_step', 'write_sandbox_text_file', 'execute_command', 'finish_task', 'advance_modelling_stage'})
+    prepare(e, req)
+    assert {'run_modelling_step', 'write_sandbox_text_file', 'execute_command'} <= declarations(req)
     wrong = await run(script_path="inventory_again.py", previous_assessment=prior(e))
     assert wrong["error"]["code"] == "planned_experiment_required" and len(calls) == 2
     await run(script_path="minimal.py", previous_assessment=prior(e))

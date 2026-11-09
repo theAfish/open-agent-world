@@ -251,7 +251,8 @@ def write_extxyz(path, atoms):
                 not np.allclose(observed, value, atol=1e-8, rtol=0) if value.dtype.kind in "fc" else
                 not np.array_equal(observed, value)):
             raise ValueError("Structure round-trip changed atom array " + name)
-    return {"path": str(target), "atom_count": len(back), "round_trip": True, "independent_validation": False}
+    return {"path": str(target), "atom_count": len(back), "round_trip": True, "independent_validation": False,
+            "layout": {"format": "xyz", "primary_dataset": "extxyz_atoms"}}
 
 
 def relax_structure(atoms, *, calculator, movable_indices, fmax, steps, optimizer="FIRE", maxstep=None):
@@ -312,11 +313,13 @@ def relax_structure(atoms, *, calculator, movable_indices, fmax, steps, optimize
 
 def emit_measurements(*, schema_version=1, kind="diagnostic", measurement_revision=None, constraints=(), coverage=None,
                       artifacts=(), values=None, measurements=None, metadata=None, objective=None,
-                      assumption_invalid=False, contradiction=""):
+                      assumption_invalid=False, contradiction="", report_path=None):
     """Serialize native/NumPy values; controls belong inside constraint(), never here.
 
     Failed checks and nonfinite data are never repaired into passing values.
     The host's existing Measurement model validates this exact envelope.
+    report_path optionally keeps the full data in an ordinary Sandbox JSON file
+    so a reporting branch can re-envelope it without rerunning the calculation.
     """
     if type(schema_version) is not int or schema_version != 1:
         raise ValueError("Unsupported measurement schema_version")
@@ -330,15 +333,23 @@ def emit_measurements(*, schema_version=1, kind="diagnostic", measurement_revisi
     if measurements is not None:
         result["measurements"] = measurements
     result = _json_value(result)
+    path = None
+    if report_path is not None:
+        path = Path(report_path)
+        if path.suffix.lower() != ".json" or not path.resolve().is_relative_to(Path.cwd().resolve()):
+            raise ValueError("Measurement report must be a JSON file inside the Sandbox workspace")
+        result["metadata"]["oaw_report_file"] = str(path.resolve().relative_to(Path.cwd().resolve()))
     projected, changed = project_diagnostics(result)
-    if changed:
-        from uuid import uuid4
-        folder = Path(".oaw-reports")
-        if not folder.resolve().is_relative_to(Path.cwd().resolve()):
-            raise ValueError("Report output must stay inside the Sandbox workspace")
-        folder.mkdir(exist_ok=True)
-        path = folder / (uuid4().hex + ".json")
-        with path.open("x", encoding="utf-8") as stream:
-            json.dump({"oaw_measurements": result}, stream, ensure_ascii=False, allow_nan=False)
+    if changed or path is not None:
+        if path is None:
+            from uuid import uuid4
+            folder = Path(".oaw-reports")
+            if not folder.resolve().is_relative_to(Path.cwd().resolve()):
+                raise ValueError("Report output must stay inside the Sandbox workspace")
+            path = folder / (uuid4().hex + ".json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = json.dumps({"oaw_measurements": result}, ensure_ascii=False, allow_nan=False)
+        with path.open("w" if report_path is not None else "x", encoding="utf-8") as stream:
+            stream.write(encoded)
         projected, _ = project_diagnostics(result, source=str(path))
     print(json.dumps({"oaw_measurements": projected}, allow_nan=False))

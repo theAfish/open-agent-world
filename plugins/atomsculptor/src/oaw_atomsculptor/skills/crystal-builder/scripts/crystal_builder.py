@@ -68,8 +68,8 @@ def build_bulk_crystal(
     alpha=None,
     covera=None,
     u=None,
-    orthorhombic=False,
-    cubic=False,
+    orthorhombic: bool = False,
+    cubic: bool = False,
     output_name=None,
 ):
     """

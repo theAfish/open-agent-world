@@ -39,6 +39,7 @@ describe("Sandbox workspace interaction", () => {
       sandboxRuntimes: undefined, sandboxRuntimesLoading: false, sandboxRuntimesError: undefined,
       socketState: "closed", toasts: [], undoStack: [], redoStack: [], activityOpen: false,
     });
+    vi.spyOn(worldApi, 'workspaceContext').mockResolvedValue({ key: 'test-root', directory: '', label: 'Test workspace', scope_type: 'session', scope_id: 'default', session_id: 'default', group_id: 'default', conversation_id: null, sandbox_id: card.id });
     previewFile = async path => ({ state: "text", text: `Contents of ${path}` });
     vi.spyOn(worldApi, "fileTransferPolicy").mockResolvedValue({ max_file_bytes: 512 * 1024 * 1024, chunk_bytes: 256 * 1024 });
     vi.spyOn(worldApi, "getSandbox").mockResolvedValue(info);
@@ -50,6 +51,7 @@ describe("Sandbox workspace interaction", () => {
     vi.spyOn(worldApi, "getNodeDocument").mockResolvedValue({ value: { variables: {} }, revision: 0, summary: {} });
     vi.spyOn(worldApi, "getCredentialBindings").mockResolvedValue({});
     vi.spyOn(worldApi, "sandboxWorkspace").mockImplementation(async <T,>(_id: string, action: string): Promise<T> => {
+      if (action === 'workspaces') return { items: [] } as T;
       if (action === "configuration") return { profile_id: null, ready: true, variables: [] } as T;
       if (action === "history") return [] as T;
       if (action === "files") return [{ id: "workspace", label: "Workspace", access: "read_write", directory: true }] as T;
@@ -62,6 +64,120 @@ describe("Sandbox workspace interaction", () => {
     });
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it('offers only total workspace and current session with scoped terminal history and drafts', async () => {
+    vi.mocked(worldApi.workspaceContext).mockResolvedValue({ key: 'session-a', directory: 'sessions/a', label: 'Session A',
+      scope_type: 'session', scope_id: 'a', session_id: 'a', group_id: 'g', conversation_id: 'room', sandbox_id: card.id });
+    const original = vi.mocked(worldApi.sandboxWorkspace).getMockImplementation()!;
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(id: string, action: string): Promise<T> => {
+      if (action === 'workspaces') return { items: [
+        { directory: 'sessions/a', label: 'Session A', scope_type: 'session' },
+        { directory: 'sessions/b', label: 'Session B', scope_type: 'session' },
+        { directory: 'groups/g', label: 'Group G', scope_type: 'group' },
+      ] } as T;
+      if (action === 'history') return ['', 'sessions/a', 'sessions/b', 'groups/g'].map((directory, i) => ({
+        id: `command-${i}`, caller: 'Agent', state: 'finished', argv: [`history-${i}`], working_directory: directory,
+      })) as T;
+      const query = new URLSearchParams(action.split('?')[1]);
+      if (query.get('operation') === 'list') {
+        const path = query.get('path') ?? '';
+        return { entries: [{ name: path ? path.replace('/', '-') + '.xyz' : 'legacy.txt', directory: false, blocked: false, size: 10 }] } as T;
+      }
+      return await original(id, action) as T;
+    });
+    const execute = vi.spyOn(worldApi, 'executeSandbox').mockResolvedValue({ stdout: '', exit_code: 0 });
+    render(<Workspace />);
+    await screen.findByRole('button', { name: 'sessions-a.xyz' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Command' }), { target: { value: 'session draft' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'View workspace' }), { target: { value: '' } });
+    await screen.findByRole('button', { name: 'legacy.txt' });
+    expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Command' }), { target: { value: 'overview draft' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'History' }));
+    for (let i = 0; i < 4; i++) expect(await screen.findByText(`history-${i}`)).toBeTruthy();
+    const choices = screen.getByRole('combobox', { name: 'View workspace' });
+    expect(Array.from(choices.querySelectorAll('option')).map(option => option.value)).toEqual(['', '@current']);
+    expect(screen.queryByRole('button', { name: 'Upload files' })).toBeNull();
+    fireEvent.change(choices, { target: { value: '@current' } });
+    await screen.findByRole('button', { name: 'sessions-a.xyz' });
+    fireEvent.click(screen.getByRole('tab', { name: 'History' }));
+    expect(await screen.findByText('history-1')).toBeTruthy();
+    expect(screen.queryByText('history-2')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Terminal' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Command' }), { target: { value: 'pwd' } });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Command' }), { key: 'Enter' });
+    await waitFor(() => expect(execute).toHaveBeenCalledWith(card.id, 'pwd', 'auto', 'sessions/a'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Command' }), { target: { value: 'session draft' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'View workspace' }), { target: { value: '' } });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Terminal' }));
+    expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('overview draft');
+    fireEvent.change(screen.getByRole('combobox', { name: 'View workspace' }), { target: { value: '@current' } });
+    expect((await screen.findByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('session draft');
+  });
+
+  it('keeps total workspace readable while an ambiguous session disables mutation and execution', async () => {
+    vi.mocked(worldApi.workspaceContext).mockResolvedValue({ bound: false, key: 'unbound', directory: '', writable_directory: '',
+      label: 'No session selected', scope_type: 'session', scope_id: 'default', session_id: 'default', group_id: 'default',
+      conversation_id: null, sandbox_id: card.id });
+    const execute = vi.spyOn(worldApi, 'executeSandbox').mockResolvedValue({ stdout: '', exit_code: 0 });
+    render(<Workspace />);
+    await screen.findByRole('button', { name: 'first.txt' });
+    const picker = screen.getByRole('combobox', { name: 'View workspace' }) as HTMLSelectElement;
+    expect(picker.value).toBe('');
+    expect(Array.from(picker.options).map(option => option.value)).toEqual(['', '@current']);
+    expect(picker.options[1].disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Upload files' })).toBeNull();
+    const command = screen.getByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement;
+    expect(command.readOnly).toBe(true);
+    fireEvent.keyDown(command, { key: 'Enter' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(screen.queryByText('Execution environment unavailable.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'first.txt' }));
+    expect(await screen.findByText('Contents of first.txt')).toBeTruthy();
+  });
+
+  it('switches session/group views, preserves drafts, and discards the previous file preview', async () => {
+    const base = await worldApi.workspaceContext(card.id);
+    vi.mocked(worldApi.workspaceContext).mockImplementation(async () => {
+      const group = useWorldStore.getState().cards[0].config.workspace_scope === 'group';
+      return { ...base, key: group ? 'group' : 'session', scope_type: group ? 'group' : 'session' };
+    });
+    let oldPreview!: (value: Record<string, unknown>) => void;
+    previewFile = () => new Promise(resolve => { oldPreview = resolve; });
+    render(<Workspace />);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Command' }), { target: { value: 'session draft' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'first.txt' }));
+    act(() => useWorldStore.setState({ cards: [{ ...card, config: { ...card.config, workspace_scope: 'group' } }] }));
+    expect((await screen.findByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Command' }), { target: { value: 'group draft' } });
+    await act(async () => oldPreview({ state: 'text', text: 'old session content' }));
+    expect(screen.queryByText('old session content')).toBeNull();
+    act(() => useWorldStore.setState({ cards: [card] }));
+    expect((await screen.findByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('session draft');
+  });
+
+  it('follows the selected session workspace for files and manual commands', async () => {
+    vi.mocked(worldApi.workspaceContext).mockResolvedValue({ key: 'session-example', directory: 'sessions/example', label: 'Build candidate', scope_type: 'session', scope_id: 'example', session_id: 'example', group_id: 'example', conversation_id: null, sandbox_id: card.id });
+    const original = vi.mocked(worldApi.sandboxWorkspace).getMockImplementation()!;
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(id: string, action: string): Promise<T> => {
+      if (action === 'history') return [{ id: 'task-command', caller: 'Agent', state: 'finished', argv: ['pwd'], working_directory: 'sessions/example' }] as T;
+      const query = new URLSearchParams(action.split('?')[1]);
+      if (query.get('operation') === 'list' && query.get('path') === 'sessions/example') {
+        return { entries: [{ name: 'candidate.extxyz', path: 'sessions/example/candidate.extxyz', directory: false, blocked: false, size: 30 }] } as T;
+      }
+      return await original(id, action) as T;
+    });
+    const execute = vi.spyOn(worldApi, 'executeSandbox').mockResolvedValue({ stdout: 'task', stderr: '', exit_code: 0 });
+    render(<Workspace />);
+    await screen.findByRole('button', { name: 'candidate.extxyz' });
+    expect(screen.queryByRole('button', { name: 'first.txt' })).toBeNull();
+    const command = screen.getByRole('textbox', { name: 'Command' });
+    fireEvent.change(command, { target: { value: 'pwd' } });
+    fireEvent.keyDown(command, { key: 'Enter' });
+    await waitFor(() => expect(execute).toHaveBeenCalledWith(card.id, 'pwd', 'auto', 'sessions/example'));
+    fireEvent.click(screen.getByRole('tab', { name: 'History' }));
+    expect(screen.getAllByText('sessions/example').length).toBeGreaterThan(0);
+  });
 
   it('opens files and folders in the system file manager and reports failures', async () => {
     const { container } = render(<Workspace />);
@@ -172,7 +288,7 @@ describe("Sandbox workspace interaction", () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(remove).toHaveBeenLastCalledWith(card.id, 'first.txt');
     expect(screen.queryByText('Contents of first.txt')).toBeNull();
-    expect(useOpenFiles.getState().sources[card.id]).toBeUndefined();
+    expect(useOpenFiles.getState().sources[JSON.stringify([card.id, 'test-root'])]).toBeUndefined();
   });
 
   it('moves a dragged file into a folder and updates the current preview path', async () => {
@@ -199,7 +315,7 @@ describe("Sandbox workspace interaction", () => {
     fireEvent.drop(folder, { dataTransfer });
     await waitFor(() => expect(move).toHaveBeenCalledWith(card.id, 'first.txt', 'inputs/first.txt'));
     await screen.findByText('Contents of inputs/first.txt');
-    expect(useOpenFiles.getState().sources[card.id]?.reference).toMatchObject({ path: 'inputs/first.txt' });
+    expect(useOpenFiles.getState().sources[JSON.stringify([card.id, 'test-root'])]?.reference).toMatchObject({ path: 'inputs/first.txt' });
     expect(screen.getByRole('button', { name: 'inputs' }).getAttribute('aria-expanded')).toBe('true');
     // A folder cannot be dropped into itself or its descendants.
     dataTransfer.types = [];
@@ -209,6 +325,22 @@ describe("Sandbox workspace interaction", () => {
     // A matching MIME string from another browser tree carries no local authority.
     fireEvent.drop(screen.getByRole('button', { name: 'inputs' }), { dataTransfer });
     expect(move).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues an upload batch in the actual directory assigned on its first write', async () => {
+    const pending = { key: 'pending-session', directory: 'New session', label: 'New session', claimed: false,
+      scope_type: 'session' as const, scope_id: 'a', session_id: 'a', group_id: 'g', conversation_id: 'room', sandbox_id: card.id };
+    vi.mocked(worldApi.workspaceContext).mockResolvedValueOnce(pending)
+      .mockResolvedValue({ ...pending, directory: 'New session (a)', claimed: true });
+    const upload = vi.spyOn(worldApi, 'uploadSandboxEntry')
+      .mockResolvedValueOnce({ written: 1, path: 'New session (a)/a.txt' })
+      .mockResolvedValue({ written: 1, path: 'New session (a)/b.txt' });
+    render(<Workspace />);
+    await screen.findByRole('button', { name: 'first.txt' });
+    fireEvent.drop(screen.getByLabelText('Sandbox files'), { dataTransfer: { types: ['Files'], files: [new File(['a'], 'a.txt'), new File(['b'], 'b.txt')] } });
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    expect(upload.mock.calls.map(call => call[1])).toEqual(['New session/a.txt', 'New session (a)/b.txt']);
+    await waitFor(() => expect(worldApi.workspaceContext).toHaveBeenCalledTimes(2));
   });
 
   it('keeps a file batch running when switching to Settings and back', async () => {
@@ -253,15 +385,15 @@ describe("Sandbox workspace interaction", () => {
     const view = render(<Workspace />);
     expect(screen.queryByLabelText('Working folder')).toBeNull();
     expect(worldApi.getNodeDocument).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Command' }), { target: { value: 'echo retained' } });
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Command' }), { target: { value: 'echo retained' } });
     fireEvent.click(await screen.findByRole('button', { name: 'first.txt' }));
     await screen.findByText('Contents of first.txt');
     view.unmount();
-    const projectionKey = surfaceDraftKey(card.id, 'sandbox-static-preview', card.config.runtime, card.config.workspace_path, card.config.workspace_access, false);
+    const projectionKey = surfaceDraftKey(card.id, 'sandbox-static-preview', card.config.runtime, card.config.workspace_path, card.config.workspace_access, false, 'test-root');
     expect(JSON.parse(useNodeSurfaceStore.getState().drafts[projectionKey])).toMatchObject({ path: 'first.txt', text: 'Contents of first.txt' });
-    expect(useOpenFiles.getState().sources[card.id]?.reference).toMatchObject({ path: 'first.txt' });
+    expect(useOpenFiles.getState().sources[JSON.stringify([card.id, 'test-root'])]?.reference).toMatchObject({ path: 'first.txt' });
     render(<Workspace />);
-    expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('echo retained');
+    expect((await screen.findByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('echo retained');
     expect(await screen.findByText('Contents of first.txt')).toBeTruthy();
   });
 
@@ -408,7 +540,7 @@ describe("Sandbox workspace interaction", () => {
 
     expect(screen.queryByText("Stale first file content")).toBeNull();
     expect(screen.getByRole("button", { name: "second.txt" }).getAttribute("aria-current")).toBe("true");
-    expect(useOpenFiles.getState().sources[card.id].reference).toEqual({ kind: "sandbox", source_id: card.id, root: "workspace", path: "second.txt" });
+    expect(useOpenFiles.getState().sources[JSON.stringify([card.id, 'test-root'])].reference).toEqual({ kind: "sandbox", source_id: card.id, root: "workspace", path: "second.txt" });
     expect(screen.getByRole("tab", { name: "Terminal" }).getAttribute("aria-selected")).toBe("true");
     expect((screen.getByRole("textbox", { name: "Command" }) as HTMLTextAreaElement).value).toBe("echo keep this draft");
     expect(container.querySelector(".sandbox-preview")?.closest("[hidden]")).toBeNull();

@@ -69,6 +69,10 @@ bash scripts/dev.sh --agent-runtime core.mock --profile card-app --plugin-path "
 
 打开启动器打印的地址。在 **Pack & Card Library → Packs** 开启 **Greeter**，把卡片加入牌组并放置，打开卡片查看已保存的配置。此时只有 Python，默认界面只读；第 4 步会添加编辑界面。改 Python 或添加构建依赖前，用 Ctrl+C 停止启动器。setup 准备依赖，普通 dev 启动不会安装依赖。
 
+多个项目可在 Linux/macOS 上重复传入 `--plugin-path`，或在 PowerShell 中向
+`-PluginPath` 传入数组。路径可以包含空格。这些路径会追加到
+`OPEN_AGENT_WORLD_PLUGIN_DIRS` 已显式配置的目录，并传给开发进程。
+
 ## 2. 理解行为与数据
 
 阅读项目的 `src/oaw_greeter_plugin/__init__.py`：

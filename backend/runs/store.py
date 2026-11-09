@@ -15,6 +15,20 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# Summaries deliberately project only status metadata, never transcript/tool bodies.
+SUMMARY_FIELDS = (
+    "owner_id", "cancellation_policy", "execution", "holds_capacity", "awaiting",
+    "cleanup", "cleanup_reason", "cancellation_requested", "session_lost", "tool_count",
+)
+SUMMARY_COLUMNS = ", ".join(name for name in RunRecord.model_fields if name != "lifecycle") + ", json_object(" + ", ".join(
+    f"'{name}', json_extract(lifecycle_json, '$.{name}')" for name in SUMMARY_FIELDS
+) + ") AS lifecycle_json"
+ACTIVE = "status IN ('created', 'running', 'waiting')"
+CLEANUP = "json_extract(lifecycle_json, '$.cleanup') IN ('pending', 'failed', 'uncertain')"
+EXECUTING = "json_extract(lifecycle_json, '$.execution') IN ('running', 'closing')"
+CURRENT = f"({ACTIVE} OR {CLEANUP} OR {EXECUTING})"
+
+
 class RunStore:
     """Durable Run metadata; provider events are never the source of truth."""
 
@@ -56,10 +70,10 @@ class RunStore:
             )
         return self.get(run_id)
 
-    def get(self, run_id: str) -> RunRecord:
+    def get(self, run_id: str, *, summary: bool = False) -> RunRecord:
         with self.database.locked() as connection:
             row = connection.execute(
-                "SELECT * FROM runs WHERE run_id = ?", (run_id,)
+                f"SELECT {SUMMARY_COLUMNS if summary else '*'} FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
         if row is None:
             raise NotFoundError(f"run {run_id!r} does not exist")
@@ -145,6 +159,54 @@ class RunStore:
                 f"SELECT * FROM runs{where} ORDER BY created_at, rowid", values
             ).fetchall()
         return [self._record(row) for row in rows]
+
+    def page(self, *, agent_id: str | None = None, task_id: str | None = None,
+             before: str | None = None, limit: int = 50) -> list[RunRecord]:
+        clauses, values = [], []
+        for name, value in (("agent_id", agent_id), ("task_id", task_id)):
+            if value is not None:
+                clauses.append(f"{name} = ?")
+                values.append(value)
+        with self.database.locked() as connection:
+            if before is not None:
+                cursor = connection.execute("SELECT created_at, rowid FROM runs WHERE run_id = ?", (before,)).fetchone()
+                if cursor is None:
+                    raise NotFoundError(f"run {before!r} does not exist")
+                clauses.append("(created_at, rowid) < (?, ?)")
+                values.extend(cursor)
+            where = " WHERE " + " AND ".join(clauses) if clauses else ""
+            rows = connection.execute(f"SELECT {SUMMARY_COLUMNS} FROM runs{where} "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?", (*values, max(1, min(limit, 200)))).fetchall()
+        return [self._record(row) for row in rows]
+
+    def current(self, *, agent_id: str | None = None, context_id: str | None = None,
+                recent: int = 0, summary: bool = False) -> list[RunRecord]:
+        clauses, values = [CURRENT], []
+        for name, value in (("agent_id", agent_id), ("context_id", context_id)):
+            if value is not None:
+                clauses.append(f"{name} = ?")
+                values.append(value)
+        columns = SUMMARY_COLUMNS if summary else "*"
+        with self.database.locked() as connection:
+            rows = connection.execute(f"SELECT {columns} FROM runs WHERE " + " AND ".join(clauses)
+                + " ORDER BY created_at DESC, rowid DESC", values).fetchall()
+        records = {row["run_id"]: self._record(row) for row in rows}
+        if recent:
+            for record in self.page(agent_id=agent_id, limit=recent):
+                records.setdefault(record.run_id, record)
+        # Preserve the SQL tie ordering: current records precede recent history.
+        return list(records.values())
+
+    def has_cleanup_debt(self, agent_id: str) -> bool:
+        with self.database.locked() as connection:
+            return connection.execute("SELECT 1 FROM runs WHERE agent_id = ? "
+                "AND json_extract(lifecycle_json, '$.cleanup') IN ('pending', 'failed') LIMIT 1",
+                (agent_id,)).fetchone() is not None
+
+    def context_owners(self, context_id: str) -> list[tuple[str, str]]:
+        with self.database.locked() as connection:
+            return [tuple(row) for row in connection.execute(
+                "SELECT DISTINCT runtime_provider_id, agent_id FROM runs WHERE context_id = ?", (context_id,))]
 
     def list_children(self, parent_run_id: str) -> list[RunRecord]:
         with self.database.locked() as connection:

@@ -1,10 +1,11 @@
-import { cardStateSession, stateSessionHeaders } from "../state/cardState";
+import { cardStateSession, viewingSession, stateSessionHeaders } from "../state/cardState";
 import type { BackgroundJob, JobAction, JobsSnapshot } from '../cards/jobTypes';
 import { normalizeCardFinish } from '../cards/cardFinish';
 import { fetchWithRetry } from './fetchWithRetry';
 import { hostedInstanceUrl, isHosted } from '../auth/hostedSession';
 import type { SummoningSnapshot, SummonedInstance } from "../cards/Barracks";
 import type {
+  AgentRunReceipt,
   CardConfig,
   CardStatus,
   CardType,
@@ -546,6 +547,10 @@ export const worldApi = {
     return request<PluginCatalog>("/catalog");
   },
 
+  async getCard(id: string): Promise<WorldCard> {
+    return normalizeCard(await request(`/nodes/${encodeURIComponent(id)}`));
+  },
+
   async getWorld(chunks?: string[]): Promise<WorldSnapshot> {
     const query = chunks?.length
       ? `?chunks=${encodeURIComponent(chunks.join(","))}`
@@ -833,11 +838,11 @@ export const worldApi = {
     return asRecord(body);
   },
 
-  runAgent(nodeId: string, prompt: string, freshContext = false): Promise<Record<string, unknown>> {
+  runAgent(nodeId: string, prompt: string, freshContext = false): Promise<AgentRunReceipt> {
     const enqueue = isHosted();
-    return request<Record<string, unknown>>(`/agents/${encodeURIComponent(nodeId)}/run`, {
+    return request<AgentRunReceipt>(`/agents/${encodeURIComponent(nodeId)}/run`, {
       method: "POST",
-      ...(enqueue ? { headers: { "Idempotency-Key": crypto.randomUUID() } } : {}),
+      headers: { ...stateSessionHeaders(viewingSession(nodeId) ?? 'default'), ...(enqueue ? { "Idempotency-Key": crypto.randomUUID() } : {}) },
       body: JSON.stringify({ prompt, ...(freshContext ? { fresh_context: true } : {}), ...(enqueue ? { enqueue: true } : {}) }),
     });
   },
@@ -870,8 +875,8 @@ export const worldApi = {
   artifactDownloadUrl(collectionId: string, versionId: string, path: string): string {
     return hostedInstanceUrl(`${API_BASE}/artifact-collections/${encodeURIComponent(collectionId)}/versions/${encodeURIComponent(versionId)}/content?${new URLSearchParams({ path })}`);
   },
-  lifecycle<T>(retry = false): Promise<T> {
-    return request(`/lifecycle${retry ? "/retry-cleanup" : ""}`, retry ? { method: "POST" } : undefined);
+  lifecycle<T>(retry = false, agentId?: string): Promise<T> {
+    return request(`/lifecycle${retry ? "/retry-cleanup" : ""}${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`, retry ? { method: "POST" } : undefined);
   },
   cancelRun(runId: string): Promise<unknown> { return request(`/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }); },
   getRunReasoning(runId: string, offset = 0): Promise<{ items: import("../types/world").SavedModelThinking[]; next_offset: number | null }> {
@@ -892,9 +897,11 @@ export const worldApi = {
   getRunInvocation(runId: string, kind: "models" | "tools", identity: string): Promise<import("../types/world").SavedInvocation> {
     return request(`/runs/${encodeURIComponent(runId)}/invocations/${kind}/${encodeURIComponent(identity)}`);
   },
-  agentRuns(agentId: string): Promise<{ run_id: string; agent_id: string; status: string; started_at?: string;
-    finished_at?: string; lifecycle: Record<string, unknown> }[]> {
-    return request(`/runs?agent_id=${encodeURIComponent(agentId)}`);
+  runSummary(runId: string): Promise<RunSummary> {
+    return request(`/runs/${encodeURIComponent(runId)}?summary=true`);
+  },
+  agentRuns(agentId: string, before?: string): Promise<RunSummary[]> {
+    return request(`/runs?${new URLSearchParams({ agent_id: agentId, limit: "10", ...(before ? { before } : {}) })}`);
   },
 
   stopAgent(nodeId: string): Promise<Record<string, unknown>> {
@@ -905,6 +912,14 @@ export const worldApi = {
 
   getStorageSettings(): Promise<StorageSettings> {
     return request("/settings/storage");
+  },
+
+  inspectStorage(): Promise<StorageUsage> {
+    return request("/settings/storage/usage", { method: "POST" });
+  },
+
+  deleteUpdateBackup(name: string): Promise<{ removed: string }> {
+    return request(`/settings/storage/backups/${encodeURIComponent(name)}`, { method: "DELETE" });
   },
 
   saveStorageSettings(targetPath: string | null, expectedRevision: number): Promise<StorageSettings> {
@@ -994,7 +1009,7 @@ export const worldApi = {
   postConversationMessage(
     conversationId: string,
     sessionId: string,
-    input: { content: string; mention_agent_ids: string[]; message_id?: string; attachments?: { version_id: string; path: string }[] },
+    input: { content: string; mention_agent_ids: string[]; message_id?: string; continuation_run_id?: string; attachments?: { version_id: string; path: string }[] },
   ): Promise<{ message: ConversationMessage; accepted_agent_ids: string[] }> {
     return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: "POST",
@@ -1045,16 +1060,20 @@ export const worldApi = {
     return request<SandboxRuntimeCatalog>(`/sandbox/runtimes${refresh ? "?refresh=true" : ""}`);
   },
 
+  workspaceContext(nodeId: string, sessionId?: string): Promise<import('../state/workspaceContext').WorkspaceContext> {
+    return request(`/nodes/${encodeURIComponent(nodeId)}/workspace-context`, { headers: stateSessionHeaders(sessionId ?? 'default') });
+  },
+
   sandboxWorkspace<T = Record<string, unknown>>(nodeId: string, action: string, body?: unknown): Promise<T> {
-    return request<T>(`/sandboxes/${encodeURIComponent(nodeId)}/${action}`, body === undefined ? undefined : { method: "POST", body: JSON.stringify(body) });
+    return request<T>(`/sandboxes/${encodeURIComponent(nodeId)}/${action}`, { headers: stateSessionHeaders(viewingSession(nodeId) ?? 'default'), ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
   },
 
   deleteSandboxFile(nodeId: string, path: string): Promise<{ deleted: string }> {
-    return request(`/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ path })}`, { method: 'DELETE' });
+    return request(`/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ path })}`, { method: 'DELETE', headers: stateSessionHeaders(viewingSession(nodeId) ?? 'default') });
   },
 
   moveSandboxFile(nodeId: string, path: string, destination: string): Promise<{ moved: string; destination: string }> {
-    return request(`/sandboxes/${encodeURIComponent(nodeId)}/files/move`, { method: 'POST', body: JSON.stringify({ path, destination }) });
+    return request(`/sandboxes/${encodeURIComponent(nodeId)}/files/move`, { method: 'POST', headers: stateSessionHeaders(viewingSession(nodeId) ?? 'default'), body: JSON.stringify({ path, destination }) });
   },
 
   async downloadSandboxFile(nodeId: string, root: string, path: string, options?: import('../files/transferQueue').TransferOptions): Promise<Blob> {
@@ -1072,8 +1091,8 @@ export const worldApi = {
     return response.blob();
   },
 
-  uploadSandboxEntry(nodeId: string, path: string, file?: File, options?: import('../files/transferQueue').TransferOptions): Promise<{ written?: number; created?: boolean }> {
-    const route = `/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ path, directory: String(!file) })}`;
+  uploadSandboxEntry(nodeId: string, path: string, file?: File, options?: import('../files/transferQueue').TransferOptions): Promise<{ written?: number; created?: boolean; path?: string }> {
+    const route = `/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ path, directory: String(!file), state_session: viewingSession(nodeId) ?? 'default' })}`;
     if (options) return transferRequest(route, file ?? new Blob(), options);
     return request(route, {
       method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file ?? '',
@@ -1096,10 +1115,11 @@ export const worldApi = {
     });
   },
 
-  executeSandbox(nodeId: string, command: string, pythonEnvironment: "auto" | "managed" = "auto"): Promise<Record<string, unknown>> {
+  executeSandbox(nodeId: string, command: string, pythonEnvironment: "auto" | "managed" = "auto", workingDirectory = ""): Promise<Record<string, unknown>> {
     return request<Record<string, unknown>>(`/sandboxes/${encodeURIComponent(nodeId)}/execute`, {
+      headers: stateSessionHeaders(viewingSession(nodeId) ?? 'default'),
       method: "POST",
-      body: JSON.stringify({ command, ...(pythonEnvironment === "managed" ? { python_environment: "managed" } : {}) }),
+      body: JSON.stringify({ command, ...(pythonEnvironment === "managed" ? { python_environment: "managed" } : {}), ...(workingDirectory ? { working_directory: workingDirectory } : {}) }),
     });
   },
 };
@@ -1112,6 +1132,7 @@ export interface SandboxSettings {
   environment_variables?: Record<string, string | (({ value: string } | { secret_ref: string } | { folder_ref: string } | { file_ref: string } | { path_ref: string }) & { operation?: "replace" | "append" | "prepend"; separator?: string })>;
   secret_bindings?: Record<string, boolean>;
   folder_bindings?: Record<string, EnvironmentFolderBinding>;
+  binding_errors?: Record<string, string>;
   backup_paths?: string[];
 }
 
@@ -1164,4 +1185,20 @@ export interface StorageSettings {
   revision: number;
   editable: boolean;
   managed_by: string;
+}
+
+export interface StorageUsage {
+  categories: { user_data: number; managed: number; temporary: number; backups: number };
+  reclaimable_bytes: number;
+  measured_at: string;
+  backups: { name: string; path: string; created_at: string; size_bytes: number; removable: boolean }[];
+}
+
+export interface RunSummary {
+  run_id: string;
+  agent_id: string;
+  status: string;
+  started_at?: string;
+  finished_at?: string;
+  lifecycle: Record<string, unknown>;
 }

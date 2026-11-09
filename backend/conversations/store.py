@@ -300,6 +300,7 @@ class ConversationStore:
         is_final: bool = True,
         attachments: list | None = None,
         delivery_agent_ids: list[str] | None = None,
+        continuation_run_id: str | None = None,
     ) -> ConversationMessage:
         value = content.strip()
         if not value and not attachments:
@@ -325,9 +326,9 @@ class ConversationStore:
                 """
                 INSERT INTO conversation_messages (
                     id, conversation_id, session_id, sender_kind, sender_id,
-                    sender_name, content, mention_ids_json, run_id, created_at, sequence, kind, is_final, attachments_json
+                    sender_name, content, mention_ids_json, run_id, created_at, sequence, kind, is_final, attachments_json, continuation_run_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    (SELECT COALESCE(MAX(sequence), 0) + 1 FROM conversation_messages WHERE session_id = ?), ?, ?, ?)
+                    (SELECT COALESCE(MAX(sequence), 0) + 1 FROM conversation_messages WHERE session_id = ?), ?, ?, ?, ?)
                 """,
                 (
                     message_id,
@@ -342,6 +343,7 @@ class ConversationStore:
                     now,
                     session_id, kind, is_final,
                     json.dumps([item.model_dump() for item in attachments or []]),
+                    continuation_run_id,
                 ),
             )
             for agent_id in dict.fromkeys(delivery_agent_ids or []):
@@ -565,5 +567,6 @@ class ConversationStore:
             is_final=bool(row["is_final"]),
             mention_agent_ids=list(json.loads(str(row["mention_ids_json"]))),
             run_id=None if row["run_id"] is None else str(row["run_id"]),
+            continuation_run_id=row["continuation_run_id"],
             created_at=datetime.fromisoformat(str(row["created_at"])),
         )

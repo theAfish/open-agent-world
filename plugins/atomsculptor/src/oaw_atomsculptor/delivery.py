@@ -47,21 +47,38 @@ def _cli_parameters(command):
     The existing Skill CLI derives its options from these same signatures.
     No model source, external Skill content or function body is executed here.
     """
-    source = files(__package__).joinpath("skills/structure-inspect/scripts/structure_inspect.py").read_text(encoding="utf-8")
+    scripts = files(__package__).joinpath("skills/structure-inspect/scripts")
+    source = scripts.joinpath("structure_inspect.py").read_text(encoding="utf-8")
+    # Share the validator's Literal aliases without importing scientific code.
+    aliases = {node.targets[0].id: node.value for node in ast.parse(
+        scripts.joinpath("structure_validation.py").read_text(encoding="utf-8")).body
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Subscript) and ast.unparse(node.value.value) == "Literal"}
     function = next(node for node in ast.parse(source).body
                     if isinstance(node, ast.FunctionDef) and node.name == command)
     count = len(function.args.args) - len(function.args.defaults)
-    return {arg.arg: {"type": ast.unparse(arg.annotation).split(" | ")[0],
-                      "nullable": "None" in ast.unparse(arg.annotation), "required": i < count}
-            for i, arg in enumerate(function.args.args)}
+    parameters = {}
+    for i, arg in enumerate(function.args.args):
+        annotation = ast.unparse(arg.annotation)
+        literal = aliases.get(annotation, arg.annotation)
+        choices = (ast.literal_eval(literal.slice) if isinstance(literal, ast.Subscript)
+                   and ast.unparse(literal.value) == "Literal" else None)
+        if choices is not None and not isinstance(choices, tuple):
+            choices = (choices,)
+        parameters[arg.arg] = {"type": type(choices[0]).__name__ if choices else annotation.split(" | ")[0],
+            "nullable": "None" in annotation, "required": i < count,
+            **({"enum": list(choices)} if choices else {}),
+            **({"default": ast.literal_eval(function.args.defaults[i - count])} if i >= count else {})}
+    return parameters
 
 
 def validation_schema():
     kinds = {"int": "integer", "float": "number", "str": "string", "bool": "boolean"}
     return {"type": "object", "additionalProperties": False,
-            "properties": {key: {"type": kinds[meta["type"]]} for key, meta in _cli_parameters("validate_structure").items()
+            "properties": {key: {"type": kinds[meta["type"]], **({"enum": list(meta["enum"])} if "enum" in meta else {})}
+                           for key, meta in _cli_parameters("validate_structure").items()
                            if key not in {"folder", "file_name"}},
-            "description": "Optional acceptance parameters. Omit to reuse the build validation receipt. Use snake_case names; folder and file_name are supplied by the host from structure_path."}
+            "description": "Optional acceptance parameters. Omit or repeat identical parameters to reuse the current build validation receipt. Changed parameters require validation. Use snake_case names; folder and file_name are supplied by the host from structure_path."}
 
 
 def _skill_argv(command, values):
@@ -88,6 +105,9 @@ def _skill_argv(command, values):
         if not valid:
             issues.append({"field": key, "message": f"Supply a finite {kind} value of the declared type."})
             continue
+        if "enum" in meta and value not in meta["enum"]:
+            issues.append({"field": key, "message": "Choose one of the declared values.", "allowed_values": list(meta["enum"])})
+            continue
         argv.extend(("--" + key.replace("_", "-"), str(value).lower() if kind == "bool" else str(value)))
     if issues:
         raise DeliveryArguments(issues)
@@ -109,6 +129,63 @@ def _validate_argv(structure_path: str, validate: Mapping[str, Any] | None) -> l
     return _skill_argv("validate_structure", {**values, "folder": ".", "file_name": structure_path})
 
 
+def validation_identity(args, environment_revision):
+    """Normalize the existing validator invocation, without executing Skill code."""
+    argv = args.get("argv")
+    if args.get("script") != "scripts/structure_inspect.py" or not isinstance(argv, list) or not argv or argv[0] != "validate_structure":
+        return None
+    parameters = _cli_parameters("validate_structure")
+    if len(argv) % 2 != 1 or any(not isinstance(a, str) for a in argv):
+        return None
+    pairs = list(zip(argv[1::2], argv[2::2]))
+    if len({key for key, _ in pairs}) != len(pairs):
+        return None
+    values = {key: meta.get("default") for key, meta in parameters.items()}
+    for key, value in pairs:
+        key = key.removeprefix("--").replace("-", "_")
+        if key not in parameters:
+            return None
+        kind = parameters[key]["type"]
+        try:
+            if kind == "bool":
+                if value.lower() not in {"true", "false"}:
+                    return None
+                value = value.lower() == "true"
+            elif kind == "int":
+                value = int(value)
+            elif kind == "float":
+                value = float(value)
+                if not math.isfinite(value):
+                    return None
+        except (ValueError, OverflowError):
+            return None
+        values[key] = value
+    values.pop("folder", None)
+    values.pop("file_name", None)
+    # This extra file has mutable contents outside this candidate's receipt.
+    # Keep running validation until its own dependency identity is available.
+    if values.get("region_checks_file") is not None:
+        return None
+    return {"skill": args.get("skill"), "script": args["script"], "parameters": values,
+            "environment_revision": environment_revision}
+
+
+def reusable_validation(evidence, prior, sandbox, skill, argv, validate):
+    if not prior or prior.get("phase") != "validated":
+        return False
+    artifact = evidence.artifact_handoffs.get((sandbox, prior["path"]))
+    if artifact and prior.get("execution_sequence", -1) < artifact.get("execution_sequence", 0):
+        return False
+    known = prior.get("validation")
+    if known is None:
+        return validate is None and "validation" not in prior  # Legacy receipts lack invocation metadata.
+    requested = validation_identity({"skill": skill, "script": "scripts/structure_inspect.py", "argv": argv},
+                                    evidence.environment_revisions.get(sandbox, 0))
+    if requested is None or known.get("skill") != skill or known.get("environment_revision") != requested["environment_revision"]:
+        return False
+    return validate is None or known == requested
+
+
 def is_independent_validation(args, evidence):
     """Recognize only the read-only inspector for an exact host-owned artifact."""
     argv = args.get("argv")
@@ -128,7 +205,7 @@ def is_independent_validation(args, evidence):
 def validation_step_function(evidence, definitions, invoke, stopped):
     async def validate_modelling_artifact(sandbox: str, skill: str, structure_path: str,
                                          checks: dict | None = None) -> dict:
-        """Read-only independent validation of a saved HOST artifact; never imports or advances a stage."""
+        """Independently validate a saved HOST artifact. Call alone: starts Sandbox work and records a validation receipt. Preserves the artifact; never imports or advances a stage."""
         if stopped.is_set():
             raise asyncio.CancelledError()
         def error(code, message, **details):
@@ -182,10 +259,18 @@ def validation_step_function(evidence, definitions, invoke, stopped):
             return {"ok": False, "error": {"code": "validation_cli_error", "kind": "step_contract",
                 "command_dispatched": True, "message": "The Skill CLI rejected arguments before validation. Check the equipped/linked Skill and its declared parameters. Keep the structure unchanged."},
                 "validation": result}
+        if report.get("error") and "violations" not in report:
+            return {"ok": False, "error": {"code": "validation_unavailable", "kind": "native_dependency",
+                "command_dispatched": True, "message": "The validator did not produce a scientific verdict. Inspect its parameter, input or dependency error and correct that cause or report the blocker. Do not redesign the scientific method from this error alone."},
+                "validation": result, "report": report}
         bound = report.get("file") == structure_path
-        return {"ok": bool(bound and payload.get("exit_code") == 0 and report.get("passed") is True),
-                "validation": result, "report": report, "artifact_bound": bound,
-                "next_action": "Use the independent measurements to assess the current execution or patch one failed check. Stage acceptance is unchanged."}
+        passed = bool(bound and payload.get("exit_code") == 0 and report.get("passed") is True)
+        next_action = (evidence.actions.next_action(evidence, structure_path=structure_path)[0] if passed else
+            "Use the independent measurements to assess the current execution or patch one failed check. Stage acceptance is unchanged.")
+        return {"ok": passed, "validation": result, "report": report, "artifact_bound": bound,
+                "next_action": next_action,
+                **({"checkpoint_action": {"tool": "advance_modelling_stage", "arguments": completion}}
+                   if passed and (completion := evidence.workflow.checkpoint_arguments(evidence, structure_path)) else {})}
     return validate_modelling_artifact
 
 
@@ -217,7 +302,10 @@ async def run_delivery_step(evidence: Any, definitions: Any, invoke: Any, stoppe
         if build.get("structure_path") != structure_path or build.get("sandbox") != sandbox:
             return error("delivery_already_confirmed", "A Structure import and read-back already succeeded. Close its checkpoint with advance_modelling_stage(stage='deliver', target); do not replay a different candidate.", target=target, revision=evidence.imports[target])
         advance = workflow.advance(evidence, "deliver", target=target)
-        return {**advance, "receipt_reused": True, "target": target, "revision": evidence.imports[target]}
+        return {**advance, "receipt_reused": True, "target": target, "revision": evidence.imports[target],
+                "read_back": {"revision": evidence.confirmed[target], "summary": None,
+                              "source": "retained_host_confirmation"},
+                "next_action": "Report the retained native revision confirmation. Read-back summary fields are unavailable in this receipt; do not invent them or repeat import."}
     try:
         validation_argv = _validate_argv(structure_path, validate)
         convert_argv = _skill_argv("to_atomsculptor_document", {"folder": ".", "file_name": structure_path,
@@ -260,14 +348,11 @@ async def run_delivery_step(evidence: Any, definitions: Any, invoke: Any, stoppe
                          operation_ids=list(evidence.skill_operations))
         result = await operation("run_skill_script", {"sandbox": sandbox, "skill": skill,
                                                       "script": "scripts/structure_inspect.py", "argv": argv})
-        def before_wait(operation_id):
-            evidence.notice("structure_builder", "Waiting for delivery Skill operation; no additional model request",
-                            workflow_event="delivery_command_wait", operation_id=operation_id, sandbox=sandbox)
-            return 30
         try:
             result = await collect_operation_result(result, lambda op, seconds: operation(
                 "wait_sandbox_operation", {"sandbox": sandbox, "operation_id": op, "wait_seconds": seconds}),
-                stopped, before_wait=before_wait)
+                stopped, on_progress=lambda payload: evidence.sandbox_wait_progress(payload,
+                    sandbox=sandbox, workflow_event="delivery_command_wait"))
         except OperationReceiptMismatch as exc:
             return error("delivery_pending", str(exc), operation_id=_payload(exc.pending).get("operation_id"))
         payload = _payload(result)
@@ -278,7 +363,7 @@ async def run_delivery_step(evidence: Any, definitions: Any, invoke: Any, stoppe
     # Build already required independent validation. Reuse that receipt unless
     # explicit new parameters are requested; conversion uses the same input path.
     prior = evidence.outputs.get((sandbox, posixpath.normpath(structure_path)))
-    if validate is None and prior and prior.get("phase") == "validated":
+    if reusable_validation(evidence, prior, sandbox, skill, validation_argv, validate):
         report = prior["measurements"]
         validated = {"exit_code": 0, "receipt_reused": True}
     else:
@@ -340,10 +425,26 @@ async def run_delivery_step(evidence: Any, definitions: Any, invoke: Any, stoppe
         return advance
     evidence.notice("structure_builder", "Delivery pipeline completed with native receipts",
                     workflow_event="delivery_pipeline", target=target, revision=import_revision)
+    imported_summary = _payload(imported).get("summary") or {}
+    read_back_summary = _payload(read_back).get("summary") or {}
+    expected_count, actual_count = imported_summary.get("atom_count"), read_back_summary.get("atom_count")
+    # The native inspector already supplies this bounded overview. Reuse it;
+    # no second inspection or atom-window/coordinate-array transfer is needed.
+    overview = _payload(read_back).get("value") or {}
     return {"ok": True, "steps": steps, "target": target, "revision": import_revision,
             "file": structure_path, "document_file": document_file,
+            "import": {"revision": import_revision, "summary": _payload(imported).get("summary")},
+            "read_back": {"revision": _payload(read_back).get("revision"),
+                          "summary": _payload(read_back).get("summary"),
+                          "structure": {key: overview[key] for key in ("atom_count", "formula", "coordinate_bounds", "cell", "pbc") if key in overview},
+                          "source": "native_inspect_atom_structure"},
+            "confirmation": {"revision_match": True,
+                "atom_count_match": (actual_count == expected_count if expected_count is not None and actual_count is not None else None),
+                "scope": "Native import/read-back revision and available atom_count. File validation is separate; species and per-atom geometry/scientific checks were not re-run on the read-back document."},
+            "validation": {"passed": True, "scope": report.get("validation_scope"),
+                           "receipt_reused": validated.get("receipt_reused", False)},
             "next_stage": workflow.current,
-            "next_action": "Report the verified file, revision and measurements; finish_task with the compact JSON outcome."}
+            "next_action": "The native inspect/import/inspect sequence is complete. Use read_back and confirmation for document facts and the validation receipt for file facts; finish_task with measured limitations. No additional inspection is needed to repeat this confirmation."}
 
 
 def delivery_step_function(evidence: Any, definitions: Any, invoke: Any, stopped: Any):
@@ -354,6 +455,8 @@ def delivery_step_function(evidence: Any, definitions: Any, invoke: Any, stopped
         Each step checks the previous native receipt; a failure stops at its exact
         step and nothing later is dispatched. validate carries the Skill's explicit
         acceptance parameters (for example expected_count or min_vacuum).
+        output_name is a workspace-relative JSON filename ending in .json,
+        for example candidate.json, not a display title; omit it for the default.
         """
         return await run_delivery_step(evidence, definitions, invoke, stopped,
             call_id=tool_context.function_call_id, sandbox=sandbox, skill=skill,

@@ -1,5 +1,5 @@
 ---
-name: materials-project-search
+name: materials_project_search
 description: Strategies for searching, filtering, and downloading structures from the Materials Project (MP) database.
 when_to_use: Use when the user asks to fetch a real material from MP, pick a polymorph, or fall back to manual creation when the MP API is unavailable.
 ---
@@ -9,8 +9,11 @@ when_to_use: Use when the user asks to fetch a real material from MP, pick a pol
 ## OAW execution contract
 
 This Skill ships `scripts/materials_project.py`. Run it only through an
-authorized OAW Sandbox with explicit network access. Install `mp-api` **in that
-Sandbox**, select an Environment Profile containing `MP_API_KEY`, and never put
+authorized OAW Sandbox with explicit network access. OAW prepares the declared
+`mp-api` environment; inspect native readiness/error receipts rather than
+installing dependencies on every task. Retry failed native preparation or use
+`install_python_packages` for a confirmed missing ad hoc dependency. Select an
+Environment Profile containing `MP_API_KEY`, and never put
 the key in a prompt, command argument, card configuration, or Artifact.
 
 ```sh

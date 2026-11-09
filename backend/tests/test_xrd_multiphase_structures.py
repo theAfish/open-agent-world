@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parents[2] / 'plugins/xrd/src/oaw_xrd/multiphase_structures.py'
 spec = importlib.util.spec_from_file_location('multiphase_structures', MODULE)
@@ -24,6 +25,15 @@ _atom_site_fract_y
 _atom_site_fract_z
 Na1 Na 0.125 0.25 0.375
 '''
+
+
+class StructureAvailabilityTests(unittest.TestCase):
+    def test_missing_cif_parser_is_reported_per_phase_without_discarding_fit_results(self):
+        with patch.object(module, 'structure_payload', side_effect=ModuleNotFoundError("No module named 'pymatgen'")):
+            values = module.fitted_structures({'a': {'source_cif': {'text': CIF}}}, ['a'],
+                                            [[5, 5, 5, 90, 90, 90]], source_kind='profile_cell_fit')
+        self.assertEqual(values, [{'candidate_id': 'a', 'label': 'a', 'source_kind': 'profile_cell_fit',
+                                   'error': "No module named 'pymatgen'"}])
 
 
 @unittest.skipUnless(importlib.util.find_spec("pymatgen"), "Run in the OAW_XRDfit scientific environment")

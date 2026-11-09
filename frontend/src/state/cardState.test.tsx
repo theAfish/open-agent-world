@@ -5,11 +5,11 @@ import { worldApi } from '../api/client';
 import { useWorldStore } from './worldStore';
 import { useConversationView } from './conversationView';
 import { TEST_CATALOG } from './catalog.fixture';
-import { resolveCardStateSession, useCardStateSession } from './cardState';
+import { resolveCardStateSession, resolveViewingSession, useCardStateSession } from './cardState';
 import { TaskBoardBody } from '../cards/TaskBoard';
 import { clearTaskBoardCache } from '../cards/taskBoardCache';
 import { useNodeSurfaceStore } from './nodeSurfaces';
-import type { NodeTypeCatalogItem, WorldCard } from '../types/world';
+import type { NodeTypeCatalogItem, WorldCard, WorldEdge } from '../types/world';
 
 const board: WorldCard = { id: 'board', type: 'oaw.tasks', name: 'Tasks', status: 'available', config: { description: 'Same config' },
   state_scope: 'session', position: { x: 0, y: 0 }, size: { width: 360, height: 240 }, expanded: false };
@@ -64,9 +64,9 @@ it('resolves the owning workspace conversation before an unrelated active conver
   const chat = { ...board, id: 'chat', type: 'conversation', parent_id: 'group' };
   const types = [definition, { ...definition, id: 'conversation', traits: ['core.conversation'] }];
   const view = { activeConversationId: 'other', sessions: { other: 'B', chat: 'A' } };
-  expect(resolveCardStateSession(card.id, [card, group, chat], types, view)).toBe('A');
-  expect(resolveCardStateSession(card.id, [card], [{ ...definition, state: { mode: 'none' } }], view)).toBeUndefined();
-  expect(resolveCardStateSession(card.id, [{ ...card, state_scope: 'shared' }], types, view)).toBeUndefined();
+  expect(resolveCardStateSession(card.id, [card, group, chat], { ...TEST_CATALOG, node_types: types }, view)).toBe('A');
+  expect(resolveCardStateSession(card.id, [card], { ...TEST_CATALOG, node_types: [{ ...definition, state: { mode: 'none' } }] }, view)).toBeUndefined();
+  expect(resolveCardStateSession(card.id, [{ ...card, state_scope: 'shared' }], { ...TEST_CATALOG, node_types: types }, view)).toBeUndefined();
 });
 
 it('does not rerender a stateless card when unrelated cards or conversation selection change', () => {
@@ -78,4 +78,37 @@ it('does not rerender a stateless card when unrelated cards or conversation sele
   act(() => useWorldStore.setState({ cards: [board, { ...board, id: 'unrelated' }] }));
   act(() => useConversationView.getState().selectSession('other-chat', 'B'));
   expect(rendered).toHaveBeenCalledTimes(initial);
+});
+
+it('resolves only connected Conversation sources independently for each Sandbox', () => {
+  const card = (id: string, type: string): WorldCard => ({ ...board, id, type });
+  const cards = [card('a', 'agent'), card('b', 'agent'), card('s1', 'sandbox'), card('s2', 'sandbox'),
+    card('c1', 'conversation'), card('c2', 'conversation'), card('unconnected', 'sandbox'), card('viewer', 'text')];
+  const edge = (source: string, target: string, relationship: string): WorldEdge => ({ id: source + target, source, target, relationship, direction: 'forward' });
+  const edges = [edge('a', 's1', 'execute'), edge('a', 'c1', 'participate'), edge('b', 's2', 'execute'), edge('b', 'c2', 'participate'),
+    edge('a', 'viewer', 'read_edit'), edge('viewer', 's2', 'core.file-preview')];
+  const view = { activeConversationId: 'c2', sessions: { c1: 'one', c2: 'two' } };
+  const resolve = (id: string, links = edges) => resolveViewingSession(id, cards, TEST_CATALOG, view, links);
+  expect(resolve('unconnected')).toBeUndefined();
+  expect(resolve('s1')).toBe('one');
+  expect(resolve('s2')).toBe('two');
+  expect(resolve('viewer')).toBe('two');
+  const shared = [...edges, edge('a', 'c2', 'participate')];
+  expect(resolve('s1', shared)).toBe('two');
+  expect(resolveViewingSession('s1', cards, TEST_CATALOG, { ...view, activeConversationId: 'other' }, shared)).toBeUndefined();
+});
+
+it('uses native default equipment relationships to retain the selected workspace session', () => {
+  const card = (id: string, type: string): WorldCard => ({ ...board, id, type });
+  const cards = [card('agent', 'agent'), card('viewer', 'text'),
+    { ...card('sandbox', 'sandbox'), equipment: { owner_id: 'agent', relationship: null } },
+    { ...card('room', 'conversation'), equipment: { owner_id: 'agent', relationship: null } }];
+  const edges: WorldEdge[] = [{ id: 'preview', source: 'viewer', target: 'sandbox', relationship: 'core.file-preview', direction: 'forward' }];
+  const view = { activeConversationId: 'room', sessions: { room: 'selected-session' } };
+  for (const id of ['agent', 'sandbox', 'viewer']) {
+    expect(resolveViewingSession(id, cards, TEST_CATALOG, view, edges)).toBe('selected-session');
+  }
+  const revoked = cards.map(node => node.id === 'room'
+    ? { ...node, equipment: { owner_id: 'agent', relationship: 'communicate' } } : node);
+  expect(resolveViewingSession('sandbox', revoked, TEST_CATALOG, view, edges)).toBeUndefined();
 });

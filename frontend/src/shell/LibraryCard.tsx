@@ -19,7 +19,7 @@ export function LibraryCardSurface({ card, style, children, ...props }: Omit<Com
     style={{ "--collection-color": card.definition?.color ?? "#78967b", ...style } as CSSProperties}>
     {card.artworkUrl && failedArtwork !== card.artworkUrl
       ? <img className="card-face-cover" data-material-layer="artwork" data-material-region="artwork" src={card.artworkUrl} alt={card.label} draggable={false} onError={() => setFailedArtwork(card.artworkUrl!)} />
-      : <CardFace definition={card.definition} icon={card.kind === 'legion' ? <Layers3 /> : <CatalogIcon definition={card.definition} />}
+      : <CardFace definition={card.definition} icon={card.kind !== 'node' ? <Layers3 /> : <CatalogIcon definition={card.definition} />}
         label={card.label} description={card.description} imageAlt={card.label} />}
     {children}
   </CardStock>;

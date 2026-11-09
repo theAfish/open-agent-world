@@ -150,6 +150,7 @@ async def test_cleanup_pending_is_durable_and_retry_joins_same_stop(tmp_path):
         record = await manager.cancel_run(run.run_id)
         assert record.lifecycle['cleanup'] == 'complete'
         assert provider.stopped_run_ids == [run.run_id]
+        assert not manager._cleanup_tasks and not manager._cancel_locks
     finally:
         services.close()
 
@@ -216,3 +217,145 @@ async def test_quiet_tool_still_has_execution_deadline(tmp_path):
     finally:
         services.close()
 
+
+
+@pytest.mark.asyncio
+async def test_completed_run_releases_bookkeeping_after_concurrent_waiters(tmp_path):
+    provider = TerminalAcloseProvider()
+    services = _services(tmp_path, provider)
+    try:
+        manager = services.run_manager
+        agent = await services.create_card(CardCreate(type='agent'))
+        run = await manager.start_run(agent.id, 'settle all waiters')
+        await provider.started.wait()
+        terminal = [asyncio.create_task(manager.wait_terminal(run.run_id)) for _ in range(2)]
+        execution = [asyncio.create_task(manager.wait_execution(run.run_id)) for _ in range(2)]
+        provider.emit_terminal.set()
+        await provider.aclose_started.wait()
+        await asyncio.gather(*terminal)
+        assert not any(task.done() for task in execution)
+        assert run.run_id in manager._execution_done and manager.holds_agent_slot(run.run_id)
+        provider.release_aclose.set()
+        assert all(row.status == RunStatus.SUCCEEDED for row in await asyncio.gather(*execution))
+        assert (await manager.wait_terminal(run.run_id)).status == RunStatus.SUCCEEDED
+        assert (await manager.wait_execution(run.run_id)).status == RunStatus.SUCCEEDED
+        assert not manager._execution_done and not manager._terminal_done
+        assert not manager._transition_locks and not manager._start_locks
+        assert not manager._runtime_tasks and not manager._live_output
+    finally:
+        provider.emit_terminal.set()
+        provider.release_aclose.set()
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_context_deletion_waits_for_provider_tail_and_retries_failed_release(tmp_path):
+    from backend.errors import ConflictError
+    provider = TerminalAcloseProvider()
+    released = []
+    fail = True
+
+    async def delete_context(agent_id, context_id):
+        nonlocal fail
+        if fail:
+            raise RuntimeError('session service temporarily unavailable')
+        with pytest.raises(RuntimeUnavailableError, match='being deleted'):
+            await services.run_manager.start_run(agent_id, 'racing admission', context_id=context_id)
+        released.append((agent_id, context_id))
+
+    provider.delete_context = delete_context
+    services = _services(tmp_path, provider)
+    try:
+        manager = services.run_manager
+        agent = await services.create_card(CardCreate(type='agent'))
+        room = await services.create_card(CardCreate(type='conversation'))
+        session = await services.create_conversation_session(room.id, ConversationSessionCreate())
+        run = await manager.start_run(agent.id, 'keep context live', context_id=session.id)
+        await provider.started.wait()
+        provider.emit_terminal.set()
+        await provider.aclose_started.wait()
+        with pytest.raises(ConflictError):
+            await services.delete_conversation_session(room.id, session.id)
+        assert released == []
+        provider.release_aclose.set()
+        await manager.wait_execution(run.run_id)
+        with pytest.raises(RuntimeError, match='temporarily unavailable'):
+            await services.delete_conversation_session(room.id, session.id)
+        assert services.conversations.get_session(room.id, session.id).id == session.id
+        fail = False
+        manager.store.update_lifecycle(run.run_id, cleanup='failed')
+        with pytest.raises(ConflictError):
+            await services.delete_conversation_session(room.id, session.id)
+        manager.store.update_lifecycle(run.run_id, cleanup='uncertain')
+        await services.delete_conversation_session(room.id, session.id)
+        assert manager.get_run(run.run_id).lifecycle['cleanup'] == 'uncertain'
+        assert released == [(agent.id, session.id)]
+        assert not manager._deleting_contexts
+    finally:
+        provider.emit_terminal.set()
+        provider.release_aclose.set()
+        services.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scope', ['group', 'conversation'])
+async def test_group_and_conversation_deletion_release_all_owned_contexts(tmp_path, scope):
+    provider = RecordingProvider()
+    released = []
+    async def delete_context(agent_id, context_id):
+        released.append((agent_id, context_id))
+    provider.delete_context = delete_context
+    services = _services(tmp_path, provider)
+    try:
+        agent = await services.create_card(CardCreate(type='agent'))
+        room = await services.create_card(CardCreate(type='conversation'))
+        first = await services.create_conversation_session(room.id, ConversationSessionCreate())
+        second = await services.create_conversation_session(room.id, ConversationSessionCreate(group_id=first.group_id))
+        for session in (first, second):
+            run = await services.run_manager.start_run(agent.id, 'context owner', context_id=session.id)
+            await services.run_manager.wait_execution(run.run_id)
+        if scope == 'group':
+            await services.delete_conversation_group(room.id, first.group_id)
+        else:
+            await services.delete_card(room.id)
+        assert set(released) == {(agent.id, first.id), (agent.id, second.id)}
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_context_deletion_rejects_created_run_with_reserved_capacity(tmp_path, monkeypatch):
+    from backend.errors import ConflictError
+    from backend.events.models import EventType
+    services = _services(tmp_path, RecordingProvider())
+    entered, release = asyncio.Event(), asyncio.Event()
+    starting = None
+    try:
+        manager = services.run_manager
+        agent = await services.create_card(CardCreate(type='agent'))
+        room = await services.create_card(CardCreate(type='conversation'))
+        session = await services.create_conversation_session(room.id, ConversationSessionCreate())
+        publish = type(manager)._publish_run
+
+        async def paused_publish(current, record, event_type):
+            if event_type == EventType.RUN_CREATED:
+                entered.set()
+                await release.wait()
+            return await publish(current, record, event_type)
+
+        monkeypatch.setattr(type(manager), '_publish_run', paused_publish)
+        starting = asyncio.create_task(manager.start_run(agent.id, 'admitted', context_id=session.id))
+        await asyncio.wait_for(entered.wait(), 2)
+        run, = manager.store.current(context_id=session.id)
+        assert run.status == RunStatus.CREATED and manager.holds_agent_slot(run.run_id)
+        with pytest.raises(ConflictError):
+            await services.delete_conversation_session(room.id, session.id)
+        release.set()
+        await starting
+        await manager.wait_execution(run.run_id)
+        await services.delete_conversation_session(room.id, session.id)
+    finally:
+        release.set()
+        if starting is not None:
+            await asyncio.gather(starting, return_exceptions=True)
+        services.close()

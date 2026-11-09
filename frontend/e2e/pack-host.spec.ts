@@ -17,6 +17,13 @@ async function dismissOnboarding(page: import('@playwright/test').Page) {
   await expect(page.getByRole('button', { name: 'Open Pack and Card Library' })).toBeVisible();
 }
 
+async function deferRestart(page: import('@playwright/test').Page) {
+  const prompt = page.getByRole('dialog', { name: 'Restart OAW now?', exact: true });
+  await expect(prompt).toBeVisible();
+  await prompt.getByRole('button', { name: 'Restart later', exact: true }).click();
+  await expect(prompt).toBeHidden();
+}
+
 test('install local Pack into the production host without a frontend rebuild', async ({ page, request }) => {
   expect((await (await request.get('/api/application')).json()).mode).toBe('production');
   const before = await (await request.get('/api/catalog')).json();
@@ -30,9 +37,7 @@ test('install local Pack into the production host without a frontend rebuild', a
   const pendingPack = library.locator('[data-pack-id="installed:example.greeter"]');
   await expect(pendingPack.getByText('Restart required', { exact: true })).toBeVisible();
   await expect(library.getByRole('region', { name: 'Install Pack', exact: true })).toHaveCount(0);
-  const restart = page.getByRole('dialog', { name: 'Restart OAW now?', exact: true });
-  await restart.getByRole('button', { name: 'Restart later', exact: true }).click();
-  await expect(restart).toBeHidden();
+  await deferRestart(page);
   await pendingPack.getByRole('button', { name: 'View pack Greeter', exact: true }).click();
   await expect(library.getByRole('button', { name: 'Uninstall Pack', exact: true })).toBeVisible();
   await library.getByRole('button', { name: 'Back to packs', exact: true }).click();
@@ -70,9 +75,7 @@ test('install remote Pack through Store and the existing installer', async ({ pa
   await detail.getByRole('button', { name: 'Get', exact: true }).click();
   await expect(detail.getByText('Installed · Restart required', { exact: true })).toBeVisible({ timeout: 120000 });
   await expect(detail.getByRole('button', { name: 'Installed', exact: true })).toBeDisabled();
-  const restart = page.getByRole('dialog', { name: 'Restart OAW now?', exact: true });
-  await restart.getByRole('button', { name: 'Restart later', exact: true }).click();
-  await expect(restart).toBeHidden();
+  await deferRestart(page);
   const installed = await (await request.get('/api/packs')).json();
   expect(installed.versions[0]).toMatchObject({ id: 'example.greeter', version: process.env.OAW_PACK_VERSION, selected: true, loaded: false, digest: process.env.OAW_PACK_EXPECTED_SHA });
   expect((await (await request.get('/api/catalog')).json()).frontend_modules['example.greeter']).toBeUndefined();

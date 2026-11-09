@@ -6,7 +6,7 @@ import { createDiscardPreview, discardProximity } from './discardPreview';
 
 export interface PalettePointerItem {
   payload?: PaletteDragPayload;
-  entry: { kind: "node" | "legion"; id: string; sourceDeckId?: string };
+  entry: { kind: "node" | "legion" | "legion_instance"; id: string; sourceDeckId?: string };
 }
 export interface PalettePointerLocation {
   clientX: number;

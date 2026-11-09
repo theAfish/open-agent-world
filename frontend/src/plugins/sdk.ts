@@ -1,10 +1,14 @@
 import type { ComponentType } from "react";
 import type { PluginVisualCapture, PluginVisualCaptureRequest, PluginVisualCaptureResult } from "./visualCapture";
-import type { NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
+import type { AgentRunReceipt, NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
+export type { AgentRunReceipt } from "../types/world";
 export type { TutorialDefinition, TutorialStep, TutorialText } from '../tutorials/types';
 export type { DataConsumer, DataSchema, DataQuery, Dataset, DataSourceHost } from './dataSources';
 export type { ExecutionNode, ExecutionEdge, ExecutionPage, ExecutionSnapshot, ExecutionSourceHost } from './executionSources';
 export type { NodePresentation, NodeSurfaceLevel, PluginStateSpec } from "../types/world";
+export { registerSkinMod, useSkinCatalog, DEFAULT_PALETTE_ID, DEFAULT_BACKGROUND_ID } from '../appearance/registry';
+export { parseSkinMod, MAX_SKIN_MOD_BYTES, COLOR_TOKENS } from '../appearance/skinMod';
+export type { SkinMod, SkinPalette, SkinBackground, SkinColors, SkinColorToken, PaletteEntry, BackgroundEntry } from '../appearance/skinMod';
 export { SchemaFields } from "./SchemaFields";
 export { CardFace, CardStock } from '../components/CardFace';
 export type { CardFaceProps } from '../components/CardFace';
@@ -183,7 +187,7 @@ export interface PluginViewProps {
     /** Absent for state.mode=none. The host owns namespace and lifecycle. */
     state?: CardStateStore;
     /** Present only when the developer permits a choice; null restores its default. */
-    setDataPersistence?: (value: "shared" | "session" | null) => Promise<void>;
+    setDataPersistence?: (value: "shared" | "session" | "group" | null) => Promise<void>;
     /** Present only in a deployed Workspace. Reuse the view and hide engineering controls. */
     deployment?: import('../workspace/WorkspaceAccess').PluginDeploymentAccess;
     /** Human configuration of this Environment/Sandbox card. Plugin API 1.42.
@@ -206,8 +210,8 @@ export interface PluginViewProps {
     getMultiphase?(): Promise<XrdMultiphaseState>;
     stopMultiphase?(): Promise<unknown>;
     openResultsConversation?(): Promise<unknown>;
-    updateConfig(patch: Record<string, unknown>): Promise<void>;
-    getAgentInfo(nodeId?: string): Promise<{ session_id: string; details?: Record<string, unknown> }>;
+    updateConfig(patch: Record<string, unknown>, nodeId?: string): Promise<void>;
+    getAgentInfo(nodeId?: string): Promise<{ session_id: string; status?: string; details?: Record<string, unknown> }>;
     /** Live graph-derived grants; card config hints never authorize a tool. */
     getAgentCapabilities?(nodeId: string): Promise<{ kind: string; target_id?: string }[]>;
     openLinkedCanvas?(type: string, name: string): Promise<void>;
@@ -222,8 +226,10 @@ export interface PluginViewProps {
     documentDownloadUrl(name: string, nodeId?: string): string;
     /** Select a card and open its normal OAW workspace surface. */
     openWorkspace(nodeId: string): void;
-    /** Start an Agent through the ordinary OAW run lifecycle. `freshContext` runs it with no earlier history instead of the Agent's shared one. */
-    runAgent(nodeId: string, prompt: string, freshContext?: boolean): Promise<void>;
+    /** Return the immediate Run admission receipt; reject on request failure.
+     * Does not wait for execution or imply business completion. Never auto-retry.
+     * `freshContext` runs with no earlier history instead of the Agent's shared one. */
+    runAgent(nodeId: string, prompt: string, freshContext?: boolean): Promise<AgentRunReceipt>;
     /** Observe future node-document mutations received by the OAW event stream. */
     onDocumentChange(listener: (change: PluginDocumentChange) => void): () => void;
     /**

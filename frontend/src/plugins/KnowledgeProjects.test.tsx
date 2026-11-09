@@ -45,8 +45,11 @@ function setup(handler: Handler = async () => undefined, options: { request?: Re
 }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it("keeps selected folder files local until confirmation, then commits the named project", async () => {
-  const { action, fileAction } = setup(async (name) => name === "project_import_preview" ? { token: "preview-1", projects: [{ key: "all" }] }
+it("stages a folder locally and preserves its paths when importing the named project", async () => {
+  const preview = { token: "preview-1", grouping: "single", depth: 1,
+    files: [{ id: "file-1", relative_path: "root/A/report.md", filename: "report.md", size: 10, project_key: "root/A" }],
+    projects: [{ key: "root/A", name: "A", file_count: 1 }] };
+  const { action, fileAction } = setup(async name => name === "project_import_preview" ? preview
     : name === "project_import_commit" ? { projects: [PROJECT], source_ids: ["file-1"] } : undefined);
   const file = new File(["# Report"], "report.md", { type: "text/markdown" });
   vi.stubGlobal("FileReader", class { constructor() { throw new Error("Project files must not be encoded as data URLs"); } });
@@ -62,7 +65,7 @@ it("keeps selected folder files local until confirmation, then commits the named
     files: [expect.objectContaining({ file_key: "file0" })] }), { file0: file });
   expect(JSON.stringify(fileAction.mock.calls[0][1])).not.toContain("content_base64");
   await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", { token: "preview-1", grouping: "single", depth: 1, auto_process: true,
-    projects: [{ key: "all", name: "A" }] }, undefined));
+    projects: [{ key: "root/A", name: "A" }] }, undefined));
 });
 
 it("adds supporting files to the selected stable project rather than creating a new project", async () => {
@@ -164,8 +167,9 @@ it("stops an agent's extraction from the card: cancels the live run and fails th
   fireEvent.click(stop);
   await waitFor(() => expect(action).toHaveBeenCalledWith("projection_fail", { projection_id: "result-a", expected_revision: 1, error: "Stopped by the user. Retry extraction." }, undefined));
   const cancels = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([url]) => url);
-  // Only the live run is cancelled; finished runs are left alone.
-  expect(cancels).toEqual(["/api/runs/run-live/cancel"]);
+  // The runtime owns all live executions and cleanup, even outside a history page.
+  expect(cancels).toEqual(["/api/agents/agent-a/stop"]);
+  expect(fetchMock.mock.calls.some(([url]) => url.includes('/runs?'))).toBe(false);
   await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
   expect((await screen.findAllByText("Extraction stopped")).length).toBeGreaterThan(0);
   // The failed result can be retried straight away.
@@ -245,6 +249,20 @@ it("notices a finished agent run (status \"succeeded\") and shows the saved resu
   await screen.findAllByText("The agent is extracting. Open the log to follow it.");
   await waitFor(() => expect(screen.queryAllByText("The agent is extracting. Open the log to follow it.")).toHaveLength(0), { timeout: 5000 });
   expect(action.mock.calls.some(([name]) => name === "projection_fail")).toBe(false);
+});
+
+it('restores an extraction by its exact Run even after it leaves the recent history page', async () => {
+  const fetchMock = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('/runs/older-run?summary=true')
+    ? { run_id: 'older-run', status: 'succeeded', created_at: '2026-01-01T00:00:00Z' } : [] }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { action } = setup(undefined, { agent: { id: 'agent-a', name: 'Researcher' }, host: {
+    draft: { get: () => ({ projectView: { agentTask: { agentId: 'agent-a', runId: 'older-run',
+      projectionIds: ['result-a'], previousRunIds: [], startedAt: '2026-01-01T00:00:00Z' } } }), set: vi.fn() },
+  } });
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/runs/older-run?summary=true'), { timeout: 3500 });
+  await waitFor(() => expect(screen.queryAllByText('The agent is extracting. Open the log to follow it.')).toHaveLength(0));
+  expect(fetchMock.mock.calls.some(([url]) => url.includes('/runs?'))).toBe(false);
+  expect(action.mock.calls.some(([name]) => name === 'projection_fail')).toBe(false);
 });
 
 it("shows each relation's description (or its supporting snippet) in the list and under a selected concept", async () => {

@@ -17,7 +17,7 @@ from test_optimization_paths import delivery_setup
 from test_workflow import activate, execute, tool
 
 from skill_materialization import skill_scripts
-SCRIPTS = skill_scripts("structure-inspect")
+SCRIPTS = skill_scripts("structure_inspect")
 
 
 def signature_parser(command):
@@ -29,7 +29,10 @@ def signature_parser(command):
                 if isinstance(n, ast.FunctionDef) and n.name == command)
     node.body = [ast.Pass()]
     tree = ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[]))
-    namespace = {}; exec(compile(tree, '<trusted signature only>', 'exec'), namespace)
+    validation_spec = importlib.util.spec_from_file_location('contract_validation', SCRIPTS / 'structure_validation.py')
+    validation = importlib.util.module_from_spec(validation_spec); validation_spec.loader.exec_module(validation)
+    namespace = {'DistanceMode': validation.DistanceMode}
+    exec(compile(tree, '<trusted signature only>', 'exec'), namespace)
     return module.build_cli_parser(prog='contract', description_lines=[], tool_functions={command: namespace[command]})
 
 
@@ -50,11 +53,59 @@ def test_actual_signature_parser_accepts_folder_and_explicit_boolean_values(bool
     ({'expected_count': '80'}, 'expected_count'), ({'min_vacuum': float('nan')}, 'min_vacuum'),
     ({'min_vacuum': 10 ** 500}, 'min_vacuum'), ({'nonperiodic': 'maybe'}, 'nonperiodic'),
     ({'folder': []}, 'folder'), ({'folder': 'other'}, 'folder'), ({'file_name': 'other.xyz'}, 'file_name'),
-    ({'unknown': 2}, 'unknown')])
+    ({'unknown': 2}, 'unknown'), ({'distance_mode': 'minimum_image'}, 'distance_mode')])
 def test_delivery_rejects_invalid_or_conflicting_arguments_before_any_dispatch(values, field):
     with pytest.raises(DeliveryArguments) as e:
         _validate_argv('candidate.extxyz', values)
     assert field in {issue['field'] for issue in e.value.issues}
+
+
+def test_validation_enum_is_shared_by_host_schema_native_cli_and_validator():
+    from typing import get_args
+    from oaw_atomsculptor.delivery import validation_schema
+    from test_geometry_validation import validation
+    choices = get_args(validation.DistanceMode)
+    assert tuple(validation_schema()['properties']['distance_mode']['enum']) == choices
+    parser = signature_parser('validate_structure')
+    for value in choices:
+        argv = _validate_argv('candidate.extxyz', {'distance_mode': value})
+        assert parser.parse_args(argv).distance_mode == value
+    with pytest.raises(SystemExit) as caught:
+        parser.parse_args(['validate_structure', '--folder', '.', '--file-name', 'candidate.extxyz',
+                           '--distance-mode', 'minimum_image'])
+    assert caught.value.code == 2
+
+
+@pytest.mark.asyncio
+async def test_invalid_validation_enum_never_dispatches_and_native_input_failure_is_not_scientific_failure():
+    from oaw_atomsculptor.delivery import validation_step_function
+    from test_candidate_first_workflow import start_direct, candidate_report
+    from test_measurement_handoffs import execute as measured_execute, record
+    e = await start_direct('document')
+    await measured_execute(e, 'build.py', record(**candidate_report(e)))
+    definitions = [ScopedToolDefinition('operation:run_skill_script', 'run_skill_script', 'Native Skill')]
+    e.configure_tools(definitions)
+    calls = []
+    async def invoke(capability, args):
+        import json
+        calls.append(args)
+        return {'command_id': 'validator', 'exit_code': 1, 'stdout': json.dumps({
+            'file': 'cnt.extxyz', 'passed': False, 'validation_status': 'unsupported',
+            'error': 'Periodic distances require a finite nonsingular cell'})}
+    validate = validation_step_function(e, definitions, invoke, asyncio.Event())
+    result = await validate(sandbox='box', skill='inspector', structure_path='cnt.extxyz',
+                            checks={'distance_mode': 'minimum_image'})
+    assert result['error']['code'] == 'validation_arguments' and not calls
+    assert result['error']['issues'][0]['allowed_values'] == ['auto', 'finite', 'periodic']
+    result = await validate(sandbox='box', skill='inspector', structure_path='cnt.extxyz', checks={'distance_mode': 'periodic'})
+    assert result['error']['code'] == 'validation_unavailable' and result['error']['command_dispatched']
+    assert result['error']['kind'] == 'native_dependency'
+    assert len(calls) == 1 and not e.outputs and 'checkpoint_action' not in result
+    await e.tool_callbacks('structure_builder')['after_tool_callback'](SimpleNamespace(name='validate_modelling_artifact'),
+        {'sandbox': 'box', 'structure_path': 'cnt.extxyz'}, SimpleNamespace(function_call_id='validation-result'), result)
+    assert e.correction_feedback['kind'] == 'native_dependency'
+    prepare(e, request({'advance_modelling_stage', 'finish_task'}))
+    assert 'rejected before command dispatch' not in e.actions.last_action
 
 
 @pytest.mark.asyncio
@@ -124,9 +175,59 @@ async def test_confirmed_manual_delivery_closes_without_revalidation_conversion_
     result = await run_delivery_step(e, definitions, invoke, stopped, call_id='delivery', sandbox='box',
                                     skill='skill', structure_path='cnt.extxyz', target='structure', validate={})
     assert result['ok'] and result['receipt_reused'] and not calls
+    assert result['read_back']['revision'] == 2 and result['read_back']['summary'] is None
     assert e.workflow.current == 'complete'
     prepare(e, req := request({'run_delivery_step', 'advance_modelling_stage', 'finish_task'}))
     assert declarations(req) == {'finish_task'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('has_summary', [False, True])
+async def test_delivery_exposes_native_read_back_scope_without_extra_inspection(has_summary):
+    e, definitions, invoke, stopped, calls = await delivery_setup()
+    from oaw_atomsculptor import _structure_overview
+    from oaw_atomsculptor.structure import Atom, StructureDocument
+    document = StructureDocument(atoms=[Atom(id=i, symbol='C', x=i, y=0, z=0) for i in range(80)]).model_dump(mode='json')
+    async def native(capability, args):
+        result = await invoke(capability, args)
+        if capability == 'operation:inspect_atom_structure':
+            result = _structure_overview(document, revision=result['revision'], detail='summary', offset=0, limit=10)
+        if capability in {'operation:inspect_atom_structure', 'operation:import_atom_structure_file'}:
+            result = dict(result)
+            if has_summary:
+                result['summary'] = {'atom_count': 80, 'selected_atom_count': 0}
+            else:
+                result.pop('summary', None)
+        return result
+    result = await run_delivery_step(e, definitions, native, stopped, call_id='delivery', sandbox='box',
+                                    skill='skill-node', structure_path='cnt.extxyz', target='structure')
+    assert result['ok'] and result['read_back']['revision'] == result['import']['revision'] == 2
+    assert result['read_back']['source'] == 'native_inspect_atom_structure'
+    assert result['read_back']['summary'] == ({'atom_count': 80, 'selected_atom_count': 0} if has_summary else None)
+    assert result['read_back']['structure']['formula'] == 'C80'
+    assert result['read_back']['structure']['atom_count'] == 80
+    assert 'atoms' not in result['read_back']['structure']
+    assert result['confirmation']['atom_count_match'] is (True if has_summary else None)
+    assert 'not re-run' in result['confirmation']['scope']
+    assert sum(n == 'inspect_atom_structure' for n, _ in calls) == 2
+    assert sum(n == 'import_atom_structure_file' for n, _ in calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_delivery_does_not_claim_confirmation_for_a_mismatched_read_back_count():
+    e, definitions, invoke, stopped, calls = await delivery_setup()
+    async def native(capability, args):
+        result = await invoke(capability, args)
+        if capability == 'operation:import_atom_structure_file':
+            return {**result, 'summary': {'atom_count': 80}}
+        if capability == 'operation:inspect_atom_structure' and e.imports:
+            return {**result, 'summary': {'atom_count': 79}}
+        return result
+    result = await run_delivery_step(e, definitions, native, stopped, call_id='delivery', sandbox='box',
+                                    skill='skill-node', structure_path='cnt.extxyz', target='structure')
+    assert result['error']['code'] == 'delivery_read_back_required'
+    assert e.workflow.current == 'deliver' and not e.confirmed
+    assert sum(n == 'import_atom_structure_file' for n, _ in calls) == 1
 
 
 @pytest.mark.asyncio
@@ -217,6 +318,7 @@ async def test_assessment_only_and_read_dependencies_remain_available_without_ne
              'read_skills', 'preview_file', 'run_skill_script', 'inspect_sandbox'}
     e = setup(names=names); await activate(e, delivery='report')
     e.steps.available = True
+    await tool(e, 'inspect_sandbox', {'sandbox': 'box'}, {'state': 'ready'})
     await tool(e, 'write_sandbox_text_file', {'sandbox': 'box', 'path': 'probe.py', 'content': 'print(32)'}, {'written': 9})
     await tool(e, 'execute_command', {'sandbox': 'box', 'argv': ['python3', 'probe.py']},
                {'exit_code': 0, 'command_id': 'actual-probe', 'stdout': 'count=32'})
@@ -244,6 +346,7 @@ async def test_real_adk_delivery_declaration_carries_typed_acceptance_parameters
     assert declaration.parameters is None
     assert schema['properties']['validate']['additionalProperties'] is False
     assert schema['properties']['validate']['properties']['nonperiodic']['type'] == 'boolean'
+    assert schema['properties']['validate']['properties']['distance_mode']['enum'] == ['auto', 'finite', 'periodic']
     assert '--folder' not in schema['properties']['validate']['properties']
 
 
@@ -340,3 +443,44 @@ async def test_unknown_native_replacement_blocks_both_structure_write_paths():
         rejected = await tool(e, name, {'target': 'structure', 'expected_revision': 2}, {'revision': 3}, call_id='retry')
         assert rejected['error']['code'] == 'delivery_import_unknown'
     assert not e.imports and not e.confirmed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', ['same', 'omitted', 'parameters', 'skill', 'environment', 'candidate'])
+async def test_delivery_reuses_only_the_same_validation_identity(change):
+    from oaw_atomsculptor.delivery import validation_identity
+    e, definitions, invoke, stopped, calls = await delivery_setup()
+    checks = {'expected_count': 80, 'nonperiodic': True, 'min_vacuum': 8.0}
+    argv = _validate_argv('cnt.extxyz', checks)
+    e._observe_skill('structure_builder', {'sandbox': 'box', 'skill': 'skill',
+        'script': 'scripts/structure_inspect.py', 'argv': argv},
+        {'exit_code': 0, 'command_id': 'prior-validation', 'stdout': '{"passed": true, "file": "cnt.extxyz"}'})
+    args = dict(call_id='delivery', sandbox='box', skill='skill', structure_path='cnt.extxyz', target='structure')
+    requested = dict(checks)
+    if change == 'same':
+        requested.update(nonperiodic='true', min_vacuum=8)  # CLI-equivalent spelling.
+    if change == 'omitted':
+        requested = None
+    if change == 'parameters':
+        requested['min_vacuum'] = 9
+    if change == 'skill':
+        args['skill'] = 'another-skill'
+    if change == 'environment':
+        e.environment_revisions['box'] = 1
+    if change == 'candidate':
+        e._invalidate_file('box', 'cnt.extxyz', 'written')
+    result = await run_delivery_step(e, definitions, invoke, stopped, **args, validate=requested)
+    assert result['ok'], result
+    validations = [a for name, a in calls if name == 'run_skill_script' and a['argv'][0] == 'validate_structure']
+    assert len(validations) == (0 if change in {'same', 'omitted'} else 1)
+    assert result['steps'][0]['receipt_reused'] == (change in {'same', 'omitted'})
+    assert sum(name == 'import_atom_structure_file' for name, _ in calls) == 1
+
+
+def test_validation_identity_normalizes_defaults_and_does_not_cache_mutable_rules_file():
+    from oaw_atomsculptor.delivery import validation_identity
+    def identity(checks):
+        return validation_identity({'script': 'scripts/structure_inspect.py', 'skill': 'skill',
+                                    'argv': _validate_argv('candidate.extxyz', checks)}, 0)
+    assert identity({}) == identity({'min_distance': 0.1, 'nonperiodic': False, 'distance_mode': 'auto'})
+    assert identity({'region_checks_file': 'rules.json'}) is None

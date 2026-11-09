@@ -152,6 +152,13 @@ class RuntimeProvider(ABC):
     async def delete_agent(self, agent_id: str) -> None:
         pass
 
+    async def delete_context(self, agent_id: str, context_id: str) -> None:
+        """Release an idle context's provider sessions; retry must be safe.
+
+        The host closes context admission and checks execution/cleanup before
+        calling this. Providers without retained context resources need no hook.
+        """
+
     @abstractmethod
     def execute(
         self,

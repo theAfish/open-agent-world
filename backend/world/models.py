@@ -119,6 +119,9 @@ class SandboxConfig(BaseModel):
     runtime: str = Field(default="auto", min_length=1, max_length=200, json_schema_extra={"privileged": True})
     workspace_path: str | None = Field(default=None, max_length=4096, json_schema_extra={"privileged": True})
     workspace_access: Literal["read_only", "read_write"] = Field(default="read_write", json_schema_extra={"privileged": True})
+    workspace_scope: Literal['shared', 'session', 'group'] = Field(default='session',
+        description='Share workspace files and result views within a Conversation session or group.',
+        json_schema_extra={'privileged': True})
     network_enabled: bool = Field(default=False, json_schema_extra={"privileged": True})
     memory_bytes: int = Field(default=2048 * 1024 * 1024, ge=16 * 1024 * 1024, le=8 * 1024 * 1024 * 1024)
     active_process_limit: int = Field(default=64, ge=1, le=256)
@@ -203,7 +206,7 @@ class CardCreate(BaseModel):
     size: Size | None = None
     expanded: bool = False
     status: str | None = None
-    state_scope: Literal["shared", "session"] | None = None
+    state_scope: Literal["shared", "session", "group"] | None = None
     config: dict[str, Any] = Field(default_factory=dict)
     content: str | None = None
     data_base64: str | None = None
@@ -224,7 +227,7 @@ class CardPatch(BaseModel):
     expanded: bool | None = None
     status: str | None = None
     config: dict[str, Any] | None = None
-    state_scope: Literal["shared", "session"] | None = None
+    state_scope: Literal["shared", "session", "group"] | None = None
 
 
 class CardsDelete(BaseModel):
@@ -253,7 +256,9 @@ class CardBatchPatch(BaseModel):
 class CardsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    updates: Annotated[list[CardBatchPatch], Field(min_length=1, max_length=101)]
+    # A canvas move includes nested resource cards as well as direct Legion
+    # members. Keep the same bounded canvas batch size as deletion.
+    updates: Annotated[list[CardBatchPatch], Field(min_length=1, max_length=10_000)]
 
     @field_validator("updates")
     @classmethod
@@ -286,8 +291,8 @@ class Card(BaseModel):
     expanded: bool
     status: str
     config: dict[str, Any]
-    state_scope: Literal["shared", "session"] | None = None
-    state_scope_override: Literal["shared", "session"] | None = None
+    state_scope: Literal["shared", "session", "group"] | None = None
+    state_scope_override: Literal["shared", "session", "group"] | None = None
     chunk: tuple[int, int]
     resource: ResourceSummary | None = None
     created_at: datetime

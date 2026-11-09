@@ -7,7 +7,7 @@ import pytest
 
 
 from skill_materialization import skill_scripts
-SCRIPTS = skill_scripts("structure-inspect")
+SCRIPTS = skill_scripts("structure_inspect")
 spec = importlib.util.spec_from_file_location("structure_validation", SCRIPTS / "structure_validation.py")
 validation = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validation)

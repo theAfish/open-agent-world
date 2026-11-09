@@ -76,16 +76,19 @@ async def reconcile_plugin_environments(services=Depends(get_services)):
 
 
 @router.get('/lifecycle')
-async def lifecycle_snapshot(services=Depends(get_services)):
+async def lifecycle_snapshot(services=Depends(get_services), agent_id: str | None = None):
     from backend.sandbox.history import lifecycle_records
     runs = []
     artifacts = services.resources.artifacts.all()
-    for run in services.run_manager.list_runs():
+    artifacts_by_run = {}
+    for artifact in artifacts:
+        artifacts_by_run.setdefault(artifact['provenance']['run_id'], []).append(artifact)
+    for run in services.run_manager.store.current(agent_id=agent_id, recent=20, summary=True):
         item = run.model_dump(mode='json')
         item['lifecycle']['holds_capacity'] = services.run_manager.holds_agent_slot(run.run_id)
         item['artifacts'] = [{'version_id': r['version_id'], 'artifact_id': r['artifact_id'], 'name': r['name'], 'state': r['state'],
                              'collection_id': r.get('collection_id') if services.world.maybe_get_card(r.get('collection_id', '')) else None}
-                             for r in artifacts if r['provenance']['run_id'] == run.run_id]
+                             for r in artifacts_by_run.get(run.run_id, [])]
         runs.append(item)
     with services.database.locked() as db:
         cleanup = [dict(row) for row in db.execute('SELECT node_id, batch_id, attempts, last_error, commit_state FROM pending_node_deletions ORDER BY batch_id, sequence')]
@@ -157,6 +160,7 @@ class SandboxExecuteRequest(BaseModel):
     environment_id: str | None = None
     target_id: str | None = None
     python_environment: Literal["auto", "managed", "none"] = "auto"
+    working_directory: str = Field(default="", max_length=4096)
 
     @model_validator(mode="after")
     def validate_command_shape(self) -> "SandboxExecuteRequest":
@@ -204,15 +208,7 @@ async def run_agent(
             parent_run_id=request.parent_run_id, detached=request.detached,
             fresh_context=request.fresh_context, idempotency_key=idempotency_key,
         )
-    if (
-        request.task_id is None
-        and request.parent_run_id is None
-        and not request.detached
-    ):
-        return await services.run_agent(
-            agent_id, request.prompt, fresh_context=request.fresh_context, idempotency_key=idempotency_key,
-        )
-    run = await services._require_run_manager().start_run(
+    return await services.run_agent(
         agent_id,
         request.prompt,
         task_id=request.task_id,
@@ -221,26 +217,28 @@ async def run_agent(
         fresh_context=request.fresh_context,
         idempotency_key=idempotency_key,
     )
-    return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
 
 @router.get("/runs", response_model=list[RunRecord])
 async def list_runs(
     agent_id: str | None = None,
     task_id: str | None = None,
+    before: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
     services: ApplicationServices = Depends(get_services),
 ) -> list[RunRecord]:
-    return services._require_run_manager().list_runs(
-        agent_id=agent_id, task_id=task_id
+    return services._require_run_manager().store.page(
+        agent_id=agent_id, task_id=task_id, before=before, limit=limit
     )
 
 
 @router.get("/runs/{run_id}", response_model=RunRecord)
 async def get_run(
     run_id: str,
+    summary: bool = False,
     services: ApplicationServices = Depends(get_services),
 ) -> RunRecord:
-    return services._require_run_manager().get_run(run_id)
+    return services._require_run_manager().store.get(run_id, summary=summary)
 
 
 @router.get("/runs/{run_id}/activity")
@@ -422,7 +420,7 @@ async def execute_sandbox(
         command=request.command,
         timeout_seconds=request.timeout_seconds, environment_id=request.environment_id, target_id=request.target_id,
         python_environment=request.python_environment,
-        _keep_on_disconnect=True,
+        _keep_on_disconnect=True, _working_directory=request.working_directory,
     )
 
 
@@ -432,6 +430,14 @@ async def sandbox_configuration(sandbox_id: str, services=Depends(get_services))
     async with services._node_mutation(read_only=True):
         services._require_card_type(sandbox_id, "sandbox")
         return configuration_summary(services, sandbox_id)
+
+
+@router.get("/sandboxes/{sandbox_id}/workspaces")
+@router.get("/sandboxes/{sandbox_id}/task-workspaces", include_in_schema=False)
+async def sandbox_task_workspaces(sandbox_id: str, services=Depends(get_services)):
+    from backend.sandbox.task_workspace import list_workspaces
+    services._require_card_type(sandbox_id, "sandbox")
+    return {"items": list_workspaces(services, sandbox_id)}
 
 
 @router.get("/sandboxes/{sandbox_id}/history")
@@ -458,6 +464,11 @@ async def sandbox_files(sandbox_id: str, operation: str = "roots", root: str = "
             result = await backend.file_operation(sandbox_id, 'download_info' if operation == 'download' else operation,
                 root=root, path=path, **({'cursor': cursor, 'query': query} if operation == 'list' else {}))
         except FileNotFoundError:
+            if operation == 'list' and root == 'workspace':
+                from backend.workspace_context import resolve_workspace
+                current = resolve_workspace(services, sandbox_id, sandbox_id=sandbox_id, allow_unbound=True)
+                if current['directory'] and path == current['directory']:
+                    return {'entries': [], 'truncated': False, 'exists': False}
             return {"state": "missing", "message": "File or directory no longer exists"}
         except FileExistsError:
             return {"state": "conflict", "message": "Destination exists"}
@@ -529,16 +540,28 @@ async def upload_sandbox_file(sandbox_id: str, path: str, request: Request,
     if not parts(path):
         raise SandboxValidationError("Choose a file or folder within the workspace")
     services._require_card_type(sandbox_id, "sandbox")
+    from backend.workspace_context import assert_workspace_write
+    from backend.card_state import active_state_session
+    if services.run_manager.current_context is not None or active_state_session.get() is not None:
+        from backend.sandbox.task_workspace import binding, ensure_directory
+        async with services._node_mutation():
+            previous = binding(services, sandbox_id)['directory']
+            assigned = (await ensure_directory(services, sandbox_id))['directory']
+            if previous and assigned != previous and (path == previous or path.startswith(previous + '/')):
+                path = assigned + path[len(previous):]
+    assert_workspace_write(services, sandbox_id, path)
     if directory:
         async for chunk in request.stream():
             if chunk:
                 raise HTTPException(413, detail='Folders must have an empty body')
         async with services._node_mutation():
             services._require_card_type(sandbox_id, 'sandbox')
-            return await services._require_sandbox_backend().file_operation(sandbox_id, 'mkdir', path=path)
+            result = await services._require_sandbox_backend().file_operation(sandbox_id, 'mkdir', path=path)
+            return {**result, 'path': path}
     async with services.resources.artifacts.workspace(services, sandbox_id, None, allow_running=True):
         def authorize():
             services._require_card_type(sandbox_id, 'sandbox')
+            assert_workspace_write(services, sandbox_id, path)
         transfer = SandboxFileTransfer(services, sandbox_id, authorize)
         async def chunks():
             size = 0
@@ -565,6 +588,12 @@ async def delete_sandbox_file(sandbox_id: str, path: str, services=Depends(get_s
     async with services._node_mutation():
         services._require_card_type(sandbox_id, 'sandbox')
         services.resources.artifacts.assert_source_idle(sandbox_id)
+        from backend.workspace_context import assert_workspace_write
+        from backend.card_state import active_state_session
+        if active_state_session.get() is not None:
+            from backend.sandbox.task_workspace import ensure_directory
+            await ensure_directory(services, sandbox_id)
+        assert_workspace_write(services, sandbox_id, path)
         return await services._require_sandbox_backend().file_operation(sandbox_id, 'delete', path=path)
 
 
@@ -573,6 +602,12 @@ async def move_sandbox_file(sandbox_id: str, request: SandboxFileMove, services=
     async with services._node_mutation():
         services._require_card_type(sandbox_id, 'sandbox')
         services.resources.artifacts.assert_source_idle(sandbox_id)
+        from backend.workspace_context import assert_workspace_write
+        from backend.card_state import active_state_session
+        if active_state_session.get() is not None:
+            from backend.sandbox.task_workspace import ensure_directory
+            await ensure_directory(services, sandbox_id)
+        assert_workspace_write(services, sandbox_id, request.path, request.destination)
         return await services._require_sandbox_backend().file_operation(sandbox_id, 'move', path=request.path, destination=request.destination)
 
 

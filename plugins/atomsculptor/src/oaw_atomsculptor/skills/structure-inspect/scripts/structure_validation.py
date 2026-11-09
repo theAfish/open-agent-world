@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from typing import Literal, get_args
 
 VALIDATOR_VERSION = "2"
+DistanceMode = Literal["auto", "finite", "periodic"]
 
 
 def _neighbors(positions, cell, pbc, cutoff, periodic):
@@ -78,7 +80,7 @@ def measure_structure(symbols, positions, cell, pbc, *, expected_count=None,
                       expected_symbol=None, min_vacuum=None, min_distance=0.1,
                       nonperiodic=False, nearest_neighbor_min=None, nearest_neighbor_max=None,
                       connectivity_cutoff=None, require_connected=False, region_checks=None,
-                      distance_mode="auto"):
+                      distance_mode: DistanceMode = "auto"):
     errors = []
     if (not positions or len(positions) != len(symbols) or
         any(len(row) != 3 or not all(math.isfinite(x) for x in row) for row in positions)):
@@ -95,8 +97,8 @@ def measure_structure(symbols, positions, cell, pbc, *, expected_count=None,
         errors.append(f"Expected only {expected_symbol}")
     if len(pbc) != 3:
         return {"passed": False, "error": "Three PBC flags are required"}
-    if distance_mode not in {"auto", "finite", "periodic"}:
-        return {"passed": False, "error": "distance_mode must be auto, finite or periodic"}
+    if distance_mode not in get_args(DistanceMode):
+        return {"passed": False, "error": "distance_mode must be one of: " + ", ".join(get_args(DistanceMode))}
     periodic = any(pbc) if distance_mode == "auto" else distance_mode == "periodic"
     if (periodic and not any(pbc)) or (not periodic and any(pbc)):
         return {"passed": False, "validation_status": "unsupported",

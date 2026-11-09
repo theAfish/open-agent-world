@@ -54,7 +54,7 @@ def artifact(**extra):
 
 
 @pytest.mark.parametrize("changed", [
-    {"path": "../outside.xyz"}, {"path": ""}, {"components": {"empty": 0}},
+    {"path": "../outside.xyz"}, {"path": ""}, {"components": {"invalid": -1}},
     {"frame": {"origin": [8., 8., 8.], "axes": [[0,0,0]]*3}}, {"units": ""},
 ])
 def test_artifact_contract_rejects_ambiguous_frame_or_identity(changed):
@@ -88,14 +88,15 @@ def assess(e):
 
 
 @pytest.mark.asyncio
-async def test_prefix_metrics_drive_stagnation_across_new_script_names():
+async def test_prefix_metrics_report_stagnation_without_forcing_review():
     e, _ = await build_context()
     for i in range(2):
         await execute(e, f"trial{i}.py", "OAW_MEASUREMENTS " + record(objective=METRIC))
         result = assess(e)
-        assert result["observation"]["outcome"] == ("needs_plan_review" if i else "continue")
+        assert result["observation"]["outcome"] == "continue"
     assert "without improvement" in e.workflow.host_signal["reason"]
-    assert e.workflow.before_tool("structure_builder", "run_modelling_step", {}, e)["error"]["code"] == "plan_review_required"
+    assert e.workflow.host_signal["advisory"] is True
+    assert e.workflow.before_tool("structure_builder", "run_modelling_step", {}, e) is None
 
 
 @pytest.mark.asyncio
@@ -114,7 +115,7 @@ async def test_better_objective_with_failed_constraint_is_not_progress_or_accept
 async def test_zero_coverage_overrules_a_false_pass_boolean_without_rejecting_real_zero_defects():
     e, _ = await build_context()
     values={"kind":"candidate", "measurement_revision":"stable-region", "objective":{**METRIC,"value":0},
-            "constraints":[{"name":"local_check", "passed":True}], "coverage":{"measured_region":0}}
+            "constraints":[{"name":"local_check", "passed":True, "regions":["measured_region"]}], "coverage":{"measured_region":0}}
     await execute(e,"empty.py",record(**values))
     assert assess(e)["observation"]["candidate_eligible"] is False and not e.workflow._progress
     assert e.workflow.advance(e,"build","box","empty.py")["error"]["code"]=="candidate_constraints"
@@ -125,12 +126,64 @@ async def test_zero_coverage_overrules_a_false_pass_boolean_without_rejecting_re
 
 
 @pytest.mark.asyncio
-async def test_repeated_constraint_failures_request_review_instead_of_running_another_blind_trial():
+async def test_unused_zero_counts_remain_truthful_without_overriding_checked_populations():
+    from oaw_atomsculptor.measurements import constraint_failures
+    e, _ = await build_context()
+    values = {"kind": "candidate", "measurement_revision": "zero-optional-group",
+              "constraints": [{"name": "actual_check", "passed": True, "regions": ["tested"]}],
+              "coverage": {"tested": 20, "optional": 0},
+              "artifacts": [artifact(components={"present": 20, "optional": 0})]}
+    await execute(e, 'candidate.py', record(**values))
+    assert assess(e)['observation']['candidate_eligible']
+    parsed = e.measurement_reports[e.latest_experiment().execution_sequence]
+    assert parsed['coverage']['optional'] == parsed['artifacts'][0]['components']['optional'] == 0
+    assert not constraint_failures(parsed)
+    parsed['constraints'][0]['passed'] = False
+    assert constraint_failures(parsed)[0]['name'] == 'actual_check'
+    parsed['constraints'][0]['passed'] = True
+    parsed['constraints'][0]['regions'].append('optional')
+    assert constraint_failures(parsed)[0]['name'] == 'coverage:optional'
+
+
+@pytest.mark.asyncio
+async def test_native_skill_output_is_a_scoped_input_and_still_requires_file_inspection(tmp_path):
+    from test_candidate_first_workflow import start_direct
+    e = await start_direct()
+    args = {'sandbox': 'box', 'skill': 'authorized-skill', 'script': 'scripts/build.py', 'argv': ['build']}
+    await tool(e, 'run_skill_script', args, {'status': 'running', 'operation_id': 'producer'})
+    assert not e.artifact_handoffs
+    await tool(e, 'wait_sandbox_operation', {'sandbox': 'box', 'operation_id': 'producer'},
+        {'exit_code': 0, 'command_id': 'producer', 'stdout': json.dumps({'output_file': 'input.json',
+            'output_files': ['../outside.json', '/host/file', 'missing.json']})})
+    receipt = e.artifact_handoffs[('box', 'input.json')]
+    assert receipt['command_id'] == 'producer' and receipt['candidate_eligible'] is False
+    assert 'units' not in receipt and 'frame' not in receipt and 'execution_sequence' not in receipt
+    assert not e.outputs and len(e.artifact_handoffs) == 2
+    assert e.workflow.validate_dependencies({'input_paths': ['input.json']}, e, 'box') is None
+    assert e.workflow.validate_dependencies({'input_paths': ['input.json']}, e, 'other')['error']['code'] == 'subtask_inputs'
+    (tmp_path / 'input.json').write_text('{"positions": [[1, 2, 3]]}')
+    checked = subprocess.run([sys.executable, '-c', INPUT_GUARD, json.dumps([receipt])], cwd=tmp_path,
+                             capture_output=True, text=True, timeout=10)
+    assert checked.returncode == 0 and json.loads(checked.stdout)['oaw_input_metadata'][0]['format'] == 'json'
+    missing = e.artifact_handoffs[('box', 'missing.json')]
+    checked = subprocess.run([sys.executable, '-c', INPUT_GUARD, json.dumps([missing])], cwd=tmp_path,
+                             capture_output=True, text=True, timeout=10)
+    assert checked.returncode != 0 and 'input missing' in checked.stdout
+    e.outputs[('box', 'input.json')] = {'phase': 'validated'}
+    await tool(e, 'run_skill_script', args, {'exit_code': 0, 'command_id': 'producer2',
+               'stdout': '{"output_file": "input.json"}'})
+    assert e.artifact_handoffs[('box', 'input.json')]['command_id'] == 'producer2'
+    assert not e.outputs
+
+
+@pytest.mark.asyncio
+async def test_repeated_constraint_failures_remain_visible_without_forcing_review():
     e, _ = await build_context()
     for i in range(2):
         await execute(e, f"invalid{i}.py", record(objective={**METRIC,"value":0}, constraints=[{"name":"validity", "passed":False}]))
         result = assess(e)
-    assert result["observation"]["outcome"] == "needs_plan_review"
+    assert result["observation"]["outcome"] == "continue"
+    assert result["observation"]["host_advisory"]["advisory"] is True
     assert not e.workflow._progress
 
 
@@ -142,17 +195,19 @@ async def test_diagnostics_do_not_erase_an_invalid_candidate_before_next_trial()
                          ("bad2.py",{"objective":METRIC,"constraints":[{"name":"invariant","passed":False}]})]:
         await execute(e,path,record(**values))
         result=assess(e)
-    assert result["observation"]["outcome"]=="needs_plan_review"
+    assert result["observation"]["outcome"] == "continue"
+    assert result["observation"]["host_advisory"]["advisory"] is True
     assert "same unresolved constraint_repair" in e.workflow.host_signal["reason"]
 
 
 @pytest.mark.asyncio
-async def test_declared_diagnostic_quota_routes_to_planner_and_resets_after_accepted_revision():
+async def test_diagnostic_advisory_and_explicit_review_reset_after_accepted_revision():
     e, plan = await build_context(diagnostic_limit=2)
     for i in range(2):
         await execute(e, f"diagnostic{i}.py", record(kind="diagnostic", constraints=[{"name":"input_shape", "passed":True}]))
         result = assess(e)
-    assert result["observation"]["outcome"] == "needs_plan_review"
+    assert result["observation"]["outcome"] == "continue"
+    assert result["observation"]["host_advisory"]["advisory"] is True
     assert await tool(e, "finish_task", {"result":{"status":"needs_plan_review", "reason":"Missing comparable candidate after diagnostics",
         "sandbox":"box", "script_path":"diagnostic1.py"}}, "Task completed.") == "Task completed."
     assert e.workflow.review_request and e.working_decision()["rejected_methods"]
@@ -162,19 +217,21 @@ async def test_declared_diagnostic_quota_routes_to_planner_and_resets_after_acce
 
 
 @pytest.mark.asyncio
-async def test_executed_structured_contradiction_forces_review_even_when_model_says_continue():
+async def test_structured_contradiction_blocks_completion_but_preserves_model_continue():
     e, _ = await build_context()
     await execute(e, "diagnose.py", record(kind="diagnostic", assumption_invalid=True, contradiction="The proposed method violates a measured invariant"))
-    assert assess(e)["observation"]["outcome"] == "needs_plan_review"
+    assert assess(e)["observation"]["outcome"] == "continue"
     assert "measured invariant" in e.workflow.host_signal["reason"]
-    assert e.workflow.advance(e,"build","box","diagnose.py")["error"]["code"]=="plan_review_required"
+    assert e.workflow.advance(e,"build","box","diagnose.py")["error"]["code"] == "candidate_contradiction"
 
 
 @pytest.mark.asyncio
-async def test_a_primitive_input_contradiction_also_routes_to_planner():
+async def test_input_contradiction_is_advisory_and_cannot_complete_checkpoint():
     e, _, run = await setup(stdout=record(assumption_invalid=True, contradiction="Executed input disproves the initial assumption"))
     await run()
-    assert e.workflow.current == "probe" and assess(e)["observation"]["outcome"] == "needs_plan_review"
+    assert e.workflow.current == "probe" and assess(e)["observation"]["outcome"] == "continue"
+    assert e.workflow.host_signal["advisory"] is True
+    assert e.workflow.advance(e, "probe", "box", "step.py")["error"]["code"] == "candidate_contradiction"
 
 
 @pytest.mark.asyncio

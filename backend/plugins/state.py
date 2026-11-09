@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, model_serializer
 
-StateScope = Literal["shared", "session"]
+StateScope = Literal["shared", "session", "group"]
 
 
 class StatelessStateSpec(BaseModel):
@@ -19,6 +19,15 @@ class ScopedStateSpec(BaseModel):
     supported_scopes: tuple[StateScope, ...] = Field(default=("shared",), alias="supportedScopes", min_length=1)
     default_scope: StateScope = Field(default="shared", alias="defaultScope")
     user_configurable: bool = Field(default=False, alias="userConfigurable")
+    follow_workspace: bool = Field(default=False, alias='followWorkspace')
+
+    @model_serializer(mode='wrap')
+    def serialize(self, handler):
+        value = handler(self)
+        if not self.follow_workspace:
+            value.pop('followWorkspace', None)
+            value.pop('follow_workspace', None)
+        return value
 
     @model_validator(mode="after")
     def validate_scopes(self) -> Self:
@@ -26,6 +35,8 @@ class ScopedStateSpec(BaseModel):
             raise ValueError("supportedScopes must be unique")
         if self.default_scope not in self.supported_scopes:
             raise ValueError("defaultScope must belong to supportedScopes")
+        if self.follow_workspace and not {'shared', 'session', 'group'}.issubset(self.supported_scopes):
+            raise ValueError('followWorkspace requires shared, session and group in supportedScopes')
         return self
 
 

@@ -68,6 +68,39 @@ describe("ConversationWorkspace snapshots", () => {
 
   afterEach(() => cleanup());
 
+  it('keeps explicit continuation identity out of editable recovery prose and clears it after send', async () => {
+    const agent = { id: 'atlas', name: 'Atlas', status: 'idle', model: 'fixture', connected: true };
+    vi.mocked(worldApi.getConversation).mockResolvedValue({ conversation_id: card.id,
+      sessions: [{ ...session, participant_ids: [agent.id] }], agents: [agent] });
+    vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({ items: [{ ...historicalMessage,
+      id: 'failed-message', sender_kind: 'system', content: 'Interrupted', run_id: 'failed-run' }],
+      has_before: false, has_after: false, run_summaries: { 'failed-run': {
+        run_id: 'failed-run', agent_id: agent.id, status: 'failed', tool_count: 1, tool_trace: [], recovery_kind: 'model_stream_interrupted',
+        recovery_classification: 'read_only', confirmed_tool_count: 1,
+        recovery_receipts: [{ capability_kind: 'skills.read', target_id: 'skill', state: 'finished', read_only: true }],
+      } } });
+    const post = vi.spyOn(worldApi, 'postConversationMessage').mockResolvedValue({
+      message: { ...historicalMessage, id: 'continued' }, accepted_agent_ids: [agent.id],
+    });
+    render(<ConversationWorkspace card={card} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Review safe continuation' }));
+    const composer = screen.getByLabelText('Conversation message') as HTMLTextAreaElement;
+    expect(composer.value).toContain('"target_id": "skill"');
+    expect(composer.value).toContain('"capability_kind": "skills.read"');
+    expect(composer.value).not.toContain('failed-run');
+    expect(screen.getByText('Continuing the original task')).toBeTruthy();
+    fireEvent.change(composer, { target: { value: 'Continue, keeping the requested dimensions.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(card.id, session.id, expect.objectContaining({
+      continuation_run_id: 'failed-run', mention_agent_ids: ['atlas'], content: 'Continue, keeping the requested dimensions.',
+    })));
+    expect(screen.queryByText('Continuing the original task')).toBeNull();
+    fireEvent.change(composer, { target: { value: 'A new independent task' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[1][2].continuation_run_id).toBeUndefined();
+  });
+
   it('renders system notices as a distinct label above the body without an agent avatar', async () => {
     vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({ items: [{ ...historicalMessage,
       sender_kind: 'system', sender_name: 'System', kind: 'run_outcome', content: 'Monitoring md-run\nExternal ID: remote-123' }],

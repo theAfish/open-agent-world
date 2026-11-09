@@ -72,6 +72,7 @@ class ConversationMessage(BaseModel):
     kind: str = "text"
     is_final: bool = True
     run_id: str | None = None
+    continuation_run_id: str | None = None
     created_at: datetime
 
 
@@ -79,6 +80,7 @@ class ConversationPost(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message_id: UUID | None = None
+    continuation_run_id: UUID | None = None
 
     content: Annotated[str, Field(max_length=100_000)] = ""
     attachments: list[ConversationAttachmentRef] = Field(default_factory=list, max_length=20)

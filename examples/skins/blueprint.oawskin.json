@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "acme.blueprint",
+  "name": "Blueprint",
+  "palettes": [
+    {
+      "id": "drafting",
+      "name": "Drafting",
+      "light": {
+        "--canvas": "#e2edf3",
+        "--canvas-deep": "#c9dbe7",
+        "--accent": "#1766a3",
+        "--accent-strong": "#124f80",
+        "--accent-soft": "#1766a320",
+        "--grid-dot": "#325a7a30"
+      },
+      "dark": {
+        "--canvas": "#152331",
+        "--canvas-deep": "#101b26",
+        "--accent": "#80bfff",
+        "--accent-strong": "#add6ff",
+        "--accent-soft": "#80bfff24",
+        "--grid-dot": "#a5c7e030"
+      }
+    }
+  ],
+  "backgrounds": [
+    { "id": "squared", "name": "Squared paper", "kind": "grid", "spacing": 32 }
+  ]
+}

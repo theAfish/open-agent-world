@@ -20,6 +20,7 @@ import { currentHostedSession, isHosted } from '../auth/hostedSession';
 import { ManagedModels } from '../auth/ManagedModels';
 import { sandboxSettingsSource, type SandboxSettingsSnapshot } from './sandboxSettingsSource';
 import { AppearanceSettings } from './AppearanceSettings';
+import { StorageUsage } from './StorageUsage';
 
 type SettingsSection = "model" | "sandbox" | "storage" | "deepl" | "appearance";
 
@@ -214,6 +215,7 @@ export function SettingsPanel({ initialSection = "model" }: { initialSection?: S
             }}>{t("Cancel scheduled move")}</button>}
             {storage.last_error && <p role="alert" className="settings-error">{t("Migration did not complete. The original location remains active.")} {storage.last_error}</p>}
             {storage.previous_path && <label className="field-label"><span>{t("Retained backup (before the move)")}</span><input readOnly value={storage.previous_path} /></label>}
+            <StorageUsage />
           </>}
           {error && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setError(""); setStorageRetry(value => value + 1); }}>{t("Reload storage settings")}</button>}
         </div> : <div className="settings-form" onChangeCapture={() => setSandboxSaved(false)}>
@@ -251,6 +253,8 @@ export function SettingsPanel({ initialSection = "model" }: { initialSection?: S
             {sandboxSnapshot?.deliveryEnabled === false && <p role="status">{locale === 'zh-CN'
               ? '配置可以保存，但部署端尚未启用公共环境下发。'
               : 'Settings can be saved, but shared environment delivery has not been enabled by the deployment operator.'}</p>}
+            {Object.entries(sandbox.binding_errors ?? {}).map(([name, message]) =>
+              <p role="alert" className="settings-error" key={name}><code>{name}</code>: {t(message)}</p>)}
             <EnvironmentVariablesEditor rows={environmentRows} onChange={rows => { setEnvironmentRows(rows); setSandboxSaved(false); }} disabled={!loaded || busy} allowPaths={!sharedEnvironment}
               existingVariables={Object.fromEntries(Object.keys(sandbox.environment_variables ?? {}).map(name => [name.toUpperCase(), "global"]))}
               secrets={environmentSecrets} bindings={sandbox.secret_bindings ?? {}} onSecretsChange={setEnvironmentSecrets} />

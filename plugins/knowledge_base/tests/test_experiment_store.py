@@ -208,3 +208,32 @@ def test_a_database_from_the_merge_era_is_migrated_once(engine):
     # Opening the store again is harmless.
     ExperimentRecordStore(engine)
     assert store.require("r1")["status"] == "published"
+
+
+def test_source_links_carry_the_content_hash_and_are_found_by_source(store):
+    first = store.create(group_id="g1", schema_id="sch1", name="A", data={})
+    second = store.create(group_id="g1", schema_id="sch1", name="B", data={})
+    store.set_sources(first["id"], [{"source_id": "s1", "artifact_id": "a1", "sha256": "f" * 64}])
+    store.set_sources(second["id"], [{"source_id": "s1"}, {"source_id": "s2", "sha256": "e" * 64}])
+
+    assert store.sources_for(first["id"])[0]["sha256"] == "f" * 64
+    assert store.sources_for(second["id"])[0]["sha256"] is None
+    by_record = {link["record_id"] for link in store.links_for_sources(["s1"])}
+    assert by_record == {first["id"], second["id"]}
+    assert [link["record_id"] for link in store.links_for_sources(["s2"])] == [second["id"]]
+    assert store.links_for_sources([]) == []
+
+
+def test_a_source_link_table_without_the_hash_column_gains_it(engine):
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE oaw_kb_experiment_record_source (record_id VARCHAR(36) NOT NULL, "
+            "source_id VARCHAR(36) NOT NULL, artifact_id VARCHAR(36), PRIMARY KEY (record_id, source_id))"))
+        connection.execute(text(
+            "INSERT INTO oaw_kb_experiment_record_source VALUES ('r1', 's1', 'a1')"))
+
+    store = ExperimentRecordStore(engine)
+    assert store.sources_for("r1") == [{"record_id": "r1", "source_id": "s1", "artifact_id": "a1", "sha256": None}]
+    ExperimentRecordStore(engine)  # idempotent
+    store.set_sources("r1", [{"source_id": "s1", "artifact_id": "a1", "sha256": "0" * 64}])
+    assert store.sources_for("r1")[0]["sha256"] == "0" * 64

@@ -83,6 +83,18 @@ internal components. UI extensions are trusted application code, not a security
 sandbox; error boundaries isolate rendering and module-load errors, not arbitrary
 asynchronous side effects.
 
+`updateConfig(patch, nodeId?)` defaults to the current card; an explicit node ID
+requires Plugin API 1.50 and uses the same host edit action and backend authorization.
+Declare that minimum in the descriptor and manifest when targeting another card:
+older hosts can ignore the second argument and update the current card instead.
+`getAgentInfo(nodeId?)` also exposes the Agent's existing optional `status` field.
+Domain workflows should
+live in their Pack and use these generic document, configuration, and navigation
+capabilities. Packs can export named `services` beside `views`, consumed through
+`loadPackFrontendService(owner, name)` after the host checks that the owner is
+loaded. XRD's input interpretation and new-workflow import use this boundary;
+the existing XRD host callbacks remain available to installed views.
+
 Vite discovers immediate `plugins/*/frontend` projects at startup/build time.
 Each project owns `package.json`, a lockfile and a build script using the public
 SDK. Development and production both load that independent build artifact;
@@ -92,6 +104,73 @@ without rebuilding the host. React and the public SDK always use host instances.
 
 See [Codex](../../packs/codex/frontend/index.tsx) for a working SDK-based settings
 view and its package-owned icon.
+
+### Skin mods
+
+The skin-mod SDK requires Plugin API 1.49. Packs using these exports declare
+`plugin_api_version="1.49"` in their descriptor and
+`plugin_api = "1.49"` in their manifest's `[compatibility]` section. JSON imports
+through Settings do not require a Pack or a compatibility declaration.
+
+**Settings → Appearance** offers independent color palette, light/dark mode and
+canvas background choices. **Import skin mod** installs a JSON file in the active
+application profile; **Export skin mod** saves the selected palette and background
+as a new portable mod. Users can edit and share these files without building a
+Pack. Importing selects the first supplied palette and background. Start with
+[Blueprint](../../examples/skins/blueprint.oawskin.json).
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "acme.blueprint",
+  "name": "Blueprint",
+  "palettes": [{
+    "id": "drafting",
+    "name": "Drafting",
+    "light": { "--accent": "#1766a3", "--accent-strong": "#124f80" },
+    "dark": { "--accent": "#80bfff", "--accent-strong": "#add6ff" }
+  }],
+  "backgrounds": [{ "id": "squared", "name": "Squared paper", "kind": "grid", "spacing": 32 }]
+}
+```
+
+Palette IDs and background IDs are local to the mod; saved selections use
+`acme.blueprint/drafting` and `acme.blueprint/squared`. The `oaw` namespace is
+reserved for builtins. Colors override the host's existing theme tokens, with
+separate `light` and `dark` maps; omitted tokens retain the host defaults. Use
+`--accent`, `--accent-strong` and `--on-accent` together when changing button
+contrast. Background kinds are `terrain`, `solid`, `dots`, `grid` and `gradient`;
+`spacing` controls dots/grid and `angle` controls gradients. The exported
+`SkinMod` type describes the contract, `COLOR_TOKENS` lists allowed tokens, and
+`parseSkinMod` validates unknown data. IDs use lowercase letters, numbers, dots,
+underscores or hyphens (1–64 characters, starting with a letter); names contain
+1–80 characters. Both collections are required, with at least one entry overall.
+Each file is limited to 64 KiB and 16 entries per collection; a profile supports
+12 imported mods. Dots/grid spacing ranges from 8 to 128, gradient angles from
+0 to 360 degrees.
+
+Color values accept hexadecimal RGB/RGBA only (`#rgb`, `#rgba`, `#rrggbb`,
+`#rrggbbaa`). The schema admits known color tokens and bounded parameters; it
+does not load CSS, image URLs or scripts. Invalid files and duplicate mod IDs are
+rejected atomically. Removing a selected mod falls back to Paper/Terrain while
+preserving its selection IDs, so registering it again restores the selection.
+
+Trusted frontend code can register the same data for its own lifetime:
+
+```ts
+import { parseSkinMod, registerSkinMod } from '@oaw/plugin-api';
+
+const mod = parseSkinMod(JSON.parse(jsonText));
+const unregister = registerSkinMod(mod);
+// When the owner is disposed:
+unregister();
+```
+
+Registration updates the Appearance choices immediately and returns an idempotent
+cleanup function. Runtime registrations are transient; JSON imports are persisted.
+This API does not load Pack modules or introduce an automatic Pack activation
+lifecycle. A view-scoped registration exists only while that view owns it; use
+the JSON import flow for a skin that should remain available across reloads.
 
 ### Human credential configuration
 

@@ -85,7 +85,7 @@ async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any
             invocation_env=request.get("invocation_env"), execution_policy=request.get("execution_policy"),
             folder_mounts=_folder_mounts(request),
             runtime_mount=RuntimeMount.from_wire(request["runtime_mount"]) if request.get("runtime_mount") is not None else None,
-            _unit_name=request["unit"]))
+            _unit_name=request["unit"], working_directory=request.get("working_directory", ""), workspace_write_directory=request.get("workspace_write_directory")))
         disconnected = asyncio.Event()
         if stdin_pending:
             disconnected.set()

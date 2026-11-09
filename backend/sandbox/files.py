@@ -11,7 +11,7 @@ import asyncio
 import os
 import stat
 from contextlib import contextmanager, ExitStack
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .models import SandboxValidationError, SandboxSecurityError
 
@@ -45,6 +45,17 @@ def parts(relative):
     if any(p in ("", ".", "..") or p.endswith((".", " ")) for p in result):
         raise SandboxValidationError("Path traversal and ambiguous names are forbidden")
     return result
+
+
+def working_path(root, directory):
+    """Validate a command cwd through the same native file boundary as transfers."""
+    target = Path(root).joinpath(*parts(directory))
+    with pinned(target, directory=True, runtime_pinned_root=Path(root)):
+        return target
+
+
+def command_path(directory):
+    return str(PurePosixPath("/workspace").joinpath(*parts(directory)))
 
 
 @contextmanager

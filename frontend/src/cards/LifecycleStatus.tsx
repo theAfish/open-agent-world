@@ -1,5 +1,5 @@
 import { t, useLocale } from "../i18n";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
@@ -21,30 +21,53 @@ interface Snapshot {
 
 export function LifecycleStatus({ agentId }: { agentId?: string }) {
   useLocale();
-  const socket = useWorldStore(s => s.socketState);
-  const event = useWorldStore(s => s.events.find(e => e.type.startsWith("run_") || e.type.startsWith("tool_") || e.type === "artifact_updated")?.id);
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState("");
-  const [refresh, setRefresh] = useState(0);
+  const refresh = useRef(() => {});
   useEffect(() => {
     let live = true;
-    void worldApi.lifecycle<Snapshot>().then(value => { if (live) { setSnapshot(value); setError(""); } }).catch(e => { if (live) setError(apiErrorMessage(e)); });
-    return () => { live = false; };
-  }, [agentId, socket, event, refresh]);
-  const active = snapshot?.runs.some(r => ["created", "running", "waiting"].includes(r.status) || r.lifecycle.cleanup === "pending") || !!snapshot?.commands.length;
-  useEffect(() => {
-    if (!active) return;
-    const timer = window.setInterval(() => setRefresh(n => n + 1), 2000);
-    return () => window.clearInterval(timer);
-  }, [active]);
+    let inFlight = false;
+    let pending = false;
+    let active = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function read() {
+      clearTimeout(timer);
+      if (!live || document.hidden) return;
+      if (inFlight) { pending = true; return; }
+      inFlight = true;
+      try {
+        const value = await worldApi.lifecycle<Snapshot>(false, agentId);
+        if (live) {
+          setSnapshot(value); setError("");
+          active = value.runs.some(r => ["created", "running", "waiting"].includes(r.status)
+            || r.lifecycle.holds_capacity || r.lifecycle.execution === "running" || r.lifecycle.cleanup === "pending") || !!value.commands.length;
+        }
+      } catch (e) { if (live) setError(apiErrorMessage(e)); }
+      finally {
+        inFlight = false;
+        if (live && pending) { pending = false; void read(); }
+        else if (live && active && !document.hidden) timer = setTimeout(() => void read(), 2000);
+      }
+    }
+    refresh.current = () => void read();
+    const eventId = (state: ReturnType<typeof useWorldStore.getState>) => state.events.find(e =>
+      e.type.startsWith("run_") || e.type.startsWith("tool_") || e.type === "artifact_updated")?.id;
+    const unsubscribe = useWorldStore.subscribe((next, previous) => {
+      if (next.socketState !== previous.socketState || eventId(next) !== eventId(previous)) void read();
+    });
+    const visibility = () => { if (document.hidden) clearTimeout(timer); else void read(); };
+    document.addEventListener("visibilitychange", visibility);
+    void read();
+    return () => { live = false; clearTimeout(timer); unsubscribe(); document.removeEventListener("visibilitychange", visibility); };
+  }, [agentId]);
   async function action(operation: () => Promise<unknown>) {
-    try { await operation(); setRefresh(n => n + 1); }
-    catch (e) { setError(apiErrorMessage(e)); setRefresh(n => n + 1); }
+    try { await operation(); refresh.current(); }
+    catch (e) { setError(apiErrorMessage(e)); refresh.current(); }
   }
   return <section className="lifecycle-status">
-    <header><strong>{t("Execution and cleanup")}</strong><button className="secondary-button" onClick={() => setRefresh(n => n + 1)}>{t("Refresh state")}</button></header>
+    <header><strong>{t("Execution and cleanup")}</strong><button className="secondary-button" onClick={() => refresh.current()}>{t("Refresh state")}</button></header>
     {error && <p role="alert">{error}</p>}
-    {snapshot?.runs.filter(r => !agentId || r.agent_id === agentId).slice(-30).reverse().map(run => <article key={run.run_id}>
+    {snapshot?.runs.filter(r => !agentId || r.agent_id === agentId).map(run => <article key={run.run_id}>
       <strong>{t(runStatusLabel(run.status))} {t("· Run")} {run.run_id.slice(0, 8)}</strong>
       <p>{t("Owner")} {run.lifecycle.owner_id ?? run.agent_id} · {run.lifecycle.holds_capacity ? t("holds Agent capacity") : t("capacity released")}</p>
       {run.lifecycle.awaiting && <p>{t("Awaiting")} {run.lifecycle.awaiting}</p>}
@@ -64,4 +87,11 @@ export function LifecycleStatus({ agentId }: { agentId?: string }) {
         <button className="secondary-button" onClick={() => void action(() => worldApi.lifecycle(true))}>{t("Retry resource cleanup")}</button>}
     </>}
   </section>;
+}
+
+export function LifecycleDisclosure({ agentId }: { agentId: string }) {
+  const [open, setOpen] = useState(false);
+  return <details className="agent-lifecycle-disclosure" open={open} onToggle={event => {
+    if (event.target === event.currentTarget) setOpen(event.currentTarget.open);
+  }}><summary>{t("Execution and cleanup")}</summary>{open && <LifecycleStatus agentId={agentId} />}</details>;
 }

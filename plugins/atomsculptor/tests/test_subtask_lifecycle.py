@@ -8,11 +8,14 @@ import pytest
 from google.genai import types
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_response import LlmResponse
+from google.adk.models.lite_llm import _get_completion_inputs
+from jsonschema import Draft202012Validator
 from backend.agents.models import ScopedToolDefinition
 from open_agent_world.plugin_api import AgentConfig, RuntimeModelConnection
 from oaw_atomsculptor.runtime import AtomSculptorRuntime
 from test_execution_steps import setup, prior
 from test_workflow import PLAN, REQUEST, tool
+from test_execution_actions import prepare, request
 
 ACTION = {"scope": "input_measurement", "artifact": "next.py", "question": "What is the remaining input count?",
           "method": "Read the retained inputs and print the count", "expected_output": "One measured count",
@@ -62,6 +65,29 @@ async def test_local_checkpoint_only_commits_after_sdk_success_and_never_advance
     assert e.workflow.pending_experiment['artifact'] == 'next.py'
     again = await tool(e, 'finish_task', deepcopy(args), 'Task completed.')
     assert again['error']['code'] == 'subtask_duplicate' and len(e.workflow.subtask_history) == 1
+
+
+@pytest.mark.asyncio
+async def test_local_finish_wire_schema_and_native_receipt_agree_on_result_fields():
+    e, _, run = await setup(stdout=MEASURED)
+    await run()
+    assert e.workflow.assess_previous(e, prior(e))["ok"]
+    req = request({"finish_task"})
+    prepare(e, req)
+    _, wire_tools, _, _, _ = await _get_completion_inputs(req, req.model)
+    schema = next(t["function"]["parameters"] for t in wire_tools if t["function"]["name"] == "finish_task")
+    validator = Draft202012Validator(schema)
+    result = {"status": "subtask_complete", "next_experiment": ACTION}
+    validator.validate({"result": result})
+    for field, value in {"reason": "finished", "sandbox": "box", "script_path": "step.py",
+                         "limitations": [], "files": [], "measurements": {}, "document": None}.items():
+        assert not validator.is_valid({"result": {**result, field: value}}), field
+        assert e.workflow.prepare_subtask_finish({**result, field: value}, e)["error"]["code"] == "subtask_fields"
+    assert not validator.is_valid({"result": {"status": "subtask_complete"}})
+    assert not validator.is_valid({"result": {"status": "needs_plan_review"}})
+    validator.validate({"result": {"status": "blocked", "limitations": ["Remaining work"]}})
+    assert await tool(e, "finish_task", {"result": result}, "Task completed.") == "Task completed."
+    assert e.workflow.subtask_history[-1]["measurements"]["values"]["count"] == 4
 
 
 @pytest.mark.asyncio

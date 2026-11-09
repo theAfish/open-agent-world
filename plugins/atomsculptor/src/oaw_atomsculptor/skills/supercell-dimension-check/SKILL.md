@@ -1,5 +1,5 @@
 ---
-name: supercell-dimension-check
+name: supercell_dimension_check
 description: Size periodic supercells for defects, adsorbates and molecular guests before building them.
 when_to_use: Read before enlarging a periodic structure that must host a defect, molecule or adsorbate.
 ---
@@ -11,7 +11,7 @@ not bundled. For a connected Atom Structure and integer repetitions, prefer
 the deterministic `build_atom_supercell` capability after inspecting the
 document and passing its current `expected_revision`. For general matrix
 transformations of a Sandbox file, use the separately connected
-`supercell-builder` Skill through `run_skill_script` and an authorized Sandbox.
+`supercell_builder` Skill through `run_skill_script` and an authorized Sandbox.
 
 1. Inspect the starting structure's atom count, three cell vectors and PBC.
    Distinguish primitive and conventional settings; do not assume one from

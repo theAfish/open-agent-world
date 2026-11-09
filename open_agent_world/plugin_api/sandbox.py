@@ -5,6 +5,6 @@ invoke the live host capability provider for every filesystem or process action.
 """
 from backend.sandbox.commands import python_entrypoint
 from backend.sandbox.models import SandboxValidationError
-from backend.sandbox.text_edits import apply_text_edits
+from backend.sandbox.text_edits import TEXT_EDITS_SCHEMA, apply_text_edits
 
-__all__ = ["python_entrypoint", "SandboxValidationError", "apply_text_edits"]
+__all__ = ["python_entrypoint", "SandboxValidationError", "apply_text_edits", "TEXT_EDITS_SCHEMA"]

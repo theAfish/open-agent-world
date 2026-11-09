@@ -1,5 +1,5 @@
 ---
-name: mof-structure-creation
+name: mof_structure_creation
 description: Planning and validation guidance for metal-organic frameworks; no MOF builder is bundled.
 when_to_use: Use when the user requests a MOF or another metal-node and organic-linker framework.
 ---
@@ -23,7 +23,7 @@ of structural data or user-permitted code in an authorized Sandbox.
    openings and overlapping atoms with executed code. State clearly when the
    geometry has not been relaxed.
 4. Save a cell-aware file such as ExtXYZ or CIF in the Sandbox. To update the
-   connected Atom Structure, convert through `structure-inspect` and use the
+   connected Atom Structure, convert through `structure_inspect` and use the
    authorized file-backed import with a fresh inspected revision.
 
 Any reported surface area, pore size or space group must come from a

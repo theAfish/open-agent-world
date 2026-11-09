@@ -15,14 +15,19 @@ export interface FileEntry { name: string; path?: string; directory: boolean; bl
 export interface FileListing { entries?: FileEntry[]; truncated?: boolean; next_cursor?: string; state?: string; message?: string }
 export interface FileSelection { root: string; path: string; label: string; size?: number }
 export interface FileChange { path: string; destination?: string }
+export interface WorkspacePicker {
+  value: string; currentLabel: string; currentAvailable?: boolean; onChange: (value: string) => void;
+}
 const limits = { maxEntries: 1000, directories: true };
 
 /** File interactions are independent of the terminal and preview presentation. */
 export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, selection, error, workspacePath,
-  writable, sidebarRef, onExpand, onSelect, onDownload, onRefresh, onLoadMore, onChange, transfers }: {
+  writable, sidebarRef, onExpand, onSelect, onDownload, onRefresh, onLoadMore, onChange, transfers,
+  workspaceDirectory = '', workspaceLabel, workspacePicker }: {
   cardId: string; roots: FileRoot[]; tree: Record<string, FileListing>; expanded: Record<string, boolean>;
   loading: Record<string, boolean>; selection?: FileSelection; error: string; workspacePath: string;
   writable: boolean; sidebarRef: Ref<HTMLElement>;
+  workspaceDirectory?: string; workspaceLabel?: string; workspacePicker?: WorkspacePicker;
   onExpand: (root: string, path: string) => Promise<void>;
   onSelect: (root: string, path: string, label: string) => Promise<void>;
   onDownload: (file: FileSelection) => Promise<void>; onRefresh: () => Promise<void>;
@@ -71,7 +76,10 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
         return { name: entry.path, size: entry.file?.size ?? 0, direction: 'upload',
           run: async options => {
             const retry = attempt++ > 0;
-            await worldApi.uploadSandboxEntry(cardId, folder ? `${folder}/${entry.path}` : entry.path, entry.file, options);
+            const receipt = await worldApi.uploadSandboxEntry(cardId, folder ? `${folder}/${entry.path}` : entry.path, entry.file, options);
+            // The first write can claim a suffixed directory after a name
+            // collision. The native queue is serial; later entries follow it.
+            if (receipt.path?.endsWith(entry.path)) folder = receipt.path.slice(0, -entry.path.length).replace(/\/$/, '');
             if (retry && live.current) await onRefresh();
           },
         };
@@ -101,12 +109,12 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
       void mutate({ path: entry.path, destination }).catch(reason => { if (live.current) setFailure(apiErrorMessage(reason)); });
     },
   });
-  const pick = (files: FileList | null) => { if (files) void intake.pick(files, ''); };
+  const pick = (files: FileList | null) => { if (files) void intake.pick(files, workspaceDirectory); };
   async function searchFiles(cursor = '') {
     const request = ++searchRequest.current;
     setSearching(true);
     try {
-      const result = await worldApi.sandboxWorkspace<FileListing>(cardId, `files?${new URLSearchParams({ operation: 'list', root: 'workspace', query: query.trim(), cursor })}`);
+      const result = await worldApi.sandboxWorkspace<FileListing>(cardId, `files?${new URLSearchParams({ operation: 'list', root: 'workspace', path: workspaceDirectory, query: query.trim(), cursor })}`);
       if (live.current && request === searchRequest.current) setSearch(previous => ({ ...result, entries: cursor ? [...(previous?.entries ?? []), ...(result.entries ?? [])] : result.entries }));
     } catch (reason) { if (live.current && request === searchRequest.current) setSearch({ state: 'error', message: apiErrorMessage(reason) }); }
     finally { if (live.current && request === searchRequest.current) setSearching(false); }
@@ -116,7 +124,7 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
     if (!query.trim()) return;
     const timer = window.setTimeout(() => void searchFiles(), 200);
     return () => { window.clearTimeout(timer); searchRequest.current++; };
-  }, [query, revision]);
+  }, [query, revision, workspaceDirectory]);
   const visibleFiles: FileSelection[] = [];
   function collect(root: string, path: string) {
     if (!expanded[`${root}:${path}`]) return;
@@ -128,7 +136,7 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
   }
   if (query.trim()) {
     for (const entry of search?.entries ?? []) if (!entry.directory && !entry.blocked) visibleFiles.push({ root: 'workspace', path: entry.path!, label: entry.name, size: entry.size });
-  } else for (const root of roots) { if (root.directory) collect(root.id, ''); else visibleFiles.push({ root: root.id, path: '', label: root.label }); }
+  } else for (const root of roots) { if (root.directory) collect(root.id, root.id === 'workspace' ? workspaceDirectory : ''); else visibleFiles.push({ root: root.id, path: root.id === 'workspace' ? workspaceDirectory : '', label: root.label }); }
   const identity = (file: FileSelection) => `${file.root}:${file.path}`;
   function choose(file: FileSelection, range = false) {
     const id = identity(file);
@@ -192,6 +200,7 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
     </>}</ul>;
   }
   return <aside ref={sidebarRef} className="sandbox-files file-drop-target nodrag nopan nowheel" aria-label={t('Sandbox files')}
+    data-drop-root="workspace" data-drop-path={workspaceDirectory}
     aria-busy={mutating} data-drop-active={drag.folder !== undefined || undefined} {...drag.props}>
     <div className="sandbox-file-toolbar" role="group" aria-label={t('File actions')}>
         <IconButton ref={searchToggle} icon={Search} size="xs" quiet label={t('Search workspace files')}
@@ -203,6 +212,16 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
         </>}
         <IconButton icon={RefreshCw} size="xs" quiet label={t('Refresh files')} disabled={loading.roots || searching} onClick={() => { void onRefresh(); if (query.trim()) void searchFiles(); }} />
     </div>
+    {workspacePicker ? <label className="sandbox-workspace-label">
+      {t('View workspace')}
+      <select aria-label={t('View workspace')} title={t('Files and terminal commands use this directory.')}
+        value={workspacePicker.value}
+        onChange={event => workspacePicker.onChange(event.target.value)}>
+        <option value="">{t('Total workspace')}</option>
+        <option value="@current" disabled={workspacePicker.currentAvailable === false}>{t('Current session')} · {workspacePicker.currentLabel}</option>
+      </select>
+      {workspacePicker.currentAvailable === false && <span>{t('Select a connected Conversation session to use the current workspace.')}</span>}
+    </label> : workspaceLabel && <div className="sandbox-workspace-label" title={workspaceDirectory}>{workspaceLabel}</div>}
     {searchOpen && <div id={searchId} className="sandbox-file-search" onKeyDown={event => {
       event.stopPropagation();
       if (event.key === 'Escape') { event.preventDefault(); closeSearch(); }
@@ -228,16 +247,16 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
         {search?.entries?.length === 0 && <li className="sandbox-tree-note">{t('No files found')}</li>}
         {search?.entries?.map(entry => row('workspace', '', entry, true))}
         {search?.next_cursor && <li><button className="sandbox-tree-entry sandbox-load-more" disabled={searching} onClick={() => void searchFiles(search.next_cursor)}>{t(searching ? 'Loading…' : 'Load more')}</button></li>}
-      </ul></section> : roots.map(root => <section className="sandbox-file-root" key={root.id} data-drop-root={root.id} data-drop-path="">
-        <button className="sandbox-tree-entry sandbox-root-entry" aria-expanded={root.directory ? !!expanded[`${root.id}:`] : undefined}
-          data-drop-target={root.id === 'workspace' && drag.folder === '' || undefined}
+      </ul></section> : roots.map(root => <section className="sandbox-file-root" key={root.id} data-drop-root={root.id} data-drop-path={root.id === 'workspace' ? workspaceDirectory : ''}>
+        <button className="sandbox-tree-entry sandbox-root-entry" aria-expanded={root.directory ? !!expanded[`${root.id}:${root.id === 'workspace' ? workspaceDirectory : ''}`] : undefined}
+          data-drop-target={root.id === 'workspace' && drag.folder === workspaceDirectory || undefined}
           title={root.id === 'workspace' ? workspacePath : root.label}
-          {...fileActions({ root: root.id, path: '', label: root.label }, root.directory)}
-          onClick={() => void (root.directory ? onExpand(root.id, '') : onSelect(root.id, '', root.label))}>
-          {root.directory ? <>{expanded[`${root.id}:`] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}<Folder size={13} /></> : <File size={13} />}
-          <span>{root.label}</span>{root.access === 'read_only' && <small>{t('Read only')}</small>}
+          {...fileActions({ root: root.id, path: root.id === 'workspace' ? workspaceDirectory : '', label: root.label }, root.directory)}
+          onClick={() => void (root.directory ? onExpand(root.id, root.id === 'workspace' ? workspaceDirectory : '') : onSelect(root.id, '', root.label))}>
+          {root.directory ? <>{expanded[`${root.id}:${root.id === 'workspace' ? workspaceDirectory : ''}`] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}<Folder size={13} /></> : <File size={13} />}
+          <span>{root.id === 'workspace' && workspaceDirectory ? workspaceLabel ?? workspaceDirectory : root.label}</span>{root.access === 'read_only' && <small>{t('Read only')}</small>}
         </button>
-        {root.directory && directory(root.id, '')}
+        {root.directory && directory(root.id, root.id === 'workspace' ? workspaceDirectory : '')}
       </section>)}
     </div>
     <TransferList queue={transfers.queue} items={transfers.items} />

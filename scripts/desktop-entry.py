@@ -41,10 +41,17 @@ def prepare_self_test(data_root: Path) -> None:
         services.close()
 
 
-if "--backup-for-update" in sys.argv:
+if "--backup-preflight" in sys.argv or "--backup-for-update" in sys.argv:
     from backend.config import Settings
-    from backend.desktop_backup import backup_for_update
-    print(backup_for_update(Settings.from_environment()), flush=True)
+    from backend.desktop_backup import backup_preflight, backup_for_update
+    import json
+    try:
+        settings = Settings.from_environment()
+        result = json.dumps(backup_preflight(settings)) if '--backup-preflight' in sys.argv else backup_for_update(settings)
+        print(result, flush=True)
+    except Exception as exc:
+        print(f'Backup cancelled: {exc}', file=sys.stderr, flush=True)
+        raise SystemExit(1)
 elif "--self-test-prepare" in sys.argv:
     prepare_self_test(Path(sys.argv[sys.argv.index("--self-test-prepare") + 1]).resolve())
 elif "--self-test" in sys.argv:

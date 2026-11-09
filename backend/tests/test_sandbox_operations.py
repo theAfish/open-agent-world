@@ -19,6 +19,27 @@ def toolset(client, agent):
     return {tool.__name__: tool for tool in build_scoped_tool_callables(provider, agent['id'], definitions)}
 
 
+@pytest.mark.parametrize('phase', ['preparing_python', 'executing'])
+def test_preparation_failure_preserves_native_dispatch_boundary(runtime_client, phase):
+    client, _, _ = runtime_client
+    agent, sandbox, *_ = setup_skill(client)
+    services = client.app.state.services
+    async def scenario():
+        ids = []
+        async def fail(operation_id):
+            ids.append(operation_id)
+            services._sandbox_commands[operation_id]['phase'] = phase
+            raise SandboxPreparationError('declared dependency failed')
+        result = await services.sandbox_operations.submit(agent['id'], sandbox['id'], 'command', fail, wait_seconds=1)
+        if phase == 'preparing_python':
+            assert result['error']['command_dispatched'] is False and result['command_started'] is False
+            assert result['command_id'] == ids[0]
+        else:
+            assert 'command_dispatched' not in result['error']
+        assert await services.sandbox_operations.wait(agent['id'], sandbox['id'], ids[0], 0) == result
+    client.portal.call(scenario)
+
+
 def test_inspection_defaults_to_caller_metadata_and_output_is_explicit(runtime_client):
     client, _, _ = runtime_client
     agent, sandbox, *_ = setup_skill(client)

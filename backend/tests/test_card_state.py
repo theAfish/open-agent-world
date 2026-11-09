@@ -172,6 +172,7 @@ def test_session_and_card_deletion_clean_namespaces_and_stale_handles_fail(clien
 @pytest.mark.parametrize("value", [
     {"supportedScopes": []}, {"supportedScopes": ["shared", "shared"]},
     {"supportedScopes": ["shared"], "defaultScope": "session"}, {"defaultScope": "run"},
+    {"supportedScopes": ["session", "group"], "defaultScope": "session", "followWorkspace": True},
 ])
 def test_invalid_policies_fail_early(value):
     with pytest.raises(ValidationError):

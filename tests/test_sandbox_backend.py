@@ -50,6 +50,12 @@ class FakeWindowsNativeApi:
     def revoke_path(self, path: Path, sid: int) -> None:
         self.revokes.append((Path(path), sid))
 
+    def grant_workspace(self, path: Path, sid: int, *, read_only: bool, root_handle=None) -> None:
+        self.grant_path(path, sid, read_only=read_only)
+
+    def revoke_workspace(self, path: Path, sid: int, *, root_handle=None) -> None:
+        self.revoke_path(path, sid)
+
     def protect_path_acl(self, path: Path) -> None:
         self.protected.append(Path(path))
 

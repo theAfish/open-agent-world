@@ -58,8 +58,9 @@ async def execute(e, path, *, code="print(1)", result=None):
     return returned
 
 
-async def validate(e):
-    return await tool(e, "run_skill_script", {"sandbox": "box", "script": "scripts/structure_inspect.py", "argv": ["validate_structure"]},
+async def validate(e, *, skill="inspect-skill"):
+    return await tool(e, "run_skill_script", {"sandbox": "box", "skill": skill, "script": "scripts/structure_inspect.py",
+        "argv": ["validate_structure", "--folder", ".", "--file-name", "cnt.extxyz"]},
         {"exit_code": 0, "stdout": json.dumps({"passed": True, "file": "cnt.extxyz"})})
 
 

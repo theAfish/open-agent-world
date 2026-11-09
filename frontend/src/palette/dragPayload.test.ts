@@ -14,11 +14,16 @@ describe("palette drag payload", () => {
       id: "legion-1",
       revision: 4,
     });
+    expect(parsePaletteDrag(serializePaletteDrag({ version: 1, kind: 'legion_instance', id: 'imported-1' }))).toEqual({
+      version: 1, kind: 'legion_instance', id: 'imported-1',
+    });
   });
 
   it("rejects malformed and unsupported payload versions", () => {
     expect(parsePaletteDrag("not-json")).toBeUndefined();
     expect(parsePaletteDrag(JSON.stringify({ version: 2, kind: "node", type: "agent" }))).toBeUndefined();
     expect(parsePaletteDrag(JSON.stringify({ version: 1, kind: "legion", id: "legion-1" }))).toBeUndefined();
+    expect(parsePaletteDrag(JSON.stringify({ version: 1, kind: 'legion_instance', id: '' }))).toBeUndefined();
+    expect(parsePaletteDrag(JSON.stringify({ version: 1, kind: 'legion_instance', id: 123 }))).toBeUndefined();
   });
 });

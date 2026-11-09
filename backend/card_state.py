@@ -83,10 +83,19 @@ class ScopedStateStore:
 
     def identity(self, card_id):
         card = self.services.world.get_card(card_id)
-        scope_type = effective_scope(self.services.plugins.node_type(card.type).state, card.state_scope_override)
+        spec = self.services.plugins.node_type(card.type).state
+        scope_type = effective_scope(spec, card.state_scope_override)
         if scope_type is None:
             raise PermissionDeniedError("This plugin has no persistent state capability")
-        return scope_type, "*" if scope_type == "shared" else self.session_id(card_id)
+        if spec is not None and spec.follow_workspace:
+            from backend.workspace_context import document_workspace
+            context = document_workspace(self.services, card_id)
+            return context['scope_type'], context['scope_id']
+        session_id = self.session_id(card_id) if scope_type != 'shared' else '*'
+        if scope_type == 'group' and session_id != DEFAULT_SESSION:
+            with self.services.database.locked() as db:
+                session_id = db.execute('SELECT group_id FROM conversation_sessions WHERE id=?', (session_id,)).fetchone()[0]
+        return scope_type, session_id
 
     def bind(self, card_id, *, authorize=None):
         card = self.services.world.get_card(card_id)
@@ -110,6 +119,8 @@ class ScopedStateStore:
             legacy = db.execute("SELECT scope_id FROM state_scopes WHERE scope_kind='node_document' AND owner_id=?", (card_id,)).fetchone()
             if legacy and not db.execute("SELECT 1 FROM card_state_instances WHERE state_scope_id=?", (legacy["scope_id"],)).fetchone():
                 legacy_id = "*" if scope_type == "shared" else self.default_session(card_id)
+                if scope_type == 'group' and legacy_id != DEFAULT_SESSION:
+                    legacy_id = db.execute('SELECT group_id FROM conversation_sessions WHERE id=?', (legacy_id,)).fetchone()[0]
                 db.execute("INSERT OR IGNORE INTO card_state_instances(card_id, scope_type, scope_id, state_scope_id) VALUES(?,?,?,?)",
                            (card_id, scope_type, legacy_id, legacy["scope_id"]))
             row = db.execute("SELECT s.* FROM card_state_instances c JOIN state_scopes s ON s.scope_id=c.state_scope_id WHERE c.card_id=? AND c.scope_type=? AND c.scope_id=?",
@@ -141,6 +152,10 @@ class BoundCardState:
             with self.store.services.database.locked() as db:
                 if not db.execute("SELECT 1 FROM conversation_sessions WHERE id=?", (self.identity[1],)).fetchone():
                     raise ResourceValidationError("The selected conversation session no longer exists")
+        if self.identity[0] == 'group' and self.identity[1] != DEFAULT_SESSION:
+            with self.store.services.database.locked() as db:
+                if not db.execute('SELECT 1 FROM conversation_groups WHERE id=?', (self.identity[1],)).fetchone():
+                    raise ResourceValidationError('The selected conversation group no longer exists')
         return self.store.scope(self.card_id, self.identity)
 
     def get(self):

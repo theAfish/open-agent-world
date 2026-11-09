@@ -8,6 +8,7 @@ runtime dependency; OAW's separately authorized Skill/Sandbox path owns that.
 from __future__ import annotations
 
 import base64
+import json
 import re
 from importlib.resources import files
 from typing import Iterable
@@ -53,12 +54,17 @@ def _skill(folder) -> Skill:
            and "from oaw_runtime import" in asset for path, asset in contents.items()):
         # One maintained source; each materialized Skill remains standalone.
         contents["scripts/oaw_runtime.py"] = files(__package__).joinpath("skill_cli.py").read_text(encoding="utf-8")
+    if folder.name == "structure-inspect":
+        from .measurements import measurement_contract
+        contents["references/measurement-contract.json"] = json.dumps(
+            measurement_contract(), ensure_ascii=False, indent=2)
     return Skill(
-        id=folder.name,
+        id=folder.name.replace("-", "_"),
         name=name,
         description=description,
         instructions=instructions,
         files=contents,
+        # Pack profile identities stay stable for existing equipped copies.
         runtime_requirements=({"owner": "atomsculptor", "environment": folder.name},)
         if "requirements.txt" in contents else (),
     )
@@ -68,12 +74,13 @@ def atomsculptor_skills() -> SkillPackage:
     root = files(__package__).joinpath("skills")
     return SkillPackage(
         package_id="atomsculptor.skills",
-        version="0.1.9",
+        version="0.1.15",
         name="AtomSculptor Skills",
         description="Portable atomistic modelling, inspection, conversion, and Materials Project skills.",
         author="AtomSculptor",
         instructions=(
-            "Read only Skills authorized by the live OAW graph. Read a Skill "
+            "Read only Skills authorized by the live OAW graph. Use a listed node ID "
+            "or underscore Skill ID, such as structure_inspect. Read a Skill "
             "with include_file_contents=false first; use file_path only for a "
             "specific source file needed for debugging. A bundled script "
             "must run through run_skill_script with an independently authorized "

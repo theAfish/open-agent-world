@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, UTC
 import json
 import os
@@ -11,6 +12,63 @@ import shutil
 import subprocess
 import sys
 from uuid import uuid4
+
+
+def runtime_source(relative: Path) -> bool:
+    """Keep runtime models/licenses; the vendored XRD papers are research inputs."""
+    return ("tests" not in relative.parts and relative.as_posix() != "backend/development.py"
+            and not relative.is_relative_to("plugins/xrd/src/oaw_xrd/OAW_XRDfit/src/refs"))
+
+
+@contextmanager
+def payload_stage(build_root: Path):
+    """Serialize builds and recover only paths named by our durable build record."""
+    from backend.packs.environments import installation_lock, _json_write
+
+    build_root.mkdir(parents=True, exist_ok=True)
+    record_path = build_root / "desktop-build.json"
+    destination = build_root / "desktop-payload"
+
+    def owned(name, prefix):
+        import re
+        if not isinstance(name, str) or not re.fullmatch(prefix + r"[a-f0-9]{10}", name):
+            raise RuntimeError("Invalid desktop build recovery path")
+        path = build_root / name
+        if path.resolve().parent != build_root.resolve() or path.is_symlink() or (
+                path.exists() and getattr(path.lstat(), "st_file_attributes", 0) & 0x400):
+            raise RuntimeError("Desktop build recovery path must not be a link")
+        return path
+
+    def recover():
+        if not record_path.exists():
+            return
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        stage = owned(record["stage"], "desktop-staging-")
+        previous = owned(record["previous"], "desktop-previous-")
+        if previous.exists():
+            if destination.exists():
+                shutil.rmtree(previous)
+            else:
+                previous.rename(destination)
+        if stage.exists():
+            shutil.rmtree(stage)
+        record_path.unlink()
+
+    with installation_lock(build_root / "desktop-build.lock"):
+        recover()
+        stage = build_root / ("desktop-staging-" + uuid4().hex[:10])
+        previous = build_root / ("desktop-previous-" + uuid4().hex[:10])
+        _json_write(record_path, {"stage": stage.name, "previous": previous.name})
+        stage.mkdir()
+        try:
+            yield stage
+            if destination.exists():
+                if destination.is_symlink() or destination.resolve().parent != build_root.resolve():
+                    raise RuntimeError("Unexpected desktop payload path")
+                destination.rename(previous)
+            stage.rename(destination)
+        finally:
+            recover()
 
 
 def run(arguments, *, root, env, quiet=False):
@@ -40,77 +98,70 @@ def main():
     if os.name == "nt" and (not (source / "python.exe").is_file() or not (source / "Lib/venv").is_dir()):
         parser.error("Use a full CPython installation with the standard library and venv module")
     build_root = root / ".open-agent-world"
-    stage = build_root / ("desktop-staging-" + uuid4().hex[:10])
-    stage.mkdir(parents=True)
-    python_root = stage / "python"
-    if os.name == "nt":
-        python_root.mkdir()
-    for pattern in (("python*.exe", "python*.dll", "python*.zip", "vcruntime*.dll", "LICENSE*") if os.name == "nt" else ()):
-        for item in source.glob(pattern):
-            if item.is_file():
-                shutil.copy2(item, python_root / item.name)
-    for name in (("Lib", "DLLs") if os.name == "nt" else ()):
-        if (source / name).is_dir():
-            shutil.copytree(source / name, python_root / name,
-                ignore=shutil.ignore_patterns("site-packages", "__pycache__", "*.pth", "sitecustomize.py", "usercustomize.py", "test", "tests"))
-    env = dict(os.environ)
-    env["UV_CACHE_DIR"] = str(args.cache_dir.resolve() if args.cache_dir else root / ".uv-cache")
-    env["UV_PYTHON_INSTALL_DIR"] = str(build_root / "build-python")
-    if sys.platform == "darwin":
-        # A managed standalone interpreter is relocatable; Homebrew/framework
-        # installations can retain absolute references to the build machine.
-        run([uv, "python", "install", "3.12"], root=root, env=env)
-        managed = Path(subprocess.check_output(
-            [uv, "python", "find", "--managed-python", "3.12"],
-            cwd=root, env=env, text=True).strip()).resolve().parent.parent
-        shutil.copytree(managed, python_root, symlinks=False,
-                        ignore=shutil.ignore_patterns("__pycache__"))
-    python = python_root / ("python.exe" if os.name == "nt" else "bin/python3")
-    site_packages = python_root / ("Lib/site-packages" if os.name == "nt" else "lib/python3.12/site-packages")
-    source_info["version"] = subprocess.check_output(
-        [str(python), "-I", "-c", "import sys; print(sys.version)"], text=True).strip()
-    requirements = stage / "requirements.txt"
-    run([uv, "export", "--project", "backend", "--locked", "--no-dev", "--extra", "adk", "--extra", "litellm",
-         "--no-emit-project", "--output-file", requirements], root=root, env=env, quiet=True)
-    run([uv, "pip", "install", "--python", python, "--target", site_packages,
-         "--require-hashes", "--no-deps", "--only-binary", ":all:", "-r", requirements], root=root, env=env)
-    # Bundled plugin dependencies belong to each plugin, not the host project.
-    # Resolve against the exported host pins so a plugin cannot upgrade the host.
-    run([args.python, root / "scripts/install-plugins.py", "--python", python,
-         "--target", site_packages, "--constraint", requirements], root=root, env=env)
-    # Honor repository ignores, including local .env files, caches and user data.
-    # New implementation files are included even before a developer commits them.
-    source_files = subprocess.check_output(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard",
-                                            "--", "backend", "open_agent_world", "plugins"], cwd=root).decode("utf-8").split("\0")
-    for name in set(source_files) - {""}:
-        relative = Path(name)
-        if "tests" in relative.parts or name == "backend/development.py":
-            continue
-        source_file = root / relative
-        if not source_file.is_file():
-            continue
-        if source_file.is_symlink() or not source_file.resolve().is_relative_to(root):
-            raise RuntimeError(f"Package source must be a regular checkout file: {relative}")
-        target_file = stage / relative
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, target_file)
-    # Debug reset code is neither imported nor shipped with the installed backend.
-    shutil.copytree(root / "frontend/dist", stage / "frontend/dist")
-    (stage / "tools").mkdir()
-    shutil.copy2(uv, stage / ("tools/uv.exe" if os.name == "nt" else "tools/uv"))
-    shutil.copy2(root / "scripts/desktop-entry.py", stage / "launch.py")
-    (stage / "build-info.json").write_text(json.dumps({"built_at": datetime.now(UTC).isoformat(),
-        "python": source_info["version"], "platform": "windows-x64" if os.name == "nt" else f"macos-{platform.machine()}", "backend_dependencies": "requirements.txt"}, indent=2), encoding="utf-8")
-    env["PATH"] = str(stage / "tools") + os.pathsep + env.get("PATH", "")
-    run([python, "-I", "-B", stage / "launch.py", "--self-test"], root=stage, env=env)
+    sys.path.insert(0, str(root))
+    with payload_stage(build_root) as stage:
+        python_root = stage / "python"
+        if os.name == "nt":
+            python_root.mkdir()
+        for pattern in (("python*.exe", "python*.dll", "python*.zip", "vcruntime*.dll", "LICENSE*") if os.name == "nt" else ()):
+            for item in source.glob(pattern):
+                if item.is_file():
+                    shutil.copy2(item, python_root / item.name)
+        for name in (("Lib", "DLLs") if os.name == "nt" else ()):
+            if (source / name).is_dir():
+                shutil.copytree(source / name, python_root / name,
+                    ignore=shutil.ignore_patterns("site-packages", "__pycache__", "*.pth", "sitecustomize.py", "usercustomize.py", "test", "tests"))
+        env = dict(os.environ)
+        env["UV_CACHE_DIR"] = str(args.cache_dir.resolve() if args.cache_dir else root / ".uv-cache")
+        env["UV_PYTHON_INSTALL_DIR"] = str(build_root / "build-python")
+        if sys.platform == "darwin":
+            # A managed standalone interpreter is relocatable; Homebrew/framework
+            # installations can retain absolute references to the build machine.
+            run([uv, "python", "install", "3.12"], root=root, env=env)
+            managed = Path(subprocess.check_output(
+                [uv, "python", "find", "--managed-python", "3.12"],
+                cwd=root, env=env, text=True).strip()).resolve().parent.parent
+            shutil.copytree(managed, python_root, symlinks=False,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        python = python_root / ("python.exe" if os.name == "nt" else "bin/python3")
+        site_packages = python_root / ("Lib/site-packages" if os.name == "nt" else "lib/python3.12/site-packages")
+        source_info["version"] = subprocess.check_output(
+            [str(python), "-I", "-c", "import sys; print(sys.version)"], text=True).strip()
+        requirements = stage / "requirements.txt"
+        run([uv, "export", "--project", "backend", "--locked", "--no-dev", "--extra", "adk", "--extra", "litellm",
+             "--no-emit-project", "--output-file", requirements], root=root, env=env, quiet=True)
+        run([uv, "pip", "install", "--python", python, "--target", site_packages,
+             "--require-hashes", "--no-deps", "--only-binary", ":all:", "-r", requirements], root=root, env=env)
+        # Bundled plugin dependencies belong to each plugin, not the host project.
+        # Resolve against the exported host pins so a plugin cannot upgrade the host.
+        run([args.python, root / "scripts/install-plugins.py", "--python", python,
+             "--target", site_packages, "--constraint", requirements], root=root, env=env)
+        # Honor repository ignores, including local .env files, caches and user data.
+        # New implementation files are included even before a developer commits them.
+        source_files = subprocess.check_output(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard",
+                                                "--", "backend", "open_agent_world", "plugins"], cwd=root).decode("utf-8").split("\0")
+        for name in set(source_files) - {""}:
+            relative = Path(name)
+            if not runtime_source(relative):
+                continue
+            source_file = root / relative
+            if not source_file.is_file():
+                continue
+            if source_file.is_symlink() or not source_file.resolve().is_relative_to(root):
+                raise RuntimeError(f"Package source must be a regular checkout file: {relative}")
+            target_file = stage / relative
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, target_file)
+        # Debug reset code is neither imported nor shipped with the installed backend.
+        shutil.copytree(root / "frontend/dist", stage / "frontend/dist")
+        (stage / "tools").mkdir()
+        shutil.copy2(uv, stage / ("tools/uv.exe" if os.name == "nt" else "tools/uv"))
+        shutil.copy2(root / "scripts/desktop-entry.py", stage / "launch.py")
+        (stage / "build-info.json").write_text(json.dumps({"built_at": datetime.now(UTC).isoformat(),
+            "python": source_info["version"], "platform": "windows-x64" if os.name == "nt" else f"macos-{platform.machine()}", "backend_dependencies": "requirements.txt"}, indent=2), encoding="utf-8")
+        env["PATH"] = str(stage / "tools") + os.pathsep + env.get("PATH", "")
+        run([python, "-I", "-B", stage / "launch.py", "--self-test"], root=stage, env=env)
     destination = build_root / "desktop-payload"
-    # Both paths are fixed build outputs in this checkout; keep the previous package
-    # until the newly staged interpreter, plugins, and Sandbox venv passed validation.
-    if destination.exists():
-        if destination.is_symlink() or destination.resolve().parent != build_root.resolve():
-            raise RuntimeError("Unexpected desktop payload path")
-        destination.rename(build_root / ("desktop-previous-" + uuid4().hex[:10]))
-    stage.rename(destination)
     print(f"Desktop payload ready: {destination}", flush=True)
 
 

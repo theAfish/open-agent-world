@@ -29,6 +29,7 @@ class SandboxBackend(ABC):
     permitted to implement any operation by launching an ordinary host process.
     """
 
+    supports_workspace_scopes: bool = False
     supports_invocation_environment: bool = False
     supports_execution_policy: bool = False
     supports_folder_mounts: bool = False
@@ -80,6 +81,7 @@ class SandboxBackend(ABC):
         runtime_mount: RuntimeMount | None = None,
         execution_policy: Mapping[str, object] | None = None,
         folder_mounts: Sequence[FolderMount] = (),
+        working_directory: str = "", workspace_write_directory: str | None = None,
     ) -> CommandResult:
         """Run argv with an optional command-scoped, read-only runtime bundle.
 
@@ -97,6 +99,14 @@ class SandboxBackend(ABC):
         folder_mounts contains host-authorized directories captured at admission.
         Backends enforce access and rewrite their environment values to accessible
         paths. Grants last only for this command and must be cleaned up on failure.
+
+        working_directory is a host-assigned, workspace-relative process cwd.
+        Validate it through the native file boundary; never change global cwd or
+        the Sandbox's configured workspace. Package/runtime mounts remain shared.
+
+        workspace_write_directory is host-only: None uses the configured root
+        access, an empty string denies workspace writes, and a relative directory
+        allows writes only there while the whole workspace stays readable.
 
         Independent commands may overlap in the same workspace. Cancelling the
         execute task must join cleanup of only that command's process tree.

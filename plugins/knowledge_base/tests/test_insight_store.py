@@ -140,3 +140,17 @@ def test_a_single_schema_insight_table_is_rebuilt_for_cross_schema_insights():
     InsightStore(engine)
     assert store.get("i1") is not None and store.get(cross["id"]) is not None
     engine.dispose()
+
+
+def test_record_links_are_found_whatever_the_insight_status(store):
+    draft = store.create(schema_ids=["sch1"], kind="note", title="d", statement="s")
+    published = store.create(schema_ids=["sch1"], kind="rule", title="p", statement="s")
+    store.set_evidence(draft["id"], [{"record_id": "r1", "role": "supports"}])
+    store.set_evidence(published["id"], [{"record_id": "r1", "role": "contradicts"}, {"record_id": "r2"}])
+    store.update(published["id"], expected_revision=published["revision"], status="published")
+
+    links = store.links_for_records(["r1"])
+    assert {(link["insight_id"], link["role"]) for link in links} == {
+        (draft["id"], "supports"), (published["id"], "contradicts")}
+    assert store.published_citing("r1") == [published["id"]]
+    assert store.links_for_records([]) == []

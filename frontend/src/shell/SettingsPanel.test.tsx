@@ -43,6 +43,23 @@ describe("Application settings", () => {
     expect(useWorldStore.getState().settingsOpen).toBe(false);
   });
 
+  it('applies appearance immediately without submitting unrelated model settings', async () => {
+    useAppearance.setState({ textSize: 100, wheelShortcut: true });
+    const save = vi.spyOn(worldApi, 'saveModelConnections');
+    render(<SettingsPanel />);
+    await screen.findByLabelText('Model 1 context window');
+    fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
+    fireEvent.change(screen.getByRole('slider', { name: 'Text size' }), { target: { value: '150' } });
+    expect(useAppearance.getState().textSize).toBe(150);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset text size' }));
+    expect(useAppearance.getState().textSize).toBe(100);
+    expect(screen.queryByRole('button', { name: 'Save settings' })).toBeNull();
+    fireEvent.submit(screen.getByRole('dialog', { name: 'Settings' }));
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /^Close$/ }));
+    expect(useWorldStore.getState().settingsOpen).toBe(false);
+  });
+
   it('keeps personal model settings while hiding host paths and runtime management for hosted users', async () => {
     vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
     render(<SettingsPanel />);
@@ -380,6 +397,28 @@ describe("Application settings", () => {
     await waitFor(() => expect((screen.getByLabelText("Connection name") as HTMLInputElement).value).toBe("Work account"));
   });
 
+});
+
+
+it("shows unreadable bindings and requires a replacement secret before saving", async () => {
+  useWorldStore.setState({ settingsOpen: true });
+  vi.spyOn(worldApi, "getModelConnections").mockResolvedValue(savedCatalog());
+  vi.spyOn(worldApi, "getSandboxRuntimes").mockResolvedValue({ default_runtime: "auto", runtimes: [] });
+  const current = { workspace_root: null, runtime: "auto", environment_variables: { ACCESS_KEY: { secret_ref: "old" } },
+    secret_bindings: { old: false }, binding_errors: { ACCESS_KEY: "Re-enter the secret and save." } };
+  vi.spyOn(worldApi, "getSandboxSettings").mockResolvedValue(current);
+  const save = vi.spyOn(worldApi, "saveSandboxSettings").mockResolvedValue({ ...current, secret_bindings: { old: true }, binding_errors: {} });
+  render(<SettingsPanel />);
+  fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("ACCESS_KEY");
+  fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Environment variable 1 value"), { target: { value: "replacement-secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(save.mock.calls[0][0].secrets).toEqual({ old: "replacement-secret" });
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  cleanup();
 });
 
 

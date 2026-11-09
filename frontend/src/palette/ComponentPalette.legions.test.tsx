@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { useRef } from 'react';
 import { ComponentPalette } from "./ComponentPalette";
 import { useWorldStore } from "../state/worldStore";
-import { useCardLibrary, type LibrarySnapshot } from "../state/cardLibrary";
+import { useCardLibrary, type LibrarySnapshot, type DeckEntry } from "../state/cardLibrary";
 import type { LegionSummary } from "../types/world";
+import { usePaletteDropTarget } from './pointerDrag';
 
 let hit: Element;
 let frame: FrameRequestCallback | undefined;
@@ -33,7 +35,7 @@ function dropOn(target: HTMLElement) {
   hit = target;
   fireEvent.pointerUp(window, { button: 0, clientX: 50, clientY: 50 });
 }
-function librarySnapshot(entries: Array<{ kind: "node" | "legion"; id: string }>): LibrarySnapshot {
+function librarySnapshot(entries: DeckEntry[]): LibrarySnapshot {
   return { schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
     card_definitions: {}, collection: {}, available_card_ids: [], available_pack_ids: [],
     active_deck_id: "custom", decks: [{ id: "custom", name: "Custom", icon: "folder", entries }] };
@@ -86,6 +88,45 @@ it("removes a saved Legion from the current deck without deleting its source", a
   await waitFor(() => expect(edit).toHaveBeenCalledWith({ action: "update_deck", id: "custom", entries: [] }));
   expect(remove).not.toHaveBeenCalled();
   expect(place).not.toHaveBeenCalled();
+});
+
+it('opens an imported Legion and discards only its deck reference', async () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  const snapshot = librarySnapshot([{ kind: 'legion_instance', id: 'imported' }]);
+  snapshot.legion_instances = { imported: { name: 'Imported research', description: 'Migration complete: 12 sessions, 896 messages.' } };
+  const open = vi.fn().mockResolvedValue(true);
+  const instantiate = vi.fn();
+  const remove = vi.fn();
+  const edit = vi.fn().mockResolvedValue(null);
+  useCardLibrary.setState({ snapshot, busy: false, open: false, refresh: vi.fn(), edit });
+  useWorldStore.setState({ legions: [], openLegionInstance: open, instantiateLegion: instantiate, deleteCards: remove });
+  const view = render(<ComponentPalette />);
+  const button = view.getByRole('button', { name: 'Open Imported research' });
+  expect(view.getByRole('status').textContent).toBe('Migration complete: 12 sessions, 896 messages.');
+  fireEvent.click(button);
+  expect(open).toHaveBeenCalledWith('imported');
+  expect(instantiate).not.toHaveBeenCalled();
+  startDrag(button);
+  dropOn(view.getByRole('region', { name: 'Discard card' }));
+  await waitFor(() => expect(edit).toHaveBeenCalledWith({ action: 'update_deck', id: 'custom', entries: [] }));
+  expect(remove).not.toHaveBeenCalled();
+});
+
+it('drags the existing imported Legion ID from the deck to the canvas', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  const snapshot = librarySnapshot([{ kind: 'legion_instance', id: 'imported' }]);
+  snapshot.legion_instances = { imported: { name: 'Imported research', description: 'Migration complete.' } };
+  useCardLibrary.setState({ snapshot, busy: false, open: false, refresh: vi.fn() });
+  const received = vi.fn();
+  function CanvasTarget() {
+    const ref = useRef<HTMLDivElement>(null);
+    usePaletteDropTarget(ref, { accepts: item => Boolean(item.payload), drop: item => received(item.payload) });
+    return <div ref={ref} role="region" aria-label="Canvas drop target" />;
+  }
+  const view = render(<><ComponentPalette /><CanvasTarget /></>);
+  startDrag(view.getByRole('button', { name: 'Open Imported research' }));
+  dropOn(view.getByRole('region', { name: 'Canvas drop target' }));
+  expect(received).toHaveBeenCalledWith({ version: 1, kind: 'legion_instance', id: 'imported' });
 });
 
 it("removes an unavailable entry only from the current deck", async () => {

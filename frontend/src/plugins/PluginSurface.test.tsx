@@ -19,6 +19,27 @@ afterEach(() => { cleanup(); useLegionWorkspace.getState().close(); useNodeSurfa
 const card: WorldCard = { id: "extension-card", type: "example.agent", name: "Extension", status: "idle",
   position: { x: 0, y: 0 }, size: { width: 300, height: 190 }, expanded: false, config: { effort: "default" } };
 
+it('observes new document events once across bounded event-window churn and unsubscribes', () => {
+  install('test.documents', { settings: 'view' });
+  useWorldStore.setState({ events: [] });
+  let props!: PluginViewProps;
+  vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => { props = value; return null; }) as ReturnType<typeof registry.pluginView>);
+  render(<PluginSurface card={card} slot="settings" level="inspector" />);
+  const listener = vi.fn();
+  const stop = props.host.onDocumentChange(listener);
+  for (let index = 1; index <= 500; index++) act(() => useWorldStore.setState({ events: [{
+    id: `change-${index}`, type: 'state_changed', timestamp: 'now',
+    payload: { scope_kind: 'node_document', key: 'document', owner_id: card.id, revision: index },
+  }, ...useWorldStore.getState().events].slice(0, 160) }));
+  act(() => useWorldStore.setState({ socketState: 'live' }));
+  expect(listener).toHaveBeenCalledTimes(500);
+  expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ nodeId: card.id, revision: 500 }));
+  stop();
+  act(() => useWorldStore.setState({ events: [{ id: 'after-unsubscribe', type: 'state_changed', timestamp: 'now',
+    payload: { scope_kind: 'node_document', key: 'document', owner_id: card.id, revision: 501 } }] }));
+  expect(listener).toHaveBeenCalledTimes(500);
+});
+
 it('suspends covered XRD graph canvases but keeps Legion panes and restores them on exit', () => {
   const canvas = { ...card, type: 'xrd.structure-canvas' };
   render(<><PluginSurface card={canvas} slot="settings" level="workspace"><p>Graph canvas</p></PluginSurface><WorkspaceSurfaceContext.Provider value={true}><PluginSurface card={canvas} slot="settings" level="workspace"><p>Legion canvas</p></PluginSurface></WorkspaceSurfaceContext.Provider></>);
@@ -203,4 +224,33 @@ it('binds the SDK to the originating session while exposing no session argument 
   expect(changedA).toHaveBeenCalledTimes(3);
   unsubscribe();
   act(() => useConversationView.setState({ activeConversationId: undefined, sessions: {} }));
+});
+
+
+it.each([
+  ['accepted', undefined], ['accepted', true], ['rejected', undefined], ['rejected', true],
+] as const)('preserves %s Agent admission through the actual plugin host bridge with freshContext=%s', async (outcome, freshContext) => {
+  install('test.launcher', { settings: 'view' });
+  const agent: WorldCard = { ...card, id: 'executor', type: 'agent' };
+  useWorldStore.setState({ cards: [card, agent], toasts: [], activityOpen: false });
+  let props!: PluginViewProps;
+  vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => {
+    props = value;
+    return <p>Launch fixture</p>;
+  }) as ReturnType<typeof registry.pluginView>);
+  const receipt = { accepted: true as const, agent_id: agent.id, run_id: 'admitted-run' };
+  const failure = new Error('Agent launch refused');
+  const request = vi.spyOn(worldApi, 'runAgent');
+  if (outcome === 'accepted') request.mockResolvedValue(receipt);
+  else request.mockRejectedValue(failure);
+  render(<PluginSurface card={card} slot="settings" level="inspector" />);
+  await screen.findByText('Launch fixture');
+  await act(async () => {
+    const result = props.host.runAgent(agent.id, 'Inspect the assigned work', freshContext);
+    if (outcome === 'accepted') await expect(result).resolves.toBe(receipt);
+    else await expect(result).rejects.toBe(failure);
+  });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith(agent.id, 'Inspect the assigned work', freshContext);
+  expect(useWorldStore.getState().toasts).toHaveLength(0);
 });

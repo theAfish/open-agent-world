@@ -37,6 +37,9 @@ class NodeResourceContext:
     # Ephemeral file leases supplied by the host outside JSON/model arguments.
     # Consumers must finish reading before the resource action returns.
     files: Mapping[str, TransferredFile] = field(default_factory=dict)
+    # Host-supplied identity of this Agent invocation, never a tool argument.
+    # Desktop/standalone calls have no Run. Appended for positional compatibility.
+    run_id: str | None = None
 
     @property
     def file_transfer_policy(self):

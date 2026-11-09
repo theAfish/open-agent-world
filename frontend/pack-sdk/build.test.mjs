@@ -8,7 +8,7 @@ import { buildPackFrontend } from './build.mjs';
 import { buildPackFrontendVite } from './build-vite.mjs';
 import { sourcePackArtifacts } from '../server/source-packs.mjs';
 import { buildSourcePack, checkProject, dependencyFingerprint, preparePack } from '../scripts/source-packs.mjs';
-import { createServer } from 'vite';
+import { build, createServer } from 'vite';
 import sdkExports from './sdk-exports.mjs';
 import { sdkRuntimeExports } from '../scripts/pack-sdk-exports.mjs';
 import { cachedBuild, treeFingerprint } from '../scripts/build-cache.mjs';
@@ -195,6 +195,49 @@ test('Vite checks cached dependency links with the same Pack boundary as install
     await rm(root, { recursive: true, force: true });
     await rm(cache, { recursive: true, force: true });
   }
+});
+
+for (const layout of ['hoisted', 'nested']) {
+  test(`Vite bundles ${layout} transitive dependencies in Pack modules and workers`, async () => {
+    const root = await temporaryDirectory();
+    try {
+      await writeFile(path.join(root, 'package.json'), JSON.stringify({ type: 'module', dependencies: { library: '1.0.0' } }));
+      const library = path.join(root, 'node_modules/library');
+      const helper = path.join(layout === 'nested' ? library : root, 'node_modules/helper');
+      await mkdir(library, { recursive: true }); await mkdir(helper, { recursive: true });
+      await writeFile(path.join(library, 'package.json'), JSON.stringify({ name: 'library', type: 'module',
+        exports: './index.js', dependencies: { helper: '1.0.0' } }));
+      await writeFile(path.join(library, 'index.js'), "import { value } from 'helper/value'; export const answer = value + 1;");
+      await writeFile(path.join(helper, 'package.json'), JSON.stringify({ name: 'helper', type: 'module', exports: { './value': './value.js' } }));
+      await writeFile(path.join(helper, 'value.js'), 'export const value = 41;');
+      await writeFile(path.join(root, 'index.tsx'), `import { answer } from 'library'; export default { answer };
+        export const worker = () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });`);
+      await writeFile(path.join(root, 'worker.ts'), "import { answer } from 'library'; self.postMessage(answer);");
+      const artifact = await buildPackFrontendVite({ root });
+      assert.equal((await import(pathToFileURL(path.join(root, 'dist/index.js')).href)).default.answer, 42);
+      assert.ok(artifact.files.some(file => /worker.*\.js$/.test(file.path)));
+      // Merely installing a transitive dependency does not authorize Pack
+      // source to import it directly without its own declaration.
+      await writeFile(path.join(root, 'index.tsx'), "import { value } from 'helper/value'; export default value;");
+      await assert.rejects(buildPackFrontendVite({ root }), /Undeclared Pack frontend dependency: helper/);
+      await writeFile(path.join(root, 'index.tsx'), "export const worker = () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });");
+      await writeFile(path.join(root, 'worker.ts'), "import { t } from '@oaw/plugin-api'; self.postMessage(t('hello'));");
+      await assert.rejects(buildPackFrontendVite({ root }), /Pack workers cannot import host/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+}
+
+test('a failed source Pack build preserves its original error without publishing incomplete artifacts', async () => {
+  const root = await temporaryDirectory();
+  try {
+    await writeFile(path.join(root, 'entry.js'), 'export default {};');
+    await assert.rejects(build({ root, configFile: false, publicDir: false,
+      plugins: [sourcePackArtifacts({ discover: async () => [{ root, owner: 'failed.pack' }],
+        buildPack: async () => { throw new Error('Original Pack compilation failure'); } })],
+      build: { write: false, lib: { entry: path.join(root, 'entry.js'), formats: ['es'] } },
+    }), /Original Pack compilation failure/);
+    await assert.rejects(access(path.join(root, 'dist/assets/packs/failed.pack')));
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('real source Pack build isolates development NODE_ENV and emits release JSX', async () => {

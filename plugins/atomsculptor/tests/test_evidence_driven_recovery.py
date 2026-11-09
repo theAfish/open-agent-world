@@ -83,7 +83,9 @@ async def test_returning_to_an_excluded_measured_state_is_not_new_progress():
     for index, count in enumerate((2, 3, 2)):
         await measure(e, f"measure-{index}.py", record(kind="diagnostic", values={"count":count}))
         outcome = assess(e)["observation"]["outcome"]
-        assert outcome == ("needs_plan_review" if index == 2 else "continue")
+        assert outcome == "continue"
+    assert e.workflow.host_signal["advisory"] is True
+    assert e.workflow.before_tool("structure_builder", "run_modelling_step", {}, e) is None
 
 
 @pytest.mark.asyncio
@@ -98,7 +100,9 @@ async def test_renaming_revision_or_check_prose_cannot_hide_the_same_failed_requ
                 "samples": {"detail_source": f"report-{index}.json", "record_pointer": "/values/samples", "size": 500}}))
         assert assess(e)["ok"]
     assert e.workflow.recovery["unchanged_evidence"] and e.workflow.host_signal
-    assert e.workflow.host_signal["outcome"] == "needs_plan_review"
+    assert e.workflow.host_signal["advisory"] is True
+    assert e.experiment_history[-1]["outcome"] == "continue"
+    assert e.workflow.advance(e, "build", "box", "method-1.py")["error"]["code"] == "candidate_constraints"
 
 
 @pytest.mark.asyncio

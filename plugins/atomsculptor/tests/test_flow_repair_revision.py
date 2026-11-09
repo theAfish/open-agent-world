@@ -85,14 +85,15 @@ async def test_only_definite_native_save_rejection_retains_the_unexecuted_propos
 
 
 @pytest.mark.asyncio
-async def test_failed_command_cannot_be_laundered_into_a_scientific_review_assessment():
-    e, calls, run = await setup(exit_code=1)
-    await run()
-    for change in [{'assumption_invalid':True}, {'outcome':'needs_plan_review'}]:
-        rejected = e.workflow.assess_previous(e, prior(e, **change))
-        assert rejected['error']['code'] == 'execution_repair_required'
-        assert not e.experiment_observations and len(calls) == 2
-    assert e.workflow.assess_previous(e,prior(e))['ok'] and e.workflow.local_repair(e)
+async def test_failed_commands_keep_model_judgments_but_cannot_complete_checkpoints():
+    for change in [{'assumption_invalid': True}, {'outcome': 'needs_plan_review'}]:
+        e, calls, run = await setup(exit_code=1)
+        await run()
+        result = e.workflow.assess_previous(e, prior(e, **change))
+        assert result['observation']['outcome'] == change.get('outcome', 'continue')
+        assert result['observation']['exit_code'] == 1 and len(calls) == 2
+        assert e.workflow.advance(e, 'probe', 'box', 'step.py')['error']['code'] == 'execution_required'
+        assert not e.workflow.checkpoints
 
 
 @pytest.mark.asyncio
@@ -112,27 +113,29 @@ async def test_metric_printed_before_a_code_failure_cannot_trigger_method_stagna
 
 
 @pytest.mark.asyncio
-async def test_code_failure_repairs_the_same_source_without_false_method_review():
+async def test_code_failure_supports_explicit_rewrite_and_model_chosen_review():
     e, calls, run = await setup(exit_code=1)
     await run()
     req = request({'run_modelling_step','patch_modelling_step','rewrite_modelling_step','rerun_modelling_step',
                    'advance_modelling_stage','finish_task','read_modelling_source'})
     prepare(e, req)
     assert 'patch_modelling_step' in declarations(req) and 'run_modelling_step' not in declarations(req)
-    rewrite = next(d for t in req.config.tools for d in t.function_declarations if d.name=='rewrite_modelling_step')
-    assert 'rewrite_reason' in rewrite.parameters_json_schema['required']
-    missing = await run(action_mode='rewrite', 
-                        source="print('large rewrite')", previous_assessment=prior(e))
-    assert missing['error']['code']=='local_repair_required' and len(calls)==2
+    rewrite = next(d for t in req.config.tools for d in t.function_declarations if d.name == 'rewrite_modelling_step')
+    assert 'source' in rewrite.parameters_json_schema['required']
+    assert 'rewrite_reason' not in rewrite.parameters_json_schema['required']
+    replaced = await run(action_mode='rewrite', source="print('large rewrite')", previous_assessment=prior(e))
+    assert replaced['step']['state'] == 'finished' and len(calls) == 4
+    assert e.script_sources[('box','step.py')] == "print('large rewrite')" and not e.workflow.checkpoints
     for word in ['second','third']:
         assert (await run(source='', edits=[{'old':e.script_sources[('box','step.py')],'new':f"print('{word}')"}],
-                           previous_assessment=prior(e)))['exit_code']==1
+                           previous_assessment=prior(e)))['exit_code'] == 1
         assert e.workflow.host_signal is None
-    review = await tool(e,'finish_task',{'result':{'status':'needs_plan_review','reason':'Still a code error'}},'Task completed.')
-    assert review['error']['code']=='execution_repair_required' and not e.workflow.review_request
-    rewrite = await run(action_mode='rewrite',  source="print('restructured parser')",
-                        rewrite_reason='The source parser needs structural replacement; scientific method unchanged', previous_assessment=prior(e))
-    assert rewrite['step']['state']=='finished' and not e.workflow.checkpoints
+    review = await tool(e, 'finish_task', {'result': {'status': 'needs_plan_review', 'reason': 'Still a code error'}}, 'Task completed.')
+    assert review == 'Task completed.' and e.workflow.review_request
+    assert e.workflow.review_request['exit_code'] == 1
+    blocked = await run(action_mode='rewrite', source="print('another rewrite')", previous_assessment=prior(e))
+    assert blocked['error']['code'] == 'plan_review_required'
+    assert not e.workflow.checkpoints
 
 
 async def ready_for_review():

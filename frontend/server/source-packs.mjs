@@ -10,10 +10,11 @@ const types = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'te
  * identities are refreshed together. Failed builds are shown by Vite's overlay.
  */
 export function sourcePackArtifacts({ discover = sourcePacks, buildPack = buildSourcePack } = {}) {
-  let packs = [], server, output, chain = Promise.resolve();
+  let packs = [], server, output, artifactsReady = false, chain = Promise.resolve();
   const failed = new Set();
   const timers = new Map();
   const buildAll = async () => {
+    artifactsReady = false;
     const strict = !server && process.env.OAW_ALLOW_PACK_FAILURES !== '1';
     packs = await discover({ strict });
     for (const pack of packs) {
@@ -24,6 +25,7 @@ export function sourcePackArtifacts({ discover = sourcePacks, buildPack = buildS
         await reportPackFailure(pack.owner, error);
       }
     }
+    artifactsReady = true;
   };
   return {
     name: 'oaw-source-pack-artifacts',
@@ -69,7 +71,7 @@ export function sourcePackArtifacts({ discover = sourcePacks, buildPack = buildS
       });
     },
     async closeBundle() {
-      if (server) return;
+      if (server || !artifactsReady) return;
       for (const pack of packs) {
         if (failed.has(pack.owner)) continue;
         // The manifest proves that the builder completed before artifacts are

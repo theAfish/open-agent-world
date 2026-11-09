@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from backend.agents import MockAgentRuntime
 from backend.config import Settings
@@ -11,7 +12,7 @@ from backend.errors import ConflictError, PermissionDeniedError, RevisionConflic
 from backend.legions.runtime import LegionStateWrite, read_shared_state, write_shared_state
 from backend.services import create_services
 from backend.tests.conftest import create_node
-from backend.world.models import CardCreate, CardPatch
+from backend.world.models import CardCreate, CardPatch, CardsUpdate
 
 
 def test_legion_is_managed_and_cannot_be_created_directly(client):
@@ -54,6 +55,41 @@ def test_group_membership_move_external_edges_and_reload(client):
     for member in members:
         assert client.patch(f"/api/nodes/{member['id']}", json={"parent_id": None}).status_code == 200
     assert client.delete(f"/api/nodes/{group['id']}").status_code == 200
+
+
+def test_large_nested_legion_position_batch_is_atomic(client):
+    services = client.app.state.services
+    deployed = client.post('/api/legions/presets/matcreator.native-research/instances', json={})
+    assert deployed.status_code == 201, deployed.text
+    group_id = deployed.json()['node_ids']['group']
+    for index in range(119 - len(services.world.descendants(group_id)) - 1):
+        create_node(client, 'text', parent_id=group_id, name=f'Research resource {index}')
+    before = [services.world.get_card(group_id), *services.world.descendants(group_id)]
+    assert len(before) == 119 and len(services.world.list_members(group_id)) <= 100
+    configs = {node['id']: node['config'] for node in client.get('/api/nodes').json()}
+    edges = {edge.id for edge in services.world.list_edges()}
+    moved = client.post('/api/nodes/batch-update', json={'updates': [
+        {'node_id': node.id, 'patch': {'position': {'x': node.position.x + 5000, 'y': node.position.y + 7000}}}
+        for node in before]})
+    assert moved.status_code == 200, moved.text
+    after = {node['id']: node for node in moved.json()}
+    assert set(after) == {node.id for node in before}
+    for original in before:
+        assert after[original.id]['position'] == {'x': original.position.x + 5000, 'y': original.position.y + 7000}
+        assert after[original.id]['parent_id'] == original.parent_id
+        assert after[original.id]['config'] == configs[original.id]
+    assert {edge.id for edge in services.world.list_edges()} == edges
+    updates = [{'node_id': ident, 'patch': {'position': {'x': node['position']['x'] + 100, 'y': node['position']['y']}}}
+        for ident, node in after.items()]
+    updates[-1]['patch']['expected_revision'] = after[updates[-1]['node_id']]['revision'] + 100
+    rejected = client.post('/api/nodes/batch-update', json={'updates': updates})
+    assert rejected.status_code == 409, rejected.text
+    assert all(services.world.get_card(ident).position.model_dump() == node['position'] for ident, node in after.items())
+
+
+def test_canvas_position_batches_remain_bounded():
+    with pytest.raises(ValidationError, match='at most 10000'):
+        CardsUpdate.model_validate({'updates': [{'node_id': f'node-{i}', 'patch': {}} for i in range(10001)]})
 
 
 def test_formation_encloses_existing_surfaces_without_compressing_positions(client):

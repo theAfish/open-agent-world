@@ -93,6 +93,21 @@ def test_real_portable_fixture_install_verify_and_tamper(tmp_path, archive):
     repaired = manager.prepare(spec)
     assert repaired.operation_id == handle.operation_id
     assert manager.status(spec)['status'] == 'ready'
+    assert list((manager.root / 'staging').iterdir()) == []
+
+
+def test_collected_executable_payload_is_unprepared_and_can_be_prepared_again(tmp_path):
+    spec, _ = fixture_spec(tmp_path)
+    manager = ExecutableEnvironmentManager(tmp_path / 'profile')
+    handle = manager.prepare(spec)
+    collected = tmp_path / 'collected'
+    assert handle.root.resolve().is_relative_to(tmp_path.resolve())
+    assert collected.resolve().is_relative_to(tmp_path.resolve())
+    handle.root.rename(collected)
+    status = manager.status(spec)
+    assert status['status'] == 'missing' and status['error'] is None
+    assert manager.prepare(spec).operation_id == handle.operation_id
+    assert manager.status(spec)['status'] == 'ready'
 
 
 def test_collected_executable_payload_is_unprepared_and_can_be_prepared_again(tmp_path):
@@ -125,6 +140,7 @@ def test_checksum_is_verified_before_execution(tmp_path):
     with pytest.raises(ValueError, match='checksum'):
         manager.prepare(spec)
     assert manager.status(spec)['status'] == 'failed'
+    assert list((manager.root / 'staging').iterdir()) == []
 
 
 def test_external_adoption_is_explicit_owned_and_readonly_status(tmp_path, monkeypatch):
@@ -176,8 +192,10 @@ def test_verified_stage_recovers_without_artifact_download(tmp_path):
     operation_file = manager._operation(spec)
     operation = json.loads(operation_file.read_text(encoding='utf-8'))
     stage = manager.root / 'staging' / operation['stage']
+    stage.mkdir()  # Simulate an interrupted publication, after successful staging was reclaimed.
     handle.root.rename(stage / 'payload')
     operation['status'] = 'preparing'
     operation_file.write_text(json.dumps(operation), encoding='utf-8')
     (tmp_path / 'fixture.bin').unlink()
     assert manager.prepare(spec).operation_id == handle.operation_id
+    assert not stage.exists()

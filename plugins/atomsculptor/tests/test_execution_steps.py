@@ -14,7 +14,7 @@ from test_workflow import evidence, activate
 from test_execution_actions import request, prepare
 
 
-async def setup(*, save_error=False, exit_code=0, running=False, cancel_after_save=False, stdout="actual measurement"):
+async def setup(*, save_error=False, exit_code=0, running=False, cancel_after_save=False, stdout="actual measurement", preparation_error=False):
     e = evidence()
     definitions = [ScopedToolDefinition("operation:" + name, "alias_" + name, "Native operation", input_schema={
         "properties": {"timeout_seconds": {"type": "number"}}} if name == "execute_command" else None)
@@ -45,6 +45,10 @@ async def setup(*, save_error=False, exit_code=0, running=False, cancel_after_sa
             return {"written": len(text.encode())}
         if name == "execute_command" and running:
             return {"status": "running", "operation_id": "native-op"}
+        if preparation_error:
+            return {"ok": False, "operation_id": "native-op", "command_id": "native-op", "command_started": False,
+                "error": {"type": "SandboxPreparationError", "code": "environment_preparation_failed",
+                          "message": "dependency download timeout", "command_dispatched": False}}
         return {"exit_code": exit_code, "command_id": "native-op", "stdout": stdout() if callable(stdout) else stdout, "stderr": "failure" if exit_code else ""}
 
     async def invoke(capability, args):
@@ -58,6 +62,20 @@ async def setup(*, save_error=False, exit_code=0, running=False, cancel_after_sa
             "stop_condition": "Stop after this measurement", **overrides})
 
     return e, calls, run
+
+
+@pytest.mark.asyncio
+async def test_queued_preparation_failure_retains_source_without_unknown_execution_or_scientific_review():
+    e, calls, run = await setup(running=True, preparation_error=True)
+    result = await run()
+    assert result["step"]["state"] == "execution_not_started"
+    assert result["error"]["command_dispatched"] is False and result["submitted_changes_saved"]
+    assert e.script_sources[("box", "step.py")] == "print('measurement')"
+    assert not e.pending and not e.executions and e.latest_experiment() is None
+    assert e.sandbox_environments["box"]["dependencies"]["state"] == "failed"
+    action, allowed = e.actions.next_action(e)
+    assert "Infrastructure preparation failed" in action and "run_modelling_step" not in allowed
+    assert not e.workflow.review_request
 
 
 def prior(e, **extra):
@@ -82,14 +100,19 @@ async def test_combined_assessment_and_cas_repair_uses_one_action_and_real_nativ
 
 
 @pytest.mark.asyncio
-async def test_stale_assessment_and_invalid_assumption_prevent_new_native_work():
+async def test_stale_receipts_are_rejected_but_model_continue_is_preserved():
     e, calls, run = await setup()
     await run()
     result = await run(script_path="later.py", previous_assessment=prior(e, command_id="stale"))
     assert result["error"]["code"] == "assessment_receipt" and len(calls) == 2
-    result = await run(script_path="later.py", previous_assessment=prior(e, assumption_invalid=True))
-    assert result["error"]["code"] == "plan_review_required" and len(calls) == 2
-    assert e.experiment_history[-1]["outcome"] == "needs_plan_review"
+    assessment = e.workflow.assess_previous(e, prior(e, assumption_invalid=True))
+    assert assessment["observation"]["outcome"] == "continue"
+    blocked = e.workflow.advance(e, "probe", "box", "step.py")
+    assert blocked["error"]["code"] == "candidate_contradiction"
+    result = await run(script_path="later.py")
+    assert result["ok"] and len(calls) == 4
+    assert e.experiment_history[0]["assumption_invalid"] is True
+    assert not e.workflow.checkpoints
 
 
 @pytest.mark.asyncio
@@ -131,16 +154,15 @@ async def test_mismatched_assessment_recovery_reuses_original_patch_without_retr
 
 
 @pytest.mark.asyncio
-async def test_search_requires_exact_successful_sample_and_cas_reuse_keeps_program():
+async def test_finite_search_can_start_directly_and_saved_source_is_reused():
     e, calls, run = await setup()
-    assert (await run(execution_scope="search"))["error"]["code"] == "sample_required"
-    assert not calls
-    await run(argv=["--sample"])
-    digest = e.latest_experiment().version
-    result = await run(source="",  execution_scope="search", argv=["--search"],
-                       previous_assessment=prior(e))
-    assert result["ok"] and calls[2][1]["argv"] == ["python3", "step.py", "--search"]
-    assert calls[2][0] == "execute_command" and e.latest_experiment().version == digest
+    first = await run(execution_scope="search", argv=["--search"])
+    assert first["ok"] and first["step"]["execution_scope"] == "search"
+    assert len(calls) == 2 and calls[-1][1]["argv"] == ["python3", "step.py", "--search"]
+    version = e.latest_experiment().version
+    result = await run(source="", execution_scope="search", argv=["--larger-search"], previous_assessment=prior(e))
+    assert result["ok"] and calls[-1][0] == "execute_command" and len(calls) == 3
+    assert e.latest_experiment().version == version
     assert (await run(source="print('different')", execution_scope="search", argv=["--search"]))["error"]["code"] == "step_mode"
     assert len(calls) == 3
 
@@ -169,6 +191,10 @@ async def test_step_saves_executes_collects_native_receipts_once(exit_code, runn
     assert not e.outputs and not e.workflow.checkpoints  # Execution is not acceptance.
     second = await run(script_path="later.py")
     assert second["error"]["code"] == ("local_repair_required" if exit_code else "experiment_observation_required")
+    if exit_code == 0:
+        guidance = second["error"]["message"]
+        assert "previous_assessment" in guidance and "advance_modelling_stage" in guidance
+        assert "Omitted receipt fields" in guidance
     assert len(calls) == 2 + int(running)
 
 
@@ -240,12 +266,15 @@ async def test_combined_checkpoint_never_bypasses_independent_build_validation()
 
 
 @pytest.mark.asyncio
-async def test_failed_sample_and_external_source_change_cannot_authorize_search():
+async def test_failed_saved_source_still_needs_explicit_repair_or_rerun():
     e, calls, run = await setup(exit_code=1)
     await run()
-    assert (await run(source="", 
-                      execution_scope="search", previous_assessment=prior(e)))["error"]["code"] == "sample_required"
+    result = await run(source="", execution_scope="search", previous_assessment=prior(e))
+    assert result["error"]["code"] == "local_repair_required"
     assert len(calls) == 2
+    repaired = await run(source="print('replacement')", action_mode="rewrite", previous_assessment=prior(e))
+    assert repaired["step"]["action_mode"] == "rewrite" and len(calls) == 4
+    assert e.script_sources[("box", "step.py")] == "print('replacement')"
 
 
 @pytest.mark.asyncio
@@ -264,7 +293,9 @@ async def test_focused_context_preserves_request_and_acceptance_without_future_a
     assert "acceptance_checks" not in view
     requirements = {r["id"]: r for r in stable_plan["requirements"]}
     current = stable_plan["plan"][0]
-    assert {k: v for k, v in current.items() if k != "check_ids"} == {k: v for k, v in complete_plan[0].items() if k != "checks"}
+    assert {k: v for k, v in current.items() if k != "check_ids"} == {k: v for k, v in complete_plan[0].items() if k not in {"checks", "experiment"}}
+    actual_action = host["working_decision"]["current_subtask"]
+    assert {k: actual_action[k] for k in complete_plan[0]["experiment"]} == complete_plan[0]["experiment"]
     assert [requirements[identity]["check"] for identity in current["check_ids"]] == complete_plan[0]["checks"]
     assert {stage: [requirements[identity]["check"] for identity in ids]
             for stage, ids in stable_plan["acceptance_checks"].items()} == {stage["id"]: stage["checks"] for stage in complete_plan}
@@ -275,7 +306,7 @@ async def test_focused_context_preserves_request_and_acceptance_without_future_a
 
 
 @pytest.mark.asyncio
-async def test_dependent_batch_is_withheld_and_recovered_without_partial_dispatch():
+async def test_dependent_batch_keeps_call_ids_and_returns_individual_rejections():
     from google.adk.models.base_llm import BaseLlm
     from google.adk.models.llm_response import LlmResponse
     from oaw_atomsculptor.model_recovery import bounded_output_model
@@ -283,24 +314,23 @@ async def test_dependent_batch_is_withheld_and_recovered_without_partial_dispatc
     e.actions.sandbox_states["box"] = "ready"
     req = request({"run_modelling_step", "write_sandbox_text_file", "execute_command", "advance_modelling_stage", "finish_task"})
     prepare(e, req)
-    await e.trace.callbacks("structure_builder")["before_model_callback"](None, req)
     turns = []
-
     class Fixture(BaseLlm):
         model: str = "openai/step-fixture"
-
         async def generate_content_async(self, request, stream=False):
             turns.append(request)
-            names = ["write_sandbox_text_file", "execute_command"] if len(turns) == 1 else ["run_modelling_step"]
             yield LlmResponse(content=types.Content(role="model", parts=[types.Part(function_call=
-                types.FunctionCall(name=name, id=name, args={})) for name in names]))
-
+                types.FunctionCall(name=name, id=name, args={})) for name in ["write_sandbox_text_file", "execute_command"]]))
     accepted = [response async for response in bounded_output_model(Fixture(), e.trace, "structure_builder",
         e, NS(types=types), 81920).generate_content_async(req)]
-    assert len(turns) == 2 and len(accepted) == 1
-    assert accepted[0].content.parts[0].function_call.name == "run_modelling_step"
-    assert not calls and not e.scripts  # Rejected dependency batch never reached native tools.
-    assert e.actions.recoveries == 1
+    assert len(turns) == len(accepted) == 1
+    hooks = e.tool_callbacks("structure_builder")
+    for part in accepted[0].content.parts:
+        call = part.function_call
+        rejected = await hooks["before_tool_callback"](NS(name=call.name), call.args, NS(function_call_id=call.id))
+        assert rejected["error"]["code"] == "non_readonly_tool_batch"
+        assert rejected["error"]["call_id"] == call.id and rejected["error"]["command_dispatched"] is False
+    assert not calls and not e.scripts and e.actions.recoveries == 0
     assert not e.actions.dependent_batch(e, [types.Part(function_call=types.FunctionCall(name="inspect_sandbox", args={})),
                                            types.Part(function_call=types.FunctionCall(name="inspect_atom_structure", args={}))])
 

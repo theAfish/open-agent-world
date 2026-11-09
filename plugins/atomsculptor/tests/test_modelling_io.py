@@ -107,12 +107,75 @@ def test_standard_structure_writer_preserves_cell_labels_and_ids(tmp_path,monkey
     assert back.arrays['atomsculptor_id'].tolist()==[9,17] and result['round_trip']
     assert result['independent_validation'] is False
     assert result['atom_count'] == 2 and 'sha256' not in result
+    io.artifact(result['path'], units='angstrom', frame={'origin': [0,0,0], 'axes': np.eye(3).tolist()},
+                components={'C': 1, 'O': 1}, layout=result['layout'])
+    assert result['layout'] == {'format': 'xyz', 'primary_dataset': 'extxyz_atoms'}
     # A normal Path.cwd()/filename is still the same authorized output.
     assert io.write_extxyz(tmp_path/'absolute.extxyz', atoms)['round_trip']
     with pytest.raises(ValueError,match='workspace'):io.write_extxyz('../outside.extxyz',atoms)
     with pytest.raises(ValueError,match='workspace'):io.write_extxyz(tmp_path.parent/'outside.extxyz',atoms)
     (tmp_path/'escape').symlink_to(tmp_path.parent, target_is_directory=True)
     with pytest.raises(ValueError,match='workspace'):io.write_extxyz('escape/outside.extxyz',atoms)
+
+
+def test_published_helper_example_writes_and_reports_without_fallback(tmp_path, monkeypatch, capsys):
+    from oaw_atomsculptor.execution_steps import ExecutionSteps
+    ase = pytest.importorskip('ase')
+    from ase.io import read
+    steps = ExecutionSteps(); steps.enable_helpers()
+    contract = steps.helper_contract()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(sys.modules, contract['module'], io)
+    atoms = ase.Atoms('CO', positions=[[3, 4, 5], [4.2, 4, 5]], cell=[20, 20, 20], pbc=False)
+    namespace = {'atoms': atoms}
+    # Run exactly the public example, including the named path/atoms arguments.
+    exec(contract['example'], namespace)
+    saved = read('candidate.extxyz')
+    assert saved.get_chemical_symbols() == ['C', 'O']
+    assert namespace['write_receipt']['round_trip']
+    report, issues = parse_measurements(capsys.readouterr().out)
+    assert not issues and report['kind'] == 'diagnostic' and report['values']['atom_count'] == 2
+    assert contract['signatures']['write_extxyz'] == 'write_extxyz(path, atoms)'
+    assert contract['input_methods']['array'] == 'inputs.array(path, dataset)'
+
+
+def test_saved_report_reenvelopes_measured_data_and_failed_checks_without_recalculation(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    values = {'observed_count': 7, 'saved_positions': list(range(200))}
+    io.emit_measurements(values=values, constraints=[io.constraint('measured_failure', False, 'Observed shortfall')],
+                         report_path='reports/measurement.json')
+    capsys.readouterr()
+    saved = json.loads(Path('reports/measurement.json').read_text())['oaw_measurements']
+    assert saved['values'] == values and not saved['constraints'][0]['passed']
+    # The reporting branch consumes the native saved record, rather than calling
+    # the scientific computation again or reconstructing its values in prose.
+    saved['artifacts'] = []
+    io.emit_measurements(**saved, report_path='reports/measurement.json')
+    parsed, issues = parse_measurements(capsys.readouterr().out)
+    assert not issues and parsed['constraints'][0]['passed'] is False
+    assert json.loads(Path('reports/measurement.json').read_text())['oaw_measurements']['values'] == values
+    with pytest.raises(ValueError, match='inside'):
+        io.emit_measurements(values=values, report_path='../outside.json')
+    original = Path('reports/measurement.json').read_text()
+    with pytest.raises(ValueError):
+        io.emit_measurements(constraints=[{'passed': float('nan')}], report_path='reports/measurement.json')
+    assert Path('reports/measurement.json').read_text() == original
+
+
+def test_invalid_envelope_points_to_saved_data_for_a_reporting_only_repair(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    item = io.artifact('shape.extxyz', units='angstrom', frame={'origin': [0,0,0], 'axes': [[1,0,0],[0,1,0],[0,0,1]]},
+                       components={'object': 4}, layout={'format': 'not_a_format'})
+    io.emit_measurements(artifacts=[item], values={'measured_count': 4},
+        constraints=[io.constraint('actual_failure', False)], report_path='saved.json')
+    parsed, issues = parse_measurements(capsys.readouterr().out)
+    assert parsed is None and issues[0]['saved_report_file'] == 'saved.json'
+    saved = json.loads(Path('saved.json').read_text())['oaw_measurements']
+    saved['artifacts'][0]['layout'] = {'format': 'xyz', 'primary_dataset': 'extxyz_atoms'}
+    io.emit_measurements(**saved, report_path='saved.json')
+    parsed, issues = parse_measurements(capsys.readouterr().out)
+    assert not issues and parsed['values']['measured_count'] == 4
+    assert parsed['constraints'][0]['passed'] is False
 
 
 @pytest.mark.parametrize('optimizer', ['FIRE', 'LBFGS'])

@@ -1,5 +1,5 @@
 ---
-name: nanostructure-creation
+name: nanostructure_creation
 description: Design and validate nanoparticles, carbon nanotubes, shells and filled nanostructures.
 when_to_use: Read for a nanostructure task when geometry, chirality, PBC or filling needs an explicit design decision.
 ---
@@ -7,7 +7,7 @@ when_to_use: Read for a nanostructure task when geometry, chirality, PBC or fill
 # Nanostructure creation
 
 This is guidance, not an executable builder. Read it from an authorized OAW
-Skill card or Toolbox. Use the packaged `nanotube-builder` only if the user
+Skill card or Toolbox. Use the packaged `nanotube_builder` only if the user
 permits `ase.build.nanotube`; otherwise write and run authorized Sandbox code
 that meets the user's restrictions. No `cylinder_filler`, `molecule_filler`,
 `atomic_text` or generic nanoparticle builder is shipped in this Toolbox.
@@ -31,7 +31,7 @@ force tolerance and iteration bound for this experiment. Record actual forces,
 convergence and potential/parameter identity. A fitted spring or distance penalty
 can prepare geometry but does not demonstrate physical stability. Force convergence
 alone also does not validate the requested topology or establish a global minimum.
-Reinspect the resulting saved file with the existing `structure-inspect` workflow;
+Reinspect the resulting saved file with the existing `structure_inspect` workflow;
 do not reuse pre-relaxation passes for changed coordinates.
 
 ## Carbon nanotubes

@@ -3,3 +3,5 @@
 # Preserve vendored engine bytes and their SHA256 manifest across platforms.
 plugins/xrd/src/oaw_xrd/OAW_XRDfit/** -text -whitespace
 plugins/xrd/engines/*.patch -whitespace
+
+frontend/pack-sdk/sdk-exports.mjs text eol=lf

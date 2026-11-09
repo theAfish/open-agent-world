@@ -1,6 +1,10 @@
 # Surface Creation — Validation Checklist
 
-Load via `read_skill("surface-creation", "references/checklist.md")`.
+Read with `read_skills` arguments
+`{"toolbox":"atomsculptor_skills","skill_id":"surface_creation","file_path":"references/checklist.md"}`.
+For a direct Skill connection use `read_skill` arguments
+`{"skill":"surface_creation","file_path":"references/checklist.md"}` instead.
+Copy the exact authorized toolbox/skill selector from the tool declaration.
 
 ## Before generating
 - [ ] Bulk source confirmed (MP ID recorded, or hand-built parameters noted).
@@ -8,11 +12,12 @@ Load via `read_skill("surface-creation", "references/checklist.md")`.
 
 ## After generating
 - [ ] Correct Miller indices and surface orientation.
-- [ ] Proper surface termination (all structural units intact).
-- [ ] ≥ 5 layers (for DFT).
-- [ ] ≥ 10 Å vacuum.
-- [ ] PBC = (True, True, False).
-- [ ] Adsorbate periodic images > 10 Å apart in supercell.
+- [ ] Surface termination and structural units match the requested physical model.
+- [ ] Layer count/thickness and vacuum justified for the target properties.
+- [ ] ASE equivalent-layer count distinguished from individual atomic planes.
+- [ ] Vacuum recorded per side; a fixed layer count or distance is not convergence proof.
+- [ ] Intended PBC checked (an isolated slab commonly uses True, True, False).
+- [ ] Actual adsorbate-image separation measured and tested for convergence as needed.
 
 ## Output
 - [ ] Saved as `.extxyz` (preferred). Optionally also CIF / POSCAR.
@@ -21,7 +26,8 @@ Load via `read_skill("surface-creation", "references/checklist.md")`.
 ## Format notes
 - `.extxyz` preserves PBC and per-atom info — preferred for surfaces.
 - CIF for visualization; POSCAR for VASP.
-- ASE handles conversions: `ase build --change-format <format>`.
+- ASE handles conversions, for example: `ase convert slab.extxyz slab.cif`.
+- Reinspect the converted file; output formats can change which metadata/PBC survive.
 
 ## Reconstruction & relaxation
 - Real surfaces may reconstruct — plan a relaxation step if accuracy matters.

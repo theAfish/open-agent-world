@@ -54,7 +54,7 @@ def test_node_cli_dependencies_remain_sandbox_only_and_reject_installer_options(
 
 @pytest.mark.parametrize("definition", [
     EnvironmentSpec(target="host-worker"),
-    EnvironmentSpec(target="sandbox", management="legacy-shared"),
+    EnvironmentSpec(target="sandbox", management="legacy-shared", requires_python=">=3.13"),
     EnvironmentSpec(target="sandbox", provider="external", management="external"),
     EnvironmentSpec(target="sandbox", lock="uv.lock"),
     EnvironmentSpec(target="sandbox", resources=("resource.py",)),
@@ -95,6 +95,77 @@ def test_profile_binding_wraps_same_runtime_mount_and_keeps_arguments(tmp_path):
     root = materialize_bundle(tmp_path, mount.bundle)
     assert mount.command(argv, root)[3] == str(root / "_oaw_profile/runner.py")
     assert (root / "scripts/probe.py").read_bytes() == b"print(1)"
+
+
+def test_shared_profiles_bind_native_python_without_a_private_installer():
+    plugins = registry(EnvironmentSpec(target="sandbox", management="legacy-shared", python=("numpy>=2",)))
+    recipe = pack_profiles.resolve_profiles(plugins, (requirement(),))
+    assert recipe["management"] == "legacy-shared" and recipe["python"] == ["numpy>=2"]
+    command = ["python3", "-c", "print('already prepared')"]
+    argv, mount = pack_profiles.bind_command_profiles(plugins, (requirement(),), command)
+    assert argv[5:] == command
+    assert json.loads(dict(mount.bundle.files)["_oaw_profile/recipe.json"])["management"] == "legacy-shared"
+    bundle = RuntimeBundle("skills/example", (("scripts/probe.py", b"print(1)"),))
+    argv, mount = pack_profiles.bind_profiles(plugins, (requirement(),), bundle,
+                                             ["python3"], "scripts/probe.py", ["a b", "$(literal)"])
+    assert argv[5:] == ["a b", "$(literal)"]
+    assert dict(mount.bundle.files)["scripts/probe.py"] == b"print(1)"
+    assert json.loads(dict(mount.bundle.files)["_oaw_profile/recipe.json"])["management"] == "legacy-shared"
+    plugins.enrolled_pack_owners = set()
+    with pytest.raises(SandboxValidationError, match="uninstalled"):
+        pack_profiles.bind_command_profiles(plugins, (requirement(),), command)
+
+
+def test_extra_private_skill_dependencies_still_compose_with_shared_defaults():
+    plugins = registry(EnvironmentSpec(target="sandbox", management="legacy-shared", python=("numpy>=2",)))
+    plugins.pack_specs["example"].environments["extra"] = EnvironmentSpec(target="sandbox", python=("optional-engine==1",))
+    references = (requirement(), SkillRuntimeRequirement(owner="example", environment="extra"))
+    recipe = pack_profiles.resolve_profiles(plugins, references)
+    assert "management" not in recipe
+    assert recipe["python"] == ["numpy>=2", "optional-engine==1"]
+    argv, mount = pack_profiles.bind_command_profiles(plugins, references, ["python3", "probe.py"])
+    assert argv[:4] == ["python3", "-I", "-S", "_oaw_profile/runner.py"]
+    assert mount is not None
+
+
+def test_real_shared_commands_and_skills_reuse_prepared_environment_across_sandboxes(tmp_path):
+    from backend.sandbox.python_runtime import SharedPythonRuntime
+    shared = SharedPythonRuntime(tmp_path / "host")
+    # Model an already prepared host-owned environment, with no network/pip.
+    subprocess.run([sys.executable, "-I", "-m", "venv", "--without-pip", str(shared.venv)], check=True)
+    site = Path(subprocess.check_output([str(shared.python), "-I", "-c",
+                                       "import sysconfig;print(sysconfig.get_path('purelib'))"], text=True).strip())
+    (site / "shared_probe.py").write_text("answer = 42\n")
+    plugins = registry(EnvironmentSpec(target="sandbox", management="legacy-shared", verify_imports=("shared_probe",)))
+    source = "import json,sys;from shared_probe import answer;print(json.dumps([answer,sys.prefix,sys.argv[1:]]))"
+    bundle = RuntimeBundle("skills/example", (("scripts/probe.py", source.encode()),))
+    for identity in ("first", "second"):
+        sandbox = tmp_path / identity
+        sandbox.mkdir()
+        ordinary, ordinary_mount = pack_profiles.bind_command_profiles(plugins, (requirement(),), ["python3", "-c", source, identity])
+        ordinary_root = materialize_bundle(sandbox, ordinary_mount.bundle)
+        skill, mount = pack_profiles.bind_profiles(plugins, (requirement(),), bundle,
+                                                 ["python3"], "scripts/probe.py", [identity])
+        root = materialize_bundle(sandbox, mount.bundle)
+        environment = {**os.environ, 'HOME': str(sandbox), 'LOCALAPPDATA': str(sandbox)}
+        shared.environment(environment)
+        for argv in (ordinary_mount.command(ordinary, ordinary_root), mount.command(skill, root)):
+            result = subprocess.run(shared.command(argv), cwd=sandbox, env=environment,
+                                    capture_output=True, text=True, check=True)
+            value = json.loads(result.stdout)
+            assert value == [42, str(shared.venv), [identity]]
+        assert not (sandbox / ".oaw/pack-environments").exists()
+    # A usable interpreter alone is insufficient: a missing declared import
+    # must prevent even an otherwise valid user command from running.
+    (site / "shared_probe.py").unlink()
+    argv, mount = pack_profiles.bind_command_profiles(plugins, (requirement(),),
+        ["python3", "-c", "from pathlib import Path;Path('command-started').touch()"])
+    root = materialize_bundle(sandbox, mount.bundle)
+    failed = subprocess.run(shared.command(mount.command(argv, root)), cwd=sandbox, env=environment,
+                            capture_output=True, text=True)
+    assert failed.returncode == 1 and "shared_probe" in failed.stderr
+    assert not (sandbox / "command-started").exists()
+    assert not (sandbox / ".oaw/pack-environments").exists()
 
 
 def execute_fixture(tmp_path, *, requirements=(), imports=()):
@@ -251,6 +322,27 @@ def test_builtin_executable_skill_references_resolve_current_declarations():
     local = next(value for value in json.loads((PACKAGE / "packages/core.json").read_text(encoding="utf-8"))["skills"]
                  if value["id"] == "local-structure")
     assert pack_profiles.resolve_profiles(plugins, Skill.model_validate(local).runtime_requirements)["python"] == ["ase<4,>=3.23"]
+
+
+def test_atomsculptor_preflight_uses_core_and_each_skills_declared_imports():
+    from backend.plugins.loader import load_plugin_registry
+
+    plugins = load_plugin_registry()
+    core = SkillRuntimeRequirement(owner="atomsculptor", environment="modelling")
+    ordinary = pack_profiles.resolve_profiles(plugins, (core,))
+    assert ordinary["verify_imports"] == ["ase", "numpy"]
+    # Preflight scope is smaller, but preparation still includes optional tools.
+    assert {"mp-api", "pandas", "rdkit", "matplotlib>=3.7"} <= set(ordinary["python"])
+    for name, imports in {
+        "structure-inspect": {"ase", "numpy", "pymatgen.core"},
+        "structure-image": {"ase", "matplotlib", "numpy", "pymatgen.core"},
+        "materials-project-search": {"ase", "numpy", "mp_api.client"},
+        "molecular-structure-creation": {"ase", "numpy", "rdkit.Chem"},
+    }.items():
+        skill = SkillRuntimeRequirement(owner="atomsculptor", environment=name)
+        recipe = pack_profiles.resolve_profiles(plugins, (core, skill))
+        assert set(recipe["verify_imports"]) == imports
+        assert set(ordinary["python"]) <= set(recipe["python"])
 
 
 @pytest.mark.parametrize('argv', [

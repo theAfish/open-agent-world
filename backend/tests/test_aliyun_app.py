@@ -89,12 +89,25 @@ def test_existing_sandbox_http_contract_with_cloud_adapter(cloud_client):
     assert response.status_code == 201, response.text
     response = client.get(base + "/files", params={"operation": "download", "path": "sample.txt"})
     assert response.status_code == 200 and response.content == contents
-    response = client.post(base + "/execute", json={"command": "printf hello", "timeout_seconds": 30})
+    response = client.post(base + "/execute", headers={'X-OAW-State-Session': 'default'},
+                           json={"command": "printf hello", "timeout_seconds": 30})
     assert response.status_code == 200, response.text
     assert response.json()["stdout"] == "hello from remote\n"
     assert sdk.killed == ["remote-1"]
     response = client.get(base + "/files", params={"operation": "download", "path": "sample.txt"})
     assert response.content == contents
+
+
+def test_cloud_keeps_profile_isolation_and_rejects_unsupported_session_scopes(cloud_client):
+    client, sdk = cloud_client
+    created = client.post('/api/nodes', json={'type': 'sandbox'})
+    assert created.status_code == 201, created.text
+    assert created.json()['config']['workspace_scope'] == 'shared'
+    for scope in ('session', 'group'):
+        rejected = client.post('/api/nodes', json={'type': 'sandbox', 'config': {'workspace_scope': scope}})
+        assert rejected.status_code == 422, rejected.text
+    # Rejected policies must not allocate a VM or silently widen the scope.
+    assert not sdk.created
 
 
 def test_personal_profile_default_is_not_accepted_by_cloud_entry(monkeypatch):

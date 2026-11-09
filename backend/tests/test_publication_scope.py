@@ -7,6 +7,7 @@ from backend.api.dependencies import get_services
 from backend.deployment_workspace import workspace_router
 from backend.plugins.deployment import DeploymentSurface
 from backend.publication_scope import public_value
+from backend.tests.plugin_support import publication_services
 
 
 def test_common_projection_removes_nested_credentials_without_mutating_business_data():
@@ -35,7 +36,8 @@ def test_declared_resource_results_also_cross_the_common_credential_boundary(mon
     monkeypatch.setattr("backend.deployment_workspace.invoke_resource_action", run)
     access = DeploymentSurface(resource_actions={"read": {"answer", "details", "password"}}).model_dump(mode="json")
     app = FastAPI()
-    app.dependency_overrides[get_services] = lambda: None
+    services = publication_services()
+    app.dependency_overrides[get_services] = lambda: services
     app.include_router(workspace_router({"permissions": {"node": []}, "plugin_access": {"node": access}}))
     with TestClient(app) as client:
         assert client.post("/workspace/nodes/node/resource/read", json={"arguments": {}}).json() == {"answer": 42, "details": {"score": .5}}

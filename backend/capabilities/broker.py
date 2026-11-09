@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.capabilities.models import Capability, CapabilitySet
-from backend.errors import PermissionDeniedError, ResourceValidationError
+from backend.errors import GraphValidationError, PermissionDeniedError, ResourceValidationError
 from backend.legions.runtime import member_team
 from backend.plugins import PluginRegistry
 from backend.resources.manager import ManagedResourceStore
@@ -31,6 +31,15 @@ class CapabilityBroker:
         self.resources = resources
         self.plugins = plugins
 
+    def _current_relationship(self, edge):
+        """A persisted edge cannot retain a grant removed by a Pack update."""
+        source = self.world.get_card(edge.source)
+        target = self.world.get_card(edge.target)
+        try:
+            return self.plugins.validate_relationship_order(source.type, target.type, edge.relationship)
+        except GraphValidationError:
+            return None
+
     def require_direct_grant(self, node_id: str, target_id: str, kind: str) -> None:
         """Authorize a direct node-to-node operation, including non-Agent viewers."""
         self.world.get_card(node_id)
@@ -39,8 +48,8 @@ class CapabilityBroker:
         edges.extend((edge, edge.source) for edge in self.world.connections_to(node_id)
                      if edge.direction == EdgeDirection.BIDIRECTIONAL)
         for edge, target in edges:
-            relationship = self.plugins.relationship(edge.relationship)
-            if target == target_id and not relationship.generated and any(grant.kind == kind for grant in relationship.capabilities):
+            relationship = self._current_relationship(edge)
+            if relationship and target == target_id and not relationship.generated and any(grant.kind == kind for grant in relationship.capabilities):
                 return
         raise PermissionDeniedError("Connect the viewer to this file source before reading")
 
@@ -63,8 +72,8 @@ class CapabilityBroker:
                 continue
             visited.add((edge.relationship, target_id))
             target = self.world.get_card(target_id)
-            relationship = self.plugins.relationship(edge.relationship)
-            if relationship.generated:
+            relationship = self._current_relationship(edge)
+            if relationship is None or relationship.generated:
                 continue
             directed_edges.extend(self.forwarded_connections(edge, target_id))
             for grant in relationship.capabilities:

@@ -1,7 +1,8 @@
 """Bind installed Pack dependency recipes to a live authorized Sandbox command.
 
-Preparation and use are one ordinary Sandbox command. No provider calls, host
-installer, package imports, or filesystem mutations occur while resolving it.
+Managed profiles prepare inside an ordinary Sandbox command; shared profiles
+use OAW's existing host bootstrap and read-only Sandbox Python. No provider
+calls, installers, package imports, or filesystem mutations occur in resolution.
 """
 from __future__ import annotations
 
@@ -32,11 +33,13 @@ def environment_digest(declaration) -> str:
 
 def unsupported_profile_reason(declaration) -> str | None:
     """Static provider bounds shared by installation plans and live admission."""
-    if declaration.target != "sandbox" or declaration.management != "managed":
-        return "Skill requirements must reference managed Sandbox environments"
+    if declaration.target != "sandbox" or declaration.management not in {"managed", "legacy-shared"}:
+        return "Skill requirements must reference managed or shared Sandbox environments"
     if declaration.provider not in {"python", "node"}:
         return f"Unsupported Sandbox dependency provider: {declaration.provider}"
-    if declaration.prepare != "on-use":
+    if declaration.management == "legacy-shared" and (declaration.requires_python or declaration.platforms):
+        return "Shared Sandbox Python uses the platform's managed interpreter; use a private profile for version or platform constraints"
+    if declaration.management == "managed" and declaration.prepare != "on-use":
         return "Sandbox profiles support preparation on use in the selected Sandbox"
     if declaration.lock or declaration.resources or declaration.verify_script or declaration.prerequisites:
         return "This Sandbox profile provider does not support lockfiles, extra resources, verification scripts or external prerequisites yet"
@@ -54,6 +57,7 @@ def unsupported_profile_reason(declaration) -> str | None:
 
 def resolve_profiles(registry, references) -> dict:
     python, node, imports, constraints, sources = [], [], [], [], []
+    private = False
     for reference in references:
         if not registry.is_enabled(reference.owner):
             raise SandboxValidationError(f"Required Pack is unavailable or disabled: {reference.owner}")
@@ -68,6 +72,7 @@ def resolve_profiles(registry, references) -> dict:
             raise SandboxValidationError(f"Pack environment changed: {reference.owner}/{reference.environment}; update the Skill requirement")
         if reason := unsupported_profile_reason(declaration):
             raise SandboxValidationError(reason)
+        private = private or declaration.management == "managed"
         try:
             python.extend(validate_requirements(list(declaration.python)))
         except ValueError as exc:
@@ -111,11 +116,16 @@ def resolve_profiles(registry, references) -> dict:
                    for name, declaration in pack.environments.items()
                    if declaration.target == 'sandbox' and declaration.management == 'managed']
         ownership = {'profile': profile_id, 'revision': registry.pack_profile_revision, 'desired': desired}
-    return {"format": 1, "python": sorted(set(python)), "node": sorted(set(node)),
+    recipe = {"format": 1, "python": sorted(set(python)), "node": sorted(set(node)),
             "verify_imports": sorted(set(imports)), "requires_python": sorted(set(constraints)),
             'ownership': ownership,
             "sources": sorted({(item['owner'], item['environment']): item for item in sources}.values(),
                               key=lambda item: (item["owner"], item["environment"]))}
+    if sources and not private:
+        # PluginEnvironmentBootstrap already aggregates these declarations into
+        # SharedPythonRuntime. Never create a private pip installer for them.
+        recipe["management"] = "legacy-shared"
+    return recipe
 
 
 def runtime_profile_references(services, agent_id):

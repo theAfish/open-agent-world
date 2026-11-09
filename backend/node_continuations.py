@@ -26,7 +26,7 @@ MAX_CONTINUATION_TURNS = 64
 class NodeContinuationMixin:
     def watch_continuations(self, node_id):
         kind, namespace = self.services.card_state.identity(node_id)
-        key = (node_id, namespace if kind == "session" else None)
+        key = (node_id, self.namespace_session(kind, namespace))
         self.continuation_keys.add(key)
         self.continuation_versions[key] = self.continuation_versions.get(key, 0) + 1
         self.signal_continuations()

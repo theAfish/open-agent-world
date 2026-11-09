@@ -34,7 +34,7 @@ def activity_update(lifecycle: dict[str, Any], kind: str, payload: dict[str, Any
                 "elapsed_seconds", "idle_seconds", "first_content_seconds", "received_content_chunks",
                 "http_status", "retrying", "max_attempts", "next_attempt", "retry_delay_seconds",
                 "observed_response_chunks", "empty_response_chunks", "first_response_seconds",
-                "last_response_idle_seconds", "watchdog_scope", "error_chain_types") if key in payload})
+                "last_response_idle_seconds", "watchdog_scope", "error_chain_types", "stream_metrics", "recovery_mode") if key in payload})
             if "stage" in payload:
                 row["stream_stage"] = payload["stage"]
             row["interrupted_at"] = timestamp
@@ -43,7 +43,7 @@ def activity_update(lifecycle: dict[str, Any], kind: str, payload: dict[str, Any
         elif "elapsed_ms" in payload:
             row.update({key: payload[key] for key in ("elapsed_ms", "input_tokens", "output_tokens",
                 "max_output_tokens", "finish_reason", "timeout_kind", "deadline_seconds",
-                "received_content", "idle_seconds", "reasoning_available") if key in payload})
+                "received_content", "idle_seconds", "reasoning_available", "stream_metrics") if key in payload})
             row["returned_at"] = timestamp
         else:
             row.setdefault("started_at", timestamp)

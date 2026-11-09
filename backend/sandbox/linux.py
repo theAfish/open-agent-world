@@ -223,8 +223,9 @@ def bubblewrap_command(
     workspace: Path, access: ResourceAccess,
     attachments: Sequence[ResourceAttachment], argv: Sequence[str],
     environment: Mapping[str, str],
-    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False, python_runtime=None, home: Path | None = None, folder_mounts=(),
+    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False, python_runtime=None, home: Path | None = None, folder_mounts=(), working_directory="", workspace_write_directory=None,
 ) -> list[str]:
+    from .files import command_path
     result = [
         "/usr/bin/bwrap", "--unshare-all", "--unshare-user",
         "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--clearenv",
@@ -252,9 +253,13 @@ def bubblewrap_command(
         if Path(name).exists():
             result.extend(("--ro-bind", name, name))
     result.extend((
-        "--ro-bind" if access == ResourceAccess.READ_ONLY else "--bind",
+        "--ro-bind" if access == ResourceAccess.READ_ONLY or workspace_write_directory is not None else "--bind",
         str(workspace), "/workspace",
     ))
+    from .workspace_access import writable_path, mount_access
+    if workspace_write_directory and access != ResourceAccess.READ_ONLY:
+        writable = writable_path(workspace, workspace_write_directory)
+        result.extend(('--bind', str(writable), command_path(workspace_write_directory)))
     # Attachments occupy an independent ephemeral tree: mounting one never
     # creates files in, shadows files in, or changes the selected real folder.
     result.extend(("--dir", "/sandbox", "--dir", "/sandbox/resources"))
@@ -263,7 +268,7 @@ def bubblewrap_command(
         for folder in folder_mounts:
             if folder.kind == "file":
                 result.extend(("--dir", str(Path(folder.linux_path).parent)))
-            result.extend(("--ro-bind" if folder.access == ResourceAccess.READ_ONLY else "--bind",
+            result.extend(("--ro-bind" if mount_access(workspace, folder.source, folder.access, workspace_write_directory) == ResourceAccess.READ_ONLY else "--bind",
                            folder.source, folder.linux_path))
     if home is not None:
         result.extend(("--bind", str(home), "/sandbox/home"))
@@ -271,7 +276,7 @@ def bubblewrap_command(
         result.extend(("--dir", "/sandbox/home"))
     for item in attachments:
         result.extend((
-            "--ro-bind" if item.access == ResourceAccess.READ_ONLY else "--bind",
+            "--ro-bind" if mount_access(workspace, item.source, item.access, workspace_write_directory) == ResourceAccess.READ_ONLY else "--bind",
             str(item.source), f"/sandbox/{item.relative_path}",
         ))
     if python_runtime is not None:
@@ -281,7 +286,7 @@ def bubblewrap_command(
         result.extend(("--ro-bind", str(source), f"/.oaw/{key}"))
     for key, value in environment.items():
         result.extend(("--setenv", key, value))
-    result.extend(("--chdir", "/workspace", "--remount-ro", "/", "--", *argv))
+    result.extend(("--chdir", command_path(working_directory), "--remount-ro", "/", "--", *argv))
     return result
 
 
@@ -314,6 +319,7 @@ class _Record:
 
 
 class LinuxSandboxBackend(SandboxBackend):
+    supports_workspace_scopes = True
     supports_invocation_environment = True
     supports_folder_mounts = True
     supports_execution_policy = True
@@ -503,6 +509,7 @@ class LinuxSandboxBackend(SandboxBackend):
         runtime_mount: RuntimeMount | None = None,
         folder_mounts=(),
         execution_policy: Mapping[str, Any] | None = None,
+        working_directory: str = "", workspace_write_directory: str | None = None,
     ) -> CommandResult:
         policy = execution_policy or {}
         if type(policy.get("network_enabled", False)) is not bool:
@@ -538,8 +545,10 @@ class LinuxSandboxBackend(SandboxBackend):
                 command = runtime_mount.command(command, Path("/.oaw") / runtime_mount.bundle.key)
                 source = materialize_bundle(record.root, runtime_mount.bundle.versioned())
                 mount = (source, runtime_mount.bundle.key)
+            from .files import working_path
+            working_path(record.host_workspace, working_directory)
             isolated = bubblewrap_command(record.host_workspace, record.workspace_access,
-                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")), python_runtime=self.python_runtime, home=record.root / "home", folder_mounts=folder_mounts)
+                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")), python_runtime=self.python_runtime, home=record.root / "home", folder_mounts=folder_mounts, working_directory=working_directory, workspace_write_directory=workspace_write_directory)
             invocation = service_command(isolated, unit, limits, timeout, network_enabled=bool(policy.get("network_enabled")))
             record.state = SandboxState.RUNNING
             record.active_command, record.unit = command, unit

@@ -1,8 +1,40 @@
 import { useEffect, useLayoutEffect } from 'react';
+import { resolveBackground, resolvePalette, useSkinCatalog } from '../appearance/registry';
 import { TEXT_SIZE_STEP, useAppearance } from '../state/appearance';
+import { useWorldStore } from '../state/worldStore';
 
 export function useApplicationAppearance() {
   const textSize = useAppearance(state => state.textSize);
+  const paletteId = useAppearance(state => state.paletteId);
+  const backgroundId = useAppearance(state => state.backgroundId);
+  const theme = useWorldStore(state => state.theme);
+  const { palettes, backgrounds } = useSkinCatalog();
+  const palette = resolvePalette(paletteId, palettes);
+  const background = resolveBackground(backgroundId, backgrounds);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const previousPalette = root.dataset.palette;
+    const previousBackground = root.dataset.background;
+    const previous = Object.entries(palette[theme]).map(([token, value]) => {
+      const saved = { token, value: root.style.getPropertyValue(token), priority: root.style.getPropertyPriority(token) };
+      root.style.setProperty(token, value);
+      return saved;
+    });
+    root.dataset.palette = palette.id;
+    root.dataset.background = background.id;
+    return () => {
+      for (const saved of previous) {
+        if (saved.value) root.style.setProperty(saved.token, saved.value, saved.priority);
+        else root.style.removeProperty(saved.token);
+      }
+      if (previousPalette === undefined) delete root.dataset.palette;
+      else root.dataset.palette = previousPalette;
+      if (previousBackground === undefined) delete root.dataset.background;
+      else root.dataset.background = previousBackground;
+    };
+  }, [palette, background.id, theme]);
+
   useLayoutEffect(() => {
     const root = document.documentElement;
     const previous = root.style.getPropertyValue('--text-scale');

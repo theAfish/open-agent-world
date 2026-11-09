@@ -186,6 +186,21 @@ def test_watchdog_wraps_only_the_generated_seatbelt_command(tmp_path):
 
 
 class TestMinimalEnvironment:
+    def test_library_defaults_are_private_and_explicit_overrides_survive(self, tmp_path, monkeypatch):
+        # Host configuration is not inherited, and invocation settings may
+        # deliberately choose custom fonts or another Joblib backend.
+        monkeypatch.setenv("MPLCONFIGDIR", "/host/font-cache")
+        monkeypatch.setenv("JOBLIB_MULTIPROCESSING", "1")
+        home = tmp_path / "home"
+        env = minimal_darwin_environment(home, tmp_path / "tmp")
+        assert env["MPLCONFIGDIR"] == str(home / ".cache" / "matplotlib")
+        assert env["MPL_IGNORE_SYSTEM_FONTS"] == "1"
+        assert env["JOBLIB_MULTIPROCESSING"] == "0"
+        overrides = {"MPLCONFIGDIR": str(home / "fonts"),
+                     "MPL_IGNORE_SYSTEM_FONTS": "", "JOBLIB_MULTIPROCESSING": "1"}
+        env = minimal_darwin_environment(home, tmp_path / "tmp", invocation_env=overrides)
+        assert all(env[key] == value for key, value in overrides.items())
+
     def test_basic_paths(self, tmp_path):
         env = minimal_darwin_environment(
             tmp_path / "home", tmp_path / "tmp", resources=tmp_path / "resources")

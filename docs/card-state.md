@@ -5,8 +5,9 @@
 Plugin API 1.23 adds an opt-in card state policy. The persistent card and graph
 remain the same when a conversation changes. Card config belongs to the card;
 runtime data belongs to a host-resolved namespace; drafts, hover and selection
-remain frontend state. This API exposes only `shared` and `session`, without
-inheritance or Agent/Run/project scopes.
+remain frontend state. The available scopes are `shared`, `session`, and `group`
+(a native Conversation group). Plugins continue to use bound state without
+accepting namespace identifiers.
 
 ## Declaration
 
@@ -30,6 +31,30 @@ state = StatelessStateSpec()  # mode="none"
 The catalog uses `mode`, `supportedScopes`, `defaultScope`, and
 `userConfigurable`. Empty/duplicate scopes and unsupported defaults are rejected
 at registration. `none` cannot declare a persistent document or execution ledger.
+
+A result view may follow its connected Sandbox's **Workspace sharing** setting:
+
+```python
+state = ScopedStateSpec(
+    supportedScopes=("shared", "session", "group"), defaultScope="session",
+    followWorkspace=True,
+)
+```
+
+Shared, session and group must all be supported. The host resolves a connected Sandbox
+through existing file-preview or Agent execution connections; multiple
+Sandbox sources require one explicit file-source connection. No Sandbox means
+session scope. Document access within a Run uses its saved workspace binding;
+browser access follows the selected Conversation session's saved workspace
+binding. Global shared mode uses the shared document; session/group modes use
+their corresponding namespace. Changing the Sandbox setting applies only to
+new sessions; existing sessions retain their directory and document identity.
+Workspace-following views use only Conversations reachable through the native
+Agent grants. An unrelated active Conversation is not a fallback. Multiple
+connected Conversations without a selected session leave the view unbound; a
+standalone Run uses its independent default identity. Published access validates
+the effective session even when it was inferred from a unique connected source.
+The frontend host scopes `host.draft` and remounts the view on scope changes.
 
 Card metadata exposes the effective `state_scope`. The database stores only the
 explicit `state_scope_override` (in `cards.state_scope`); NULL follows the current
@@ -74,17 +99,25 @@ state after their existing permission checks.
 ## Persistence and migration
 
 `ScopedStateStore` maps `(card_id, scope_type, scope_id)` to an existing StateStore
-scope through `card_state_instances`. Shared uses `*`; session uses the durable
-Conversation session ID. Payloads, timestamps, revisions, events and rollback
+scope through `card_state_instances`. Shared uses `*`; session and group use
+their durable Conversation IDs. Payloads, timestamps, revisions, events and rollback
 stay in `state_scopes`/`state_values`; no second JSON storage engine is introduced.
 Namespaces are created on first access, using document model defaults until the
 first write. Creating a session does not enumerate cards or allocate card state.
 
-The host selects the owning workspace's conversation first. Without a selected
+For cards with a fixed scoped-state policy, the host selects the owning
+workspace's conversation first. Without a selected
 conversation it uses that conversation's General session, or the only
 conversation in the world. A standalone card with no unambiguous conversation
 uses the host's implicit `default` session. That namespace is retained when other
 sessions are used. Session IDs are host transport details, not plugin settings.
+
+For `followWorkspace`, existing shared state remains in its shared namespace.
+Sessions with historical global bindings continue to use it; new isolated
+sessions start in their own namespace without copying or relocating shared
+documents. Established session/group namespaces and revisions remain intact.
+Group deletion cleans up that group's namespaces through the existing
+StateStore lifecycle.
 
 An omitted manifest retains the old shared behavior and original
 `node_document:<card_id>` address. Existing native resources and lifecycle

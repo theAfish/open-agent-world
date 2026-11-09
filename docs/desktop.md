@@ -27,6 +27,12 @@ Application installation and Sandbox provisioning remain separate. Scientific pl
 
 Formal data keeps its existing default location (`%LOCALAPPDATA%\OpenAgentWorld` on Windows), including any relocation already selected in Settings. An application upgrade does not replace this directory. Uninstalling the application leaves user data available for a later reinstall. Source launches continue to support `OPEN_AGENT_WORLD_DATA_ROOT`; the installed desktop uses the formal user location and its storage settings.
 
+Before stopping the workspace for an update, the desktop estimates the space for a full recovery copy. It checks again after shutdown before copying, and cancels the update if space or backup verification fails. Backups retain managed environments as well as user data, so recovery does not depend on a network reinstall.
+
+In **Settings > Storage**, choose **Analyze storage** to measure user data, managed environments/cache, temporary files, and update backups. Scanning happens only on request. Recognized update backups remain until you explicitly delete them; the latest backup is protected. Older backups can be deleted there after verifying the updated application works. Unknown folders and backups from another data location are never deleted by this control. Managed resources are reclaimed through the existing Pack uninstall and installation lifecycle; temporary files needed to resume an interrupted verified installation remain protected.
+
+For manual recovery, stop OAW, retain the current data directory separately, and copy the full verified `*.before-update-*` directory back to its original path. Keep its encrypted credential keys and database together. Storage moves and development-reset backups have separate recovery paths below.
+
 From a source checkout:
 
 ```powershell

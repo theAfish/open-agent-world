@@ -183,12 +183,12 @@ def register_results_context(registration):
     registration.register_relationship(RelationshipDefinition(
         id='xrd.results-read', label='结果只读', short_label='结果',
         description='分析员只读当前检索与拟合结果，不授予运行拟合权限',
-        source_types=frozenset({'agent'}), target_types=frozenset({'xrd.match'}),
+        source_traits=frozenset({'core.agent'}), target_types=frozenset({'xrd.match'}),
         capabilities=(CapabilityGrantDefinition(kind='xrd.results.read'),), templateable=True))
     registration.register_relationship(RelationshipDefinition(
         id='xrd.results-report', label='结果报告归档', short_label='报告',
         description='只允许提交符合 XRD schema 的报告，不授予自由 SQL 写入权限',
-        source_types=frozenset({'agent'}), target_types=frozenset({'xrd.match'}),
+        source_traits=frozenset({'core.agent'}), target_types=frozenset({'xrd.match'}),
         capabilities=(CapabilityGrantDefinition(kind='xrd.results.read'), CapabilityGrantDefinition(kind='xrd.results.report')), templateable=True))
     registration.register_relationship(RelationshipDefinition(
         id='xrd.results-context', label='结果讨论', short_label='讨论',

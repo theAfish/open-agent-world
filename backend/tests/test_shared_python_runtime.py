@@ -44,7 +44,7 @@ def test_environment_versions_read_metadata_without_running_or_importing(tmp_pat
 
 def test_timeout_preserves_live_progress_and_uses_package_deadline(tmp_path, monkeypatch):
     from backend.sandbox.python_runtime import PACKAGE_INSTALL_TIMEOUT
-    monkeypatch.setattr(sys, "platform", "linux")  # Exercise subprocess.run timeout handling.
+    monkeypatch.setattr(sys, "platform", "linux")  # Exercise common subprocess.run timeout handling.
     runtime = SharedPythonRuntime(tmp_path)
     runtime.root.mkdir(parents=True)
     def stalled(argv, **options):
@@ -133,35 +133,32 @@ def test_linux_runtime_mount_is_readonly_and_workspace_is_separate(tmp_path):
     assert command[-3] == str(runtime.python)
 
 
-def test_darwin_managed_python_is_private_and_uv_provisioned(tmp_path, monkeypatch):
+def test_darwin_python_is_copied_from_backend_and_venv_stays_private(tmp_path, monkeypatch):
     runtime = SharedPythonRuntime(tmp_path, darwin_store=tmp_path / "shared-python")
     monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(runtime, "_ensure_uv", lambda: "/managed/uv")
+    monkeypatch.setattr(runtime, "_uv", lambda: "/managed/uv")
+    def copy(root):
+        from backend.sandbox.darwin_python_copy import source_identity
+        interpreter = root / f"cpython-{DARWIN_MANAGED_PYTHON}-backend/bin/python3"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.touch()
+        stdlib = interpreter.parent.parent / "lib" / f"python{DARWIN_MANAGED_PYTHON}" / "os.py"
+        stdlib.parent.mkdir(parents=True)
+        stdlib.touch()
+        (root / 'backend-source.json').write_text(json.dumps(source_identity()))
+    monkeypatch.setattr(runtime, "_copy_backend_python", copy)
     calls = []
-
     def run(argv):
         calls.append([str(value) for value in argv])
-        if "install" in argv:
-            destination = Path(argv[argv.index("--install-dir") + 1])
-            interpreter = (destination /
-                f"cpython-{DARWIN_MANAGED_PYTHON}-macos-aarch64-none" /
-                "bin" / f"python{DARWIN_MANAGED_PYTHON}")
-            interpreter.parent.mkdir(parents=True)
-            interpreter.touch()
-            stdlib = interpreter.parent.parent / "lib" / f"python{DARWIN_MANAGED_PYTHON}" / "os.py"
-            stdlib.parent.mkdir(parents=True)
-            stdlib.touch()
-        else:
-            runtime.bin.mkdir(parents=True)
-            runtime.python.touch()
-            (runtime.venv / "pyvenv.cfg").touch()
-
+        runtime.bin.mkdir(parents=True)
+        runtime.python.touch()
+        (runtime.venv / "pyvenv.cfg").touch()
     monkeypatch.setattr(runtime, "_run", run)
     runtime.root.mkdir(parents=True)
     runtime._ensure()
-
-    assert calls[0][-2:] == ["--no-bin", DARWIN_MANAGED_PYTHON]
-    assert calls[1][-2:] == ["--clear", str(runtime.venv)]
+    assert len(calls) == 1
+    assert calls[0][-2:] == ["--clear", str(runtime.venv)]
+    assert '--no-python-downloads' in calls[0]
     assert str(runtime.installer_python).startswith(str(runtime.base))
     metadata = json.loads((runtime.root / "ready.json").read_text())
     assert metadata["base_python"] == str(runtime.installer_python)

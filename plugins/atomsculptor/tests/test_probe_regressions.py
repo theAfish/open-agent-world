@@ -66,26 +66,27 @@ async def test_actual_inline_result_precedes_saved_probe_but_cannot_advance_or_v
 
 
 @pytest.mark.asyncio
-async def test_failed_inline_attempts_are_bounded_and_do_not_refresh_progress():
+async def test_failed_inline_attempts_preserve_progress_and_thresholds_are_advisory():
     e = setup(limits=HarnessLimits(inline_probe_chars=128))
     await activate(e)
     await tool(e, "start_sandbox", {"sandbox": "box"}, {"state": "ready"})
     prepare(e, request())
     for argv, code in [(["sh", "-c", "echo fake"], "input_measurement_required"),
-                       (["python3", "-c", "x" * 129], "inline_probe_size"),
                        (["python3", "-c", " "], "inline_probe_size")]:
         result = await tool(e, "execute_command", {"sandbox": "box", "argv": argv}, {"exit_code": 0})
         assert result["error"]["code"] == code
     assert e.actions.inline_attempts == 0
-    for i in range(2):
-        await tool(e, "execute_command", {"sandbox": "box", "argv": ["python3", "-c", f"raise ValueError({i})"]},
+    for i in range(3):
+        result = await tool(e, "execute_command", {"sandbox": "box", "argv": ["python3", "-c", f"raise ValueError({i})\n#" + "x" * 130]},
                    {"exit_code": 1, "stderr": f"ValueError: {i}"}, call_id=f"fail-{i}")
+        assert result['exit_code'] == 1
         prepare(e, request())
     req = request(); prepare(e, req)
     assert "execute_command" in declarations(req)
-    assert e.actions.requests_without_progress == 4 and not e.actions.successful_measurements
+    assert e.actions.requests_without_progress == 5 and not e.actions.successful_measurements
     result = await tool(e, "execute_command", {"sandbox": "box", "argv": ["python3", "-c", "print(1)"]}, {"exit_code": 0})
-    assert result["error"]["code"] == "inline_probe_limit"
+    assert result['exit_code'] == 0 and e.actions.inline_attempts == 4
+    assert not e.workflow.checkpoints
 
 
 @pytest.mark.asyncio

@@ -193,7 +193,7 @@ def test_atomsculptor_uses_the_same_default_equipment_contract(tmp_path):
         read = next(tool for tool in tools if tool.name == "read_skills")
         listing = client.portal.call(provider.invoke_tool, agent, read.capability_id, {"toolbox": box["id"]})
         assert len(listing["skills"]) == 18
-        assert any(row["skill_id"] == "structure-inspect" for row in listing["skills"])
+        assert any(row["skill_id"] == "structure_inspect" for row in listing["skills"])
         assert not any(tool.name == "run_skill_script" for tool in tools)
         assert not client.get("/api/edges").json()
 

@@ -360,7 +360,7 @@ class Database:
             self._connection.executescript("""
                 CREATE TABLE IF NOT EXISTS card_state_instances (
                     card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-                    scope_type TEXT NOT NULL CHECK(scope_type IN ('shared','session')),
+                    scope_type TEXT NOT NULL CHECK(scope_type IN ('shared','session','group')),
                     scope_id TEXT NOT NULL,
                     state_scope_id TEXT NOT NULL UNIQUE REFERENCES state_scopes(scope_id) ON DELETE CASCADE,
                     PRIMARY KEY(card_id, scope_type, scope_id),
@@ -374,13 +374,22 @@ class Database:
             run_columns = {row['name'] for row in self._connection.execute('PRAGMA table_info(runs)')}
             if 'lifecycle_json' not in run_columns:
                 self._connection.execute("ALTER TABLE runs ADD COLUMN lifecycle_json TEXT NOT NULL DEFAULT '{}'")
+            self._connection.executescript("""
+                CREATE INDEX IF NOT EXISTS runs_recent_idx ON runs(created_at);
+                CREATE INDEX IF NOT EXISTS runs_context_idx ON runs(context_id, agent_id);
+                CREATE INDEX IF NOT EXISTS runs_cleanup_idx ON runs(agent_id, json_extract(lifecycle_json, '$.cleanup'));
+                CREATE INDEX IF NOT EXISTS runs_current_idx ON runs(agent_id, created_at)
+                    WHERE status IN ('created', 'running', 'waiting')
+                       OR json_extract(lifecycle_json, '$.cleanup') IN ('pending', 'failed', 'uncertain')
+                       OR json_extract(lifecycle_json, '$.execution') IN ('running', 'closing');
+            """)
             card_columns = {
                 row["name"] for row in self._connection.execute("PRAGMA table_info(cards)")
             }
             if "finish" not in card_columns:
                 self._connection.execute("ALTER TABLE cards ADD COLUMN finish TEXT NOT NULL DEFAULT 'normal'")
             if "state_scope" not in card_columns:
-                self._connection.execute("ALTER TABLE cards ADD COLUMN state_scope TEXT CHECK(state_scope IN ('shared', 'session'))")
+                self._connection.execute("ALTER TABLE cards ADD COLUMN state_scope TEXT CHECK(state_scope IN ('shared', 'session', 'group'))")
             if "equipment_json" not in card_columns:
                 self._connection.execute("ALTER TABLE cards ADD COLUMN equipment_json TEXT")
             if "minister_json" not in card_columns:
@@ -396,6 +405,11 @@ class Database:
                     "ALTER TABLE cards ADD COLUMN plugin_id TEXT NOT NULL "
                     "DEFAULT 'open-agent-world.core'"
                 )
+            self._migrate_group_scopes()
+            self._connection.executescript('''
+                CREATE TRIGGER IF NOT EXISTS group_card_state_cleanup BEFORE DELETE ON conversation_groups
+                BEGIN DELETE FROM card_state_instances WHERE scope_type='group' AND scope_id=OLD.id; END;
+            ''')
             edge_columns = {
                 row["name"] for row in self._connection.execute("PRAGMA table_info(edges)")
             }
@@ -479,6 +493,7 @@ class Database:
         self._connection.execute('''CREATE TABLE IF NOT EXISTS conversation_default_admissions (
             edge_id TEXT PRIMARY KEY REFERENCES edges(id) ON DELETE CASCADE)''')
         for name, definition in {
+            'continuation_run_id': 'TEXT',
             'attachments_json': "TEXT NOT NULL DEFAULT '[]'",
             'sequence': 'INTEGER NOT NULL DEFAULT 0',
             'kind': "TEXT NOT NULL DEFAULT 'text'",
@@ -513,6 +528,48 @@ class Database:
             ON conversation_deliveries (agent_id, status, session_id, id);
         CREATE INDEX IF NOT EXISTS conversation_deliveries_run_idx
             ON conversation_deliveries (claimed_run_id);""")
+
+    def _migrate_group_scopes(self) -> None:
+        """Expand existing CHECK constraints without deleting dependent rows."""
+        import re
+        updates = []
+        for table, column in [('cards', 'state_scope'), ('card_state_instances', 'scope_type')]:
+            schema = self._connection.execute('SELECT sql FROM sqlite_master WHERE type=? AND name=?', ('table', table)).fetchone()[0]
+            expanded, count = re.subn(r"CHECK\s*\(\s*" + column + r"\s+IN\s*\(\s*'shared'\s*,\s*'session'\s*\)\s*\)",
+                f"CHECK({column} IN ('shared','session','group'))", schema, flags=re.IGNORECASE)
+            if count:
+                updates.append((table, expanded))
+        if not updates:
+            return
+        before = {tuple(row) for row in self._connection.execute('PRAGMA foreign_key_check')}
+        self._connection.execute('PRAGMA foreign_keys=OFF')
+        legacy = self._connection.execute('PRAGMA legacy_alter_table').fetchone()[0]
+        self._connection.execute('PRAGMA legacy_alter_table=ON')
+        try:
+            self._connection.execute('BEGIN IMMEDIATE')
+            for table, schema in updates:
+                owned = [row[0] for row in self._connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE tbl_name=? AND type IN ('index','trigger') AND sql IS NOT NULL", (table,))]
+                columns = ','.join('"' + row['name'].replace('"', '""') + '"' for row in self._connection.execute(f'PRAGMA table_info({table})'))
+                temporary = table + '_group_scope_migration'
+                create = re.sub(r'^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`\[]?' + table + r'["`\]]?',
+                    'CREATE TABLE ' + temporary, schema, count=1, flags=re.IGNORECASE)
+                self._connection.execute(create)
+                self._connection.execute(f'INSERT INTO {temporary} ({columns}) SELECT {columns} FROM {table}')
+                self._connection.execute(f'DROP TABLE {table}')
+                self._connection.execute(f'ALTER TABLE {temporary} RENAME TO {table}')
+                for statement in owned:
+                    self._connection.execute(statement)
+            after = {tuple(row) for row in self._connection.execute('PRAGMA foreign_key_check')}
+            if after - before:
+                raise RuntimeError('Workspace scope migration would invalidate existing references')
+            self._connection.commit()
+        except BaseException:
+            self._connection.rollback()
+            raise
+        finally:
+            self._connection.execute(f'PRAGMA legacy_alter_table={int(legacy)}')
+            self._connection.execute('PRAGMA foreign_keys=ON')
 
     def _migrate_open_card_types(self) -> None:
         row = self._connection.execute(

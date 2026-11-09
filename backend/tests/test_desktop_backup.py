@@ -1,14 +1,15 @@
 from dataclasses import replace
 from contextlib import closing
 import json
+from pathlib import Path
 import shutil
 import sqlite3
 
 import pytest
 
 from backend.config import Settings
-from backend.desktop_backup import backup_for_update
-from backend.errors import ConflictError
+from backend.desktop_backup import backup_for_update, backup_preflight, delete_update_backup, update_backups
+from backend.errors import ConflictError, ResourceValidationError
 from backend.storage_location import LOCK, file_lock
 
 
@@ -113,3 +114,89 @@ def test_update_backup_can_restore_database_documents_and_encrypted_credentials(
     with closing(Database(source / 'database/world.sqlite3')) as db:
         assert LlmSettingsStore(db, source).read().api_key == 'test-credential'
     assert backup.is_dir()
+
+
+def test_space_preflight_fails_before_copy_and_keeps_source_usable(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from backend import desktop_backup
+    source = tmp_path / 'active'
+    source.mkdir()
+    (source / 'document').write_text('original')
+    settings = Settings.for_data_root(source)
+    monkeypatch.setattr(desktop_backup.shutil, 'disk_usage', lambda _: SimpleNamespace(free=1))
+    monkeypatch.setattr(desktop_backup, '_copy', lambda *_: pytest.fail('must check space before copying'))
+    for action in (backup_preflight, backup_for_update):
+        with pytest.raises(ResourceValidationError, match='Backup needs'):
+            action(settings)
+    assert (source / 'document').read_text() == 'original'
+    assert not list(tmp_path.glob('active.before-update-*'))
+    with file_lock(source / LOCK):
+        pass
+
+
+def test_backup_management_preserves_latest_unrecognized_and_active_data(tmp_path):
+    source = tmp_path / 'active'
+    source.mkdir()
+    (source / 'document').write_text('original')
+    settings = Settings.for_data_root(source)
+    backup_for_update(settings)
+    backup_for_update(settings)
+    rows = update_backups(source)
+    latest, older = rows
+    assert not latest['removable'] and older['removable']
+    with pytest.raises(ConflictError, match='latest'):
+        delete_update_backup(settings, latest['name'])
+    with pytest.raises(ResourceValidationError):
+        delete_update_backup(settings, '../active')
+    unknown = tmp_path / 'active.before-update-20200101T000000Z-aaaaaaaa'
+    unknown.mkdir()
+    (unknown / 'valuable').write_text('keep')
+    with pytest.raises(ResourceValidationError):
+        delete_update_backup(settings, unknown.name)
+    delete_update_backup(settings, older['name'])
+    assert not Path(older['path']).exists()
+    assert Path(latest['path']).is_dir()
+    assert (unknown / 'valuable').read_text() == 'keep'
+    assert (source / 'document').read_text() == 'original'
+
+
+def test_interrupted_backup_deletion_keeps_exact_target_retryable(tmp_path, monkeypatch):
+    from backend import desktop_backup
+    source = tmp_path / 'active'
+    source.mkdir()
+    (source / 'document').write_text('original')
+    settings = Settings.for_data_root(source)
+    backup_for_update(settings)
+    backup_for_update(settings)
+    older = update_backups(source)[1]
+    path = Path(older['path'])
+    remove = desktop_backup.shutil.rmtree
+    def interrupted(target):
+        (target / desktop_backup.RECEIPT).unlink()
+        raise OSError('interrupted deletion')
+    monkeypatch.setattr(desktop_backup.shutil, 'rmtree', interrupted)
+    with pytest.raises(OSError, match='interrupted'):
+        delete_update_backup(settings, older['name'])
+    assert next(item for item in update_backups(source) if item['name'] == older['name'])['deleting']
+    monkeypatch.setattr(desktop_backup.shutil, 'rmtree', remove)
+    delete_update_backup(settings, older['name'])
+    assert not path.exists()
+    assert not path.with_name(path.name + '.deleting.json').exists()
+    assert len(update_backups(source)) == 1
+
+
+@pytest.mark.parametrize('mode,function', [('--backup-preflight', 'backup_preflight'), ('--backup-for-update', 'backup_for_update')])
+def test_desktop_backup_cli_reports_concise_failure(tmp_path, monkeypatch, capsys, mode, function):
+    import runpy
+    import sys
+    from backend import desktop_backup
+    monkeypatch.setattr(sys, 'argv', ['launch.py', mode])
+    monkeypatch.setattr(sys, 'path', sys.path.copy())
+    monkeypatch.setattr(Settings, 'from_environment', lambda: Settings.for_data_root(tmp_path))
+    def fail(_):
+        raise ResourceValidationError('Not enough free space')
+    monkeypatch.setattr(desktop_backup, function, fail)
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts/desktop-entry.py'), run_name='__main__')
+    assert error.value.code == 1
+    assert capsys.readouterr().err == 'Backup cancelled: Not enough free space\n'

@@ -272,14 +272,18 @@ def test_doctor_reports_unprepared_runtime_without_creating_profile(tmp_path):
     assert not data_root.exists()
 
 
-def test_doctor_does_not_present_unsupported_lock_as_ready(tmp_path):
+def test_doctor_does_not_present_declared_lock_as_installed(tmp_path):
     root, _, _, _ = project(tmp_path)
-    (root / "lock.txt").write_text("locked", encoding="utf-8")
+    (root / "lock.txt").write_text("fixture==1 --hash=sha256:" + "a" * 64, encoding="utf-8")
     manifest = root / "oaw.pack.toml"
     manifest.write_text(manifest.read_text(encoding="utf-8").replace('verify_script="verify.py"',
                         'verify_script="verify.py"\nlock="lock.txt"'), encoding="utf-8")
     states = {item["id"]: item["state"] for item in doctor(root)["packs"][0]["environments"]}
-    assert states["engine"] == "unsupported"
+    assert states["engine"] == "unchecked"
+    report = doctor(root, data_root=tmp_path / "fresh-profile")
+    states = {item["id"]: item["state"] for item in report["packs"][0]["environments"]}
+    assert states["engine"] == "missing"
+    assert not (tmp_path / "fresh-profile").exists()
 
 
 def test_source_dependency_owner_maps_to_distribution_and_provided_pack(tmp_path):

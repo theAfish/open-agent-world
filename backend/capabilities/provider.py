@@ -11,6 +11,7 @@ from backend.file_transfer import MAX_FILE_BYTES, INLINE_FILE_BYTES, bounded_chu
 from backend.agents import ScopedToolDefinition, ToolParameter
 from backend.errors import ResourceValidationError, RuntimeUnavailableError
 from backend.resources.models import TextReplace
+from backend.sandbox.task_workspace import task_path, binding as task_binding, ensure_directory
 
 if TYPE_CHECKING:
     from backend.services import ApplicationServices
@@ -20,7 +21,10 @@ def _python_environment_summary(status):
     if not isinstance(status, dict):
         return None
     packages = status.get("package_versions") or {}
-    return {"ready": status.get("ready"), "preparing": status.get("preparing", False),
+    dependencies = status.get("dependencies") or {}
+    return {"ready": bool(status.get("ready") and dependencies.get("ready", True) and not status.get("warmup_error")),
+        "interpreter_ready": status.get("ready"), "dependencies": dependencies,
+        "preparing": status.get("preparing", False) or dependencies.get("state") == "preparing",
         "python_version": status.get("python_version"),
         "package_versions": {name: packages[name] for name in ("numpy", "ase", "scipy", "pymatgen", "matplotlib")
                              if name in packages},
@@ -165,6 +169,10 @@ class _CapabilityContext:
         from backend.plugins.summoning import SummoningAction
         return await self.services.summoning.action(capability.target_id, _validate_tool_request(SummoningAction, arguments), capability=capability)
 
+    async def run_history_action(self, capability, action, arguments):
+        from backend.runs.tools import invoke
+        return await invoke(self.services, capability, action, arguments)
+
     async def node_execution_action(self, capability, action, arguments):
         from backend.node_execution import ExecutionRequest
         service = self.services.node_execution
@@ -182,6 +190,38 @@ class _CapabilityContext:
 
     async def node_delegation_action(self, capability, action, arguments):
         return await self.services.node_execution.delegation_action(capability.target_id, action, arguments, capability=capability)
+
+    async def node_run_action(self, capability, action, arguments):
+        """Start, stop or read a direct-run node through the caller's live grant."""
+        from uuid import uuid4
+        from backend.errors import PermissionDeniedError
+        from backend.world.models import CardPatch
+        services = self.services
+        live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
+        if live.kind != capability.kind or live.target_id != capability.target_id:
+            raise PermissionDeniedError("Run capability was revoked")
+        target = services.world.get_card(capability.target_id)
+        if "ui.direct-run.v1" not in services.plugins.node_type(target.type).traits:
+            raise ResourceValidationError("This node cannot be run by a tool")
+        manager = services._require_run_manager()
+        if action == "start":
+            config = arguments.get("config", {})
+            if set(arguments) - {"config"} or not isinstance(config, dict):
+                raise ResourceValidationError("Run start accepts only a config object")
+            if config:
+                await services.update_card(target.id, CardPatch(config=config))
+            run = await manager.start_run(target.id, "Run", caller_kind="agent", caller_id=capability.agent_id,
+                                          detached=True, context_id="tool-run:" + uuid4().hex)
+            return {"run_id": run.run_id, "status": run.status.value}
+        if arguments:
+            raise ResourceValidationError("Only start accepts run arguments")
+        if action == "stop":
+            return await services.stop_agent(target.id)
+        if action == "read":
+            latest = max(manager.list_runs(agent_id=target.id), key=lambda run: run.created_at, default=None)
+            return {"node_status": target.status,
+                    "latest_run": {"run_id": latest.run_id, "status": latest.status.value, "error": latest.error} if latest else None}
+        raise ResourceValidationError("Unknown run action")
 
     async def node_document_action(self, capability, action, arguments, expected_revision=None):
         from backend.node_documents import DocumentActionRequest, invoke_document_action
@@ -207,9 +247,10 @@ class _CapabilityContext:
                 self.services.capabilities.capability_for_id(capability.agent_id, f"{kind}:{live.target_id}")
             self.services.capabilities.require_sandbox_execute(capability.agent_id, sandbox_id)
             self.services._require_card_type(sandbox_id, "sandbox")
+            await ensure_directory(self.services, sandbox_id, capability.agent_id)
             return await self.services._require_sandbox_backend().file_operation(
-                sandbox_id, "write", root="workspace", path=path,
-                data=base64.b64encode(data).decode("ascii"), overwrite=False,
+                sandbox_id, "write", root="workspace", path=task_path(self.services, sandbox_id, path, capability.agent_id),
+                data=base64.b64encode(data).decode("ascii"), overwrite=False, create_parents=True,
             )
 
     def _sandbox_file_transfer(self, capability, sandbox_id):
@@ -230,14 +271,16 @@ class _CapabilityContext:
             async with self.services.resources.artifacts.workspace(self.services, sandbox_id, capability.agent_id, allow_running=True):
                 async with self.services._node_mutation():
                     transfer.authorize()
-                await transfer.write_file_stream(path, chunks, max_bytes=max_bytes)
+                    await ensure_directory(self.services, sandbox_id, capability.agent_id)
+                    target = task_path(self.services, sandbox_id, path, capability.agent_id)
+                await transfer.write_file_stream(target, chunks, max_bytes=max_bytes)
                 return {**transfer.result, 'path': path}
 
     async def stream_sandbox_workspace_file(self, capability, sandbox_id, path, *, max_bytes=MAX_FILE_BYTES):
         transfer = self._sandbox_file_transfer(capability, sandbox_id)
         async with self.services.resources.artifacts.workspace(self.services, sandbox_id, capability.agent_id, allow_running=True):
             async with aclosing(transfer.read_file_stream(
-                    path, max_bytes=max_bytes)) as stream:
+                    task_path(self.services, sandbox_id, path, capability.agent_id), max_bytes=max_bytes)) as stream:
                 async for chunk in stream:
                     yield chunk
             async with self.services._node_mutation(read_only=True):
@@ -277,13 +320,14 @@ class _CapabilityContext:
                 raise PermissionDeniedError("Sandbox file-write capability was revoked")
             self.services.capabilities.require_sandbox_execute(capability.agent_id, live.target_id)
             self.services._require_card_type(live.target_id, "sandbox")
+            await ensure_directory(self.services, live.target_id, capability.agent_id)
             if edits is not None:
                 result = await self.services._require_sandbox_backend().file_operation(
-                    live.target_id, "edit", root="workspace", path=path,
+                    live.target_id, "edit", root="workspace", path=task_path(self.services, live.target_id, path, capability.agent_id),
                     edits=edits)
             else:
                 result = await self.services._require_sandbox_backend().file_operation(
-                    live.target_id, "write", root="workspace", path=path,
+                    live.target_id, "write", root="workspace", path=task_path(self.services, live.target_id, path, capability.agent_id),
                     data=base64.b64encode(raw).decode("ascii"), overwrite=overwrite, create_parents=True)
         return {"path": path, **result}
 
@@ -301,7 +345,7 @@ class _CapabilityContext:
             self.services.capabilities.require_sandbox_execute(capability.agent_id, sandbox_id)
             self.services._require_card_type(sandbox_id, "sandbox")
             result = await self.services._require_sandbox_backend().file_operation(
-                sandbox_id, "download", root="workspace", path=path,
+                sandbox_id, "download", root="workspace", path=task_path(self.services, sandbox_id, path, capability.agent_id),
             )
         if result.get("state") != "ready":
             raise ResourceValidationError("Sandbox file is unavailable or exceeds the 16 MiB transfer limit")
@@ -483,6 +527,10 @@ class _CapabilityContext:
         info = await self.services.stop_sandbox(sandbox_id, agent_id=agent_id)
         return {"sandbox_id": sandbox_id, "state": info.state.value}
 
+    async def sandbox_workspace_action(self, capability, operation, options):
+        from backend.sandbox_workspace import inspect_workspace
+        return await inspect_workspace(self.services, capability, operation, options)
+
     async def inspect_sandbox(self, agent_id: str, sandbox_id: str, *, history_scope="caller", history_limit=3,
                               include_output=False, include_shared_python=False) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
@@ -499,6 +547,8 @@ class _CapabilityContext:
         # and ``configuration.ready`` only reports configured variables. Make
         # the command gate explicit so an errored sandbox is not mistaken for
         # a usable one.
+        workspace_binding = task_binding(self.services, sandbox_id, agent_id)
+        task_directory = workspace_binding["directory"]
         auto_start = info.available and info.state.value in {"stopped", "ready", "running"} and any(c.id == f"sandbox.start:{sandbox_id}"
             for c in self.services.capabilities.derive(agent_id).capabilities)
         commands_accepted = info.available and (info.state.value in {"ready", "running"}
@@ -523,7 +573,12 @@ class _CapabilityContext:
             "sandbox_id": sandbox_id, "state": info.state.value,
             "commands_accepted": commands_accepted, "auto_start": auto_start, "state_guidance": state_guidance,
             "runtime_id": info.runtime_id, "platform": info.platform,
-            "shell": list(info.shell), "workspace": str(info.workspace),
+            "shell": list(info.shell), "workspace": str(info.workspace / task_directory) if task_directory else str(info.workspace),
+            "sandbox_workspace": str(info.workspace),
+            "task_workspace": {key: value for key, value in workspace_binding.items() if key != "shared_inputs"},
+            "shared_input_count": len(workspace_binding.get("shared_inputs", [])),
+            "shared_workspace": str(info.workspace / "shared"),
+            "file_paths": "Relative command/Skill/file-tool paths use workspace. Use scope=all for read-only access to other workspace files, or scope=shared for explicit shared/ inputs.",
             "workspace_access": info.workspace_access.value,
             "resources_path": str(info.resources_path) if info.resources_path else None,
             "available": info.available, "unavailable_reason": info.unavailable_reason,
@@ -543,7 +598,7 @@ class _CapabilityContext:
             "history_scope": history_scope,
             "shared_python": python_status if include_shared_python else None,
             "python_environment": _python_environment_summary(python_status),
-            "console_mode": "non-interactive; each command starts in the configured workspace; cd/export/activation do not persist",
+            "console_mode": "non-interactive; every command and relative file tool uses this assigned workspace; cd/export/activation do not persist",
             "command_timeout": self.services.world.get_card(sandbox_id).config.get("command_timeout", 6000),
             "installation": info.installation_guidance or "Use install_python_packages for the shared read-only Python environment. HOME persists (at /sandbox/home on Linux, WSL and macOS Container VM); use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is recreated for EVERY command; use HOME or workspace for files needed by subsequent commands. Shared installer logs are optional (include_shared_python=true) and do not prove a current operation is running.",
             "attachments": [

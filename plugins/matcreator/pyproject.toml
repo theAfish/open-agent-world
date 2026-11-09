@@ -4,6 +4,9 @@ version = "0.10.1"
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2.11,<3"]
 
+[project.scripts]
+oaw-matcreator-migrate = "oaw_matcreator.migrate:main"
+
 [project.entry-points."open_agent_world.plugins"]
 matcreator = "oaw_matcreator:create_plugin"
 

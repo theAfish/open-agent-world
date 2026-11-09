@@ -223,6 +223,8 @@ function LegacySettings({card,host,level,definition}:PluginViewProps){
     </div></div>}
   </section>;
 }
-export default {apiVersion:1,views:{settings:Settings,input:InputView,library:LibraryView,'frame-canvas':FrameCanvas}} satisfies FrontendPlugin;
+export default {apiVersion:1,views:{settings:Settings,input:InputView,library:LibraryView,'frame-canvas':FrameCanvas},services:{workflow:workflowService}} satisfies FrontendPlugin;
+
+import { workflowService } from './workflow';
 
 import "./light.css";

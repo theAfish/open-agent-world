@@ -1,7 +1,7 @@
 ---
-name: supercell-builder
+name: supercell_builder
 description: Build supercells from a bulk/slab structure by integer or 3×3-matrix multiplication.
-when_to_use: Use to enlarge a unit cell before introducing defects, adsorbates, or molecules. Pair with `supercell-dimension-check` to size correctly.
+when_to_use: Use to enlarge a unit cell before introducing defects, adsorbates, or molecules. Pair with `supercell_dimension_check` to size correctly.
 entry: scripts/supercell_builder.py
 ---
 

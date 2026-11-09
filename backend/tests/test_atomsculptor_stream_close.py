@@ -65,3 +65,25 @@ async def test_closing_atomsculptor_stream_drains_model_and_releases_scope(data_
         assert not any(task.get_name() == "oaw-adk-events" for task in asyncio.all_tasks() if not task.done())
     finally:
         services.close()
+
+
+@pytest.mark.asyncio
+async def test_atomsculptor_context_and_agent_delete_release_sdk_sessions():
+    from types import SimpleNamespace
+    from google.adk.sessions import InMemorySessionService
+    runtime = AtomSculptorRuntime(SimpleNamespace(), model_connection_resolver=SimpleNamespace())
+    await runtime.create_agent(AgentConfig('owner', 'Owner'))
+    bindings = SimpleNamespace(InMemorySessionService=InMemorySessionService)
+    sessions = runtime._session_service(bindings)
+    first = await runtime._session('owner', 'first', sessions, bindings)
+    second = await runtime._session('owner', 'second', sessions, bindings)
+    default = await runtime._session('owner', None, sessions, bindings)
+    args = dict(app_name='open-agent-world-atomsculptor', user_id=runtime._user_id('owner'))
+    await runtime.delete_context('owner', 'first')
+    await runtime.delete_context('owner', 'first')
+    assert await sessions.get_session(**args, session_id=first) is None
+    assert await sessions.get_session(**args, session_id=second) is not None
+    await runtime.delete_agent('owner')
+    assert await sessions.get_session(**args, session_id=second) is None
+    assert await sessions.get_session(**args, session_id=default) is None
+    assert not runtime._session_ids

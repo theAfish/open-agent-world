@@ -120,13 +120,24 @@ def workspace_router(manifest):
 
     async def state_access(request: Request, services=Depends(get_services)):
         session_id = request.headers.get("X-OAW-State-Session") or request.query_params.get("state_session")
-        node_id = request.path_params.get("node_id") or request.path_params.get("viewer_id")
+        node_id = request.path_params.get("node_id") or request.path_params.get("viewer_id") or request.path_params.get('sandbox_id')
         if node_id:
             scope.require(node_id, services)
-        if not session_id or session_id == "default" or not node_id:
+        if not node_id:
             return
         card = services.world.get_card(node_id)
-        if card.state_scope != "session":
+        policy = services.plugins.node_type(card.type).state
+        follows_workspace = (getattr(policy, 'follow_workspace', False) or services.plugins.has_trait(card.type, 'core.sandbox')
+            or any(edge.relationship == 'core.file-preview'
+                and services.plugins.has_trait(services.world.get_card(edge.target).type, 'core.sandbox')
+                for edge in services.world.connections_from(node_id)))
+        if follows_workspace and (not session_id or session_id == 'default'):
+            from backend.workspace_context import session_context
+            effective = session_context(services, node_id, allow_unbound=True)
+            session_id = effective['id'] if effective else None
+        if not session_id or session_id == 'default':
+            return
+        if card.state_scope not in {'session', 'group'} and not follows_workspace:
             return
         with services.database.locked() as db:
             session = db.execute("SELECT conversation_id FROM conversation_sessions WHERE id=?", (session_id,)).fetchone()
@@ -155,6 +166,19 @@ def workspace_router(manifest):
     mount(node_resources.router, {"execution_sources", "execution_snapshot"}, "node_id", "execution_graph")
     mount(job_board.router, {"jobs", "control"}, "node_id", "jobs")
     mount(artifacts.router, {"listing", "preview", "content"}, "collection_id", "artifacts")
+
+    @router.get('/nodes/{node_id}/workspace-context')
+    async def workspace_context(node_id: str, services=Depends(get_services)):
+        # Resolve only after the same publication gate used by the view itself.
+        scope.require(node_id, services)
+        if node_id not in manifest['permissions'] and node_id not in manifest.get('plugin_access', {}):
+            raise HTTPException(404, 'This workspace view is not published')
+        from backend.api.card_state import workspace_context as resolve_view
+        value = await resolve_view(node_id, services)
+        sandbox_id = value.get('sandbox_id')
+        if sandbox_id and not {'files', 'preview', 'terminal'}.intersection(manifest['permissions'].get(sandbox_id, [])):
+            value = {**value, 'sandbox_id': None, 'directory': ''}
+        return value
 
     @router.post("/nodes/{viewer_id}/file-preview")
     async def preview_file(viewer_id: str, reference: file_preview.FileReference, services=Depends(get_services)):
@@ -385,6 +409,15 @@ def workspace_router(manifest):
             return [{"id": "workspace", "label": "Workspace", "directory": True, "access": item.get("access", "read_only")}
                     for item in result if item["id"] == "workspace"]
         return result
+
+    @router.get('/sandboxes/{sandbox_id}/workspaces')
+    async def sandbox_workspaces(sandbox_id: str, services=Depends(get_services)):
+        require(sandbox_id, 'files', 'preview', 'terminal')
+        result = await runtime.sandbox_task_workspaces(sandbox_id, services)
+        # The published file/terminal permissions already cover this root.
+        # Expose directory presentation only, not private Run identities.
+        return {'items': [{'directory': item['directory'], 'label': item['directory'],
+            'status': item.get('status'), 'scope_type': item.get('scope_type')} for item in result['items']]}
 
     @router.post("/sandboxes/{sandbox_id}/execute")
     async def execute(sandbox_id: str, request: runtime.SandboxExecuteRequest, services=Depends(get_services)):

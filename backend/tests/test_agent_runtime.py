@@ -377,3 +377,21 @@ def test_fresh_context_runs_get_separate_contexts(data_root: Path) -> None:
             assert run() is None
     finally:
         services.close()
+
+
+@pytest.mark.asyncio
+async def test_adk_context_deletion_releases_sdk_session_without_other_contexts():
+    runtime = GoogleAdkAgentRuntime(MutableCapabilityProvider())
+    await runtime.create_agent(AgentConfig('context-owner', 'Owner'))
+    record = await runtime._record('context-owner')
+    first = await runtime._context_session(record, 'first')
+    second = await runtime._context_session(record, 'second')
+    await runtime.delete_context('context-owner', 'first')
+    await runtime.delete_context('context-owner', 'first')
+    args = dict(app_name=runtime._app_name, user_id=runtime._user_id('context-owner'))
+    assert await runtime._sessions.get_session(**args, session_id=first) is None
+    assert await runtime._sessions.get_session(**args, session_id=second) is not None
+    assert await runtime._sessions.get_session(**args, session_id=record.session_id) is not None
+    assert ('context-owner', 'first') not in runtime._context_sessions
+    await runtime.delete_agent('context-owner')
+    assert await runtime._sessions.get_session(**args, session_id=second) is None

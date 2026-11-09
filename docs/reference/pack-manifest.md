@@ -117,6 +117,19 @@ installation formats are reported explicitly. Host worker providers prepare Pyth
 environments and verified executable artifacts. Arbitrary host npm or system-package
 installation commands are outside the declaration contract.
 
+With Plugin API 1.50, managed Python host workers can declare `lock = "requirements.lock"`, a complete
+hashed requirements file produced by `uv pip compile --universal --generate-hashes`.
+Adapters using `PythonEnvironmentSpec(lockfile=...)` require the same feature level;
+declare `1.50` in both the descriptor and manifest.
+Generate it with the environment's minimum supported Python version using
+`--python-version`; retain platform and Python markers. Installation verifies hashes
+and checks the declared direct requirements against the locked
+closure. Lock contents participate in environment identity, and the ready receipt
+records resolved package versions. Regenerate the lock when changing worker
+requirements. Source distributions still require the platform's native build tools;
+their build-isolation dependencies are separate from this runtime lock. Sandbox
+lock installation remains unsupported.
+
 Host adapters execute in OAW's Python process through its public Plugin API.
 Their dependencies use an explicitly shared, version-compatible library layer:
 mandatory host packages are reused, and additional libraries ship as hash-locked
@@ -199,8 +212,15 @@ working-directory scripts, `-c`, `-m` and literal arguments. Shell commands inhe
 the private environment's `PATH`; explicit paths inside shell text retain normal
 shell semantics. Direct custom Python interpreter paths/versions and `-S` are
 rejected because they bypass the selected environment. `python_environment=none`
-cannot be combined with declared profiles. AtomSculptor uses this mechanism for
-its modelling commands instead of adding libraries to shared Sandbox Python.
+cannot be combined with runtime-declared profiles. Declarations marked
+`management="legacy-shared"` use the existing `PluginEnvironmentBootstrap` and
+read-only shared Sandbox Python instead of creating a private environment. Skill
+references preserve their authorization and declaration checks on this path.
+AtomSculptor uses shared profiles for base modelling and core Skills, so a new
+Sandbox reuses the host-prepared platform environment. Its optional Materials
+Project and RDKit Skills retain private profiles. When shared defaults compose
+with a private Skill profile, their requirements are included in that private
+environment; they do not inherit installed shared packages.
 
 Durable job providers can declare their own `sandbox_environments=("bohr",)`
 on `BackgroundJobProvider`. The host binds these profiles when the provider calls

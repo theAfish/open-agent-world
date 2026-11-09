@@ -131,3 +131,47 @@ def test_legacy_public_tail_reports_only_actual_missing_history(tmp_path):
         assert archive.get(page['items'][0]['activity_id'])['arguments'] == {'path': 'x'}
     finally:
         db.close()
+
+
+def test_run_pages_and_current_state_project_only_bounded_metadata(client, monkeypatch):
+    from backend.runs.models import RunStatus
+    services = client.app.state.services
+    store = services.run_manager.store
+    debt = store.create(agent_id="history-agent", runtime_provider_id="test", caller_kind="user")
+    store.update_status(debt.run_id, RunStatus.CANCELLED)
+    store.update_lifecycle(debt.run_id, cleanup="uncertain", tool_trace=[{"text": "private-body" * 1000}])
+    settled = []
+    for index in range(65):
+        run = store.create(agent_id="history-agent", runtime_provider_id="test", caller_kind="user")
+        store.update_status(run.run_id, RunStatus.SUCCEEDED)
+        store.update_lifecycle(run.run_id, execution="finished", cleanup="none", tool_count=index,
+                               tool_trace=[{"text": "private-body" * 1000}])
+        settled.append(run.run_id)
+    # Stable ordering must use insertion order when creation timestamps tie.
+    with services.database.transaction() as db:
+        db.execute("UPDATE runs SET created_at='2026-01-01T00:00:00+00:00' WHERE agent_id='history-agent'")
+    active = store.create(agent_id="history-agent", runtime_provider_id="test", caller_kind="user")
+    other = store.create(agent_id="other-agent", runtime_provider_id="test", caller_kind="user")
+    first = client.get('/api/runs?agent_id=history-agent&limit=10').json()
+    assert [row['run_id'] for row in first] == [active.run_id, *reversed(settled[-9:])]
+    assert "private-body" not in json.dumps(first)
+    seen = [row['run_id'] for row in first]
+    while first:
+        first = client.get(f"/api/runs?agent_id=history-agent&limit=10&before={seen[-1]}").json()
+        seen.extend(row['run_id'] for row in first)
+    assert seen == [active.run_id, *reversed(settled), debt.run_id]
+    assert 'private-body' in client.get(f'/api/runs/{debt.run_id}').text
+    summary = client.get(f'/api/runs/{debt.run_id}?summary=true')
+    assert summary.status_code == 200 and summary.json()['lifecycle']['cleanup'] == 'uncertain'
+    assert 'private-body' not in summary.text
+    assert client.get('/api/runs?limit=201').status_code == 422
+    # The hot paths must not fall back to decoding the historical list.
+    monkeypatch.setattr(type(store), 'list', lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('loaded history')))
+    snapshot = client.get('/api/lifecycle?agent_id=history-agent').json()
+    assert len(snapshot['runs']) == 21
+    ids = {row['run_id'] for row in snapshot['runs']}
+    assert debt.run_id in ids and active.run_id in ids and other.run_id not in ids
+    assert 'private-body' not in json.dumps(snapshot)
+    assert not store.has_cleanup_debt('history-agent')  # uncertain recovery does not block new admission
+    store.update_lifecycle(debt.run_id, cleanup='failed')
+    assert store.has_cleanup_debt('history-agent')

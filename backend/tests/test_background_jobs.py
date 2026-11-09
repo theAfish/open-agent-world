@@ -571,6 +571,10 @@ async def test_bohrium_profile_survives_run_and_rechecks_after_wait(research, mo
     from backend.tests.test_sandbox_manager import make_manager
 
     services, ids, runtime, _, invoke, _ = setup(research)
+    # This protocol fixture uses an unscoped recording backend. Native scope
+    # enforcement is covered by the workspace tests with the scoped backend.
+    from backend.world.models import CardPatch
+    await services.update_card(ids['sandbox'], CardPatch(config={'workspace_scope': 'shared'}))
     manager, backend = make_manager(tmp_path / 'sandbox')
     await manager.create(ids['sandbox'])
     monkeypatch.setattr(services, 'sandbox_backend', manager)

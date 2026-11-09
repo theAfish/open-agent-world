@@ -31,8 +31,8 @@ class ExecutionRequest(BaseModel):
 @dataclass
 class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
     services: object
-    workers: dict[str | tuple[str, str], asyncio.Task] = field(default_factory=dict)
-    stopping: set[str | tuple[str, str]] = field(default_factory=set)
+    workers: dict[str | tuple[str, str] | tuple[str, str, str], asyncio.Task] = field(default_factory=dict)
+    stopping: set[str | tuple[str, str] | tuple[str, str, str]] = field(default_factory=set)
     continuation_keys: set[tuple[str, str | None]] = field(default_factory=set)
     continuation_versions: dict[tuple[str, str | None], int] = field(default_factory=dict)
     continuation_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -65,6 +65,8 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
 
     def worker_key(self, node_id):
         scope_type, scope_id = self.services.card_state.identity(node_id)
+        if scope_type == 'group':
+            return node_id, scope_type, scope_id
         return (node_id, scope_id) if scope_type == "session" and scope_id != DEFAULT_SESSION else node_id
 
     def active(self, node_id):
@@ -109,8 +111,8 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
             filters.append("c.card_id=?")
             arguments.append(node_id)
         if session_id is not None:
-            filters.append("c.scope_type='session' AND c.scope_id=?")
-            arguments.append(session_id)
+            filters.append("((c.scope_type='session' AND c.scope_id=?) OR (c.scope_type='group' AND c.scope_id IN (SELECT group_id FROM conversation_sessions WHERE id=?)))")
+            arguments.extend([session_id, session_id])
         with self.services.database.locked() as db:
             rows = db.execute("SELECT v.value_json FROM card_state_instances c "
                 "JOIN state_values v ON v.scope_id=c.state_scope_id "
@@ -196,6 +198,8 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
             scope_type, scope_id = self.services.card_state.identity(node_id)
             invocation = self.services.run_manager.current_context
             origin_session = invocation.context_id if invocation else active_state_session.get()
+            if scope_type == 'group' and origin_session is None:
+                origin_session = self.namespace_session(scope_type, scope_id)
             batch_context.run(active_state_session.set, scope_id if scope_type == "session" else origin_session)
             self.workers[self.worker_key(node_id)] = asyncio.create_task(
                 self._run(node_id, request.item_id, capability), context=batch_context,
@@ -380,7 +384,10 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
         if legacy and not namespaces:
             namespaces = [self.services.card_state.identity(node.id)]
         for kind, namespace in namespaces:
-            with state_session(namespace if kind == "session" else None):
+            session = self.namespace_session(kind, namespace)
+            if kind == 'group' and session is None:
+                continue
+            with state_session(session):
                 if self.spec(node.id).summoning:
                     self.collect_delegations(node.id)
                     self.watch_continuations(node.id)
@@ -396,7 +403,11 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
             if isinstance(result, Exception):
                 failure = result
         for key in tuple(self.workers):
-            node_id, session_id = key if isinstance(key, tuple) else (key, None)
+            if isinstance(key, tuple) and len(key) == 3:
+                node_id, kind, namespace = key
+                session_id = self.namespace_session(kind, namespace)
+            else:
+                node_id, session_id = key if isinstance(key, tuple) else (key, None)
             with state_session(session_id):
                 await self.stop(node_id)
         if failure is not None:
@@ -404,6 +415,20 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
 
     def assert_session_idle(self, session_id):
         self.services.background_jobs.assert_idle(session_id=session_id)
-        if (any(isinstance(key, tuple) and key[1] == session_id for key in self.workers)
+        with self.services.database.locked() as db:
+            row = db.execute('SELECT group_id FROM conversation_sessions WHERE id=?', (session_id,)).fetchone()
+        group_id = row['group_id'] if row else None
+        if (any(isinstance(key, tuple) and (len(key) == 2 and key[1] == session_id
+                or len(key) == 3 and key[1:] == ('group', group_id)) for key in self.workers)
                 or any(self.active_attempts(state) for state in self.retained_states(session_id=session_id))):
             raise ConflictError("Stop work in this conversation before deleting it")
+
+    def namespace_session(self, kind, namespace):
+        """Resolve group state through a native member session for existing APIs."""
+        if kind == 'session' or kind == 'group' and namespace == DEFAULT_SESSION:
+            return namespace
+        if kind == 'group':
+            with self.services.database.locked() as db:
+                row = db.execute('SELECT id FROM conversation_sessions WHERE group_id=? ORDER BY created_at,id LIMIT 1', (namespace,)).fetchone()
+            return row['id'] if row else None
+        return None

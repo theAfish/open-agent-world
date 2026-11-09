@@ -72,6 +72,9 @@ def test_full_research_workspace_reuses_handlers_and_scopes_cross_card_access(tm
         viewer = nodes["science.structure-viewer"]["id"]
         collection = nodes["core.artifact-collection"]["id"]
         headers = {"X-OAW-State-Session": records["session"]}
+        workspaces = client.get(f"{ROOT}/sandboxes/{nodes['sandbox']['id']}/workspaces", headers=headers)
+        assert workspaces.status_code == 200 and 'items' in workspaces.json(), workspaces.text
+        assert client.get(f"{ROOT}/sandboxes/{records['stranger']['id']}/workspaces").status_code == 404
         agent = nodes["matcreator.agent"]["id"]
         for path in (f"/nodes/{graph}/execution-sources", f"/nodes/{jobs}/jobs"):
             response = client.get(ROOT + path, headers=headers)

@@ -40,6 +40,17 @@ function deferred<T>() {
 }
 
 describe("authoritative world synchronization", () => {
+  it("keeps one cumulative reasoning snapshot without copying prefixes into card output", () => {
+    const node = { ...card("streaming-agent", "agent"), config: { output: ["tool finished"] } };
+    useWorldStore.setState({ cards: [node], events: [] });
+    for (let index = 1; index <= 100; index++) useWorldStore.getState().ingestEvent({
+      id: `thinking-${index}`, type: "agent_progress", node_id: node.id, run_id: "streaming-run", timestamp: "now",
+      payload: { kind: "model_reasoning", provider_message_id: "message-1", text: "word ".repeat(index) },
+    });
+    expect(useWorldStore.getState().events).toHaveLength(1);
+    expect(useWorldStore.getState().events[0].payload.text).toBe("word ".repeat(100));
+    expect(useWorldStore.getState().cards[0].config.output).toEqual(["tool finished"]);
+  });
   beforeEach(() => {
     vi.restoreAllMocks();
     useLegionDeployments.setState({ pending: [] });
@@ -86,7 +97,7 @@ describe("authoritative world synchronization", () => {
   it.each([["idle", "waiting"], ["running", "running"]])(
     "shows a queued hosted Run on a %s Agent as %s and keeps Stop available", async (initial, expected) => {
       vi.spyOn(hostedAuth, "isHosted").mockReturnValue(true);
-      vi.spyOn(worldApi, "runAgent").mockResolvedValue({ run_id: "queued-run" });
+      vi.spyOn(worldApi, "runAgent").mockResolvedValue({ accepted: true, agent_id: "agent", run_id: "queued-run" });
       const stop = vi.spyOn(worldApi, "stopAgent").mockResolvedValue({});
       const agent = { ...card("agent", "agent"), status: initial };
       useWorldStore.setState({ cards: [agent] });
@@ -101,7 +112,7 @@ describe("authoritative world synchronization", () => {
 
   it("keeps a terminal hosted status received before the submission response", async () => {
     vi.spyOn(hostedAuth, "isHosted").mockReturnValue(true);
-    const receipt = deferred<Record<string, unknown>>();
+    const receipt = deferred<{ accepted: true; agent_id: string; run_id: string }>();
     vi.spyOn(worldApi, "runAgent").mockReturnValue(receipt.promise);
     const agent = { ...card("agent", "agent"), status: "idle" };
     useWorldStore.setState({ cards: [agent] });
@@ -109,9 +120,41 @@ describe("authoritative world synchronization", () => {
     const submitting = useWorldStore.getState().runAgent(agent.id, "Finish quickly");
     const finished = { ...agent, revision: 5 };
     useWorldStore.setState({ cards: [finished] });
-    receipt.resolve({ run_id: "finished-run" });
+    receipt.resolve({ accepted: true, agent_id: agent.id, run_id: "finished-run" });
     await submitting;
     expect(useWorldStore.getState().cards[0]).toBe(finished);
+  });
+
+  it.each([undefined, true])('returns the Run receipt on the plugin launch path with freshContext=%s', async freshContext => {
+    const agent = card('agent', 'agent');
+    useWorldStore.setState({ cards: [agent], activityOpen: false });
+    const receipt = { accepted: true as const, agent_id: agent.id, run_id: 'run-1' };
+    const start = vi.spyOn(worldApi, 'runAgent').mockResolvedValue(receipt);
+    expect(await useWorldStore.getState().requestAgentRun(agent.id, 'Analyze', freshContext)).toEqual(receipt);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith(agent.id, 'Analyze', freshContext);
+    expect(useWorldStore.getState().activityOpen).toBe(true);
+    expect(useWorldStore.getState().toasts).toHaveLength(0);
+  });
+
+  it('propagates launch rejection to plugins without showing a native-button toast', async () => {
+    const agent = card('agent', 'agent');
+    useWorldStore.setState({ cards: [agent], activityOpen: false });
+    const failure = new Error('Agent is busy');
+    const start = vi.spyOn(worldApi, 'runAgent').mockRejectedValue(failure);
+    await expect(useWorldStore.getState().requestAgentRun(agent.id, 'Analyze')).rejects.toBe(failure);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(useWorldStore.getState().cards).toEqual([agent]);
+    expect(useWorldStore.getState().activityOpen).toBe(false);
+    expect(useWorldStore.getState().toasts).toHaveLength(0);
+  });
+
+  it('retains the native Agent button error handling without an unhandled rejection', async () => {
+    const start = vi.spyOn(worldApi, 'runAgent').mockRejectedValue(new Error('Agent is busy'));
+    await expect(useWorldStore.getState().runAgent('agent', 'Analyze', true)).resolves.toBeUndefined();
+    expect(start).toHaveBeenCalledWith('agent', 'Analyze', true);
+    expect(useWorldStore.getState().toasts).toHaveLength(1);
+    expect(useWorldStore.getState().toasts[0].title).toBe('Agent did not start');
   });
 
   it("deletes a large selection in one request and redoes it as one transaction", async () => {

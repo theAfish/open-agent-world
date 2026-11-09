@@ -151,6 +151,15 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
                 if key[0] != agent_id
             }
 
+    async def delete_context(self, agent_id: str, context_id: str) -> None:
+        async with self._records_lock:
+            key = (agent_id, context_id)
+            session_id = self._context_sessions.get(key)
+            if session_id is not None:
+                await self._sessions.delete_session(app_name=self._app_name,
+                    user_id=self._user_id(agent_id), session_id=session_id)
+                self._context_sessions.pop(key, None)
+
     async def execute(
         self,
         config: AgentConfig,

@@ -12,11 +12,12 @@ import { ProjectWorkspace } from "./ProjectWorkspace";
 import type { BridgeProgress, ProjectTab } from "./ProjectWorkspace";
 import { SchemaEditor } from "./SchemaEditor";
 import type { SchemaDetail, SchemaItem } from "./SchemaEditor";
-import type { DraftSchema } from "./SchemaDraftChat";
+import { draftPrompt } from "./SchemaDraftChat";
 import { ExtractDialog } from "./ExtractDialog";
 import type { ExtractDetails } from "./ExtractDialog";
 import { RecordGrid, RecordTable, flattenValues } from "./RecordView";
 import { RecordForm } from "./RecordForm";
+import { LineagePanel } from "./Lineage";
 import "./style.css";
 
 type Settings = { collection_name: string; pdf_engine: string; mineru_base_url: string; vision_model: string; embedding_model: string };
@@ -34,7 +35,7 @@ type ExperimentItem = { id: string; group_id: string; schema_id: string; bundle_
   data: Record<string, unknown>; validation: { valid?: boolean; errors?: string[]; missing?: string[] } | null;
   note: string | null; status: "draft" | "published";
   revision: number; created_by: string | null; created_at: string; updated_at: string };
-type ExperimentDetail = ExperimentItem & { sources: { source_id: string; filename: string | null }[] };
+type ExperimentDetail = ExperimentItem & { sources: { source_id: string; filename: string | null; sha256: string | null; artifact_id: string | null }[] };
 type BundleFile = { source_id: string; filename: string; media_type: string; size: number;
   state: "pending" | "converting" | "converted" | "failed"; job_id: string | null; error: string | null };
 type Bundle = { id: string; group_id: string; schema_id: string; name: string; notes: string;
@@ -194,6 +195,8 @@ export function Workspace({ host, card }: PluginViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [recordDetails, setRecordDetails] = useState<Record<string, ExperimentDetail>>({});
   const [editingId, setEditingId] = useState("");
+  // The record whose evidence chain is unfolded beneath it.
+  const [tracingId, setTracingId] = useState("");
   const [recordDraft, setRecordDraft] = useState<Record<string, unknown>>({});
   const [recordName, setRecordName] = useState("");
   const [recordNote, setRecordNote] = useState("");
@@ -220,6 +223,7 @@ export function Workspace({ host, card }: PluginViewProps) {
   // extraction, or just editing them.
   const [dialog, setDialog] = useState<{ mode: "extract" | "edit" }>();
   // A running extraction: which upload, and which agent to watch until it is done.
+  const [drafting, setDrafting] = useState<{ agent_id: string; name: string }>();
   const [extracting, setExtracting] = useState<{ bundle_id: string; agent_id: string; started_at: string }>();
   // The agent run behind the selected upload's last extraction, read from the host's
   // run API: status, error and the tool/progress timeline, so a failure is explained
@@ -257,6 +261,8 @@ export function Workspace({ host, card }: PluginViewProps) {
   const extractAgents = [...new Map([...projectionAgents, ...researchAgents].map(agent => [agent.id, agent])).values()];
   const canRunAgents = !deployed && typeof host.runAgent === "function" && labAgents.length > 0;
   const canExtract = canRunAgents || !!selectedModel;
+  // schema_manage belongs to the research role, so only that agent can draft a schema.
+  const draftAgent = !deployed && typeof host.runAgent === "function" ? researchAgents[0] : undefined;
 
 
   const call = useCallback((action: string, args: Record<string, unknown> = {}, confirm?: boolean) =>
@@ -521,6 +527,24 @@ export function Workspace({ host, card }: PluginViewProps) {
     }, 2500);
     return () => { active = false; window.clearInterval(timer); };
   }, [extracting, host, call, refresh]);
+
+  // The agent saves the schema itself; once it is idle again the list shows the result.
+  useEffect(() => {
+    if (!drafting) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      host.getAgentInfo(drafting.agent_id).then(async info => {
+        const state = info as { status?: string; active_run_id?: string | null };
+        if (!active || state.status === "running" || state.active_run_id) return;
+        active = false; window.clearInterval(timer);
+        setDrafting(undefined);
+        setNotice(t("{v0} finished drafting — the schema is in the list; open it to review", { v0: drafting.name }));
+        setSchemaDetails({});
+        await refresh();
+      }).catch(() => undefined);
+    }, 2500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [drafting, host, refresh]);
 
   const loadRunLog = useCallback(async (runId: string) => {
     const current = generation.current;
@@ -845,14 +869,17 @@ export function Workspace({ host, card }: PluginViewProps) {
         </WorkspaceToolbar>
         <Banner error={error} notice={notice} />
         <SchemaEditor busy={busy} schemas={experimentSchemas} kind="experiment" call={call} perform={perform}
-          draft={deployed ? undefined : { ready: !!selectedModel, modelSelect,
+          draft={draftAgent ? { agentName: draftAgent.name,
             convert: async file => {
               const sample = await host.resourceFileAction("schema_sample", { filename: file.name,
                 media_type: file.type || "application/octet-stream" }, { file });
               return { markdown: String(sample.markdown), truncated: !!sample.truncated };
             },
-            send: body => request(`knowledge/${card.id}/schema-draft`, { ...body, model: selectedModel }, false) as
-              Promise<{ reply: string; draft: DraftSchema | null }> }}
+            send: async body => {
+              await host.runAgent!(draftAgent.id, draftPrompt(card.id, body), true);
+              setDrafting({ agent_id: draftAgent.id, name: draftAgent.name });
+              setNotice(t("{v0} is drafting the schema…", { v0: draftAgent.name }));
+            } } : undefined}
           onSaved={async saved => {
             // The experiment tables and forms read definitions from a cache; an edit refills it.
             setSchemaDetails(previous => { const next = { ...previous }; delete next[saved.id]; return next; });
@@ -1108,9 +1135,13 @@ export function Workspace({ host, card }: PluginViewProps) {
                     </>
                     : <>
                       <RecordTable definition={definition} data={record.data} validation={record.validation} />
-                      <p className="knowledge-meta">{t("revision {v0} · from {v1}", { v0: record.revision,
-                        v1: detail ? (detail.sources.map(link => link.filename ?? shortId(link.source_id)).join(", ") || "—") : "…" })}
-                        {record.note ? ` · ${record.note}` : ""}</p>
+                      <p className="knowledge-meta">{t("revision {v0} · from", { v0: record.revision })}{" "}
+                        {detail ? (detail.sources.length ? detail.sources.map((link, index) => <span key={link.source_id} title={link.sha256 ?? undefined}>
+                          {index > 0 && ", "}{link.filename ?? shortId(link.source_id)}</span>) : "—") : "…"}
+                        {record.note ? ` · ${record.note}` : ""}
+                        {" · "}<button type="button" className="knowledge-link" aria-pressed={tracingId === item.id}
+                          onClick={() => setTracingId(tracingId === item.id ? "" : item.id)}>{t("Trace")}</button></p>
+                      {tracingId === item.id && <LineagePanel root={{ record_id: item.id }} call={call} />}
                       {publishPending?.record_id === item.id ? <div role="alert" className="knowledge-confirm">
                         <strong>{t("Publish this record?")}</strong>
                         <p>{publishPending.reasons.join(" ")}</p>

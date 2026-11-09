@@ -78,6 +78,23 @@ def test_preparation_lock_and_unknown_data_are_preserved(tmp_path):
     assert (data / 'valuable.txt').read_text() == 'retain'
 
 
+def test_retired_stage_collection_defers_under_provider_lock_and_retries(tmp_path):
+    ledger = ManagedResourceLedger(tmp_path)
+    fingerprint = 'a' * 64
+    stage = tmp_path / 'runtime/staging' / ('b' * 32)
+    stage.mkdir(parents=True)
+    (stage / 'artifact.download').write_bytes(b'obsolete')
+    resource = f'stage:{fingerprint}:{stage.name}'
+    ledger.register(resource, stage, 'environment-stage')
+    with installation_lock(tmp_path / 'runtime/locks' / (fingerprint + '.lock')):
+        assert ledger.collect({resource})[0]['state'] == 'deferred'
+        assert stage.exists()
+    assert ledger.collect({resource}) == [{'id': resource, 'state': 'removed'}]
+    assert ledger.collect({resource}) == []
+    with pytest.raises(ValueError):
+        ledger.register(f'stage:{fingerprint}:user-data', tmp_path / 'runtime/staging/user-data', 'environment-stage')
+
+
 def test_uninstall_releases_archive_dependencies_and_retained_activation_prepares_again(tmp_path):
     manager = PackInstallationManager(tmp_path)
     manager.install(unified(environment={'target': 'host-worker', 'prepare': 'install', 'verify_imports': ['json']}))
@@ -123,6 +140,25 @@ def test_source_uninstall_keeps_shared_declared_environment(tmp_path):
     assert plan['resources'][0]['action'] == 'retain'
     manager.uninstall('test.greeter-release')
     assert handle.root.exists()
+
+
+def test_locked_python_recipe_is_included_in_durable_resource_claims(tmp_path):
+    from backend.packs.lifecycle import environment_resources
+    registry = source_registry(tmp_path)
+    root = registry.pack_roots['source.owner']
+    (root / 'worker.lock').write_text('fixture==1 --hash=sha256:' + 'a' * 64)
+    declaration = EnvironmentSpec(target='host-worker', lock='worker.lock')
+    pack = registry.pack_specs['source.owner'].model_copy(update={'environments': {'worker': declaration}})
+    recipe = PythonEnvironmentSpec.from_declaration(pack.owner, 'worker', declaration, root)
+    resource = 'environment:' + recipe.fingerprint
+    assert environment_resources(pack, root) == {resource}
+    ledger = ManagedResourceLedger(tmp_path / 'profile')
+    environment = ledger.root / 'runtime/environments' / recipe.fingerprint
+    environment.mkdir(parents=True)
+    ledger.register(resource, environment, 'environment')
+    ledger.replace_claims('selected:', {'selected:fixture': environment_resources(pack, root)})
+    assert ledger.collect() == []
+    assert environment.is_dir()
 
 
 def test_source_unenrollment_skips_factory_before_import_and_remains_visible(tmp_path, monkeypatch):

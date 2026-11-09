@@ -1,7 +1,10 @@
 # Crystal Builder — Reference Notes
 
-Load this file via `read_skill("crystal-builder", "references/notes.md")` only
-when you need extra detail beyond `SKILL.md`.
+Read only when you need extra detail beyond `SKILL.md`. Use `read_skills` with
+`{"toolbox":"atomsculptor_skills","skill_id":"crystal_builder","file_path":"references/notes.md"}`.
+For a direct Skill connection use `read_skill` with
+`{"skill":"crystal_builder","file_path":"references/notes.md"}` instead.
+Copy the exact authorized toolbox/skill selector from the tool declaration.
 
 ## Picking `crystalstructure`
 

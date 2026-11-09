@@ -151,3 +151,6 @@
   .sandbox-settings-content { padding: 16px; }
   .sandbox-settings-content :is(.sandbox-settings-grid, .sandbox-limits-grid, .execution-target-fields) { grid-template-columns: minmax(0, 1fr); }
 }
+
+.sandbox-workspace-label { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; font-size: var(--font-size-caption, 11px); color: var(--ink-soft); }
+.sandbox-workspace-label select { width: 100%; min-width: 0; padding: 5px; border: 1px solid var(--line); border-radius: var(--radius-control, 6px); background: var(--surface-soft); color: var(--ink); font: inherit; }

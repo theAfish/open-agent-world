@@ -251,6 +251,7 @@ $backendState = $null
 $devPhase = 'preparing source environments'
 # Pipeline cancellation bypasses catch, but PowerShell still runs finally.
 $devOutcome = 'interrupted'
+$previousPluginDirectories = $env:OPEN_AGENT_WORLD_PLUGIN_DIRS
 
 Push-Location $projectRoot
 try {
@@ -267,6 +268,10 @@ try {
         }
         $resolved.Path
     })
+    $pluginDirectories = @($previousPluginDirectories -split [IO.Path]::PathSeparator | Where-Object { $_ }) + $resolvedPluginPaths
+    if ($pluginDirectories.Count -gt 0) {
+        $env:OPEN_AGENT_WORLD_PLUGIN_DIRS = ($pluginDirectories | Select-Object -Unique) -join [IO.Path]::PathSeparator
+    }
     $backendPython = Initialize-BackendEnvironment -Root $projectRoot -DevelopmentProfile $Profile -AdditionalPlugins $resolvedPluginPaths
     $devPhase = 'recovering previous backend'
     # Recover a backend left by an earlier invocation. The recorded start time
@@ -387,5 +392,6 @@ finally {
         Stop-RecordedProcessTree (Get-ProcessRecord $backend.Id)
     }
     Remove-OwnedBackendState $backendState
+    $env:OPEN_AGENT_WORLD_PLUGIN_DIRS = $previousPluginDirectories
     Pop-Location
 }

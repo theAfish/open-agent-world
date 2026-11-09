@@ -4,6 +4,7 @@ from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.builtin_tutorials import AGENT_TUTORIALS, CONVERSATION_TUTORIALS, TEXT_TUTORIALS, SANDBOX_TUTORIALS
 
 from dataclasses import dataclass
+from copy import deepcopy
 from contextlib import suppress
 import logging
 from typing import Any, Mapping
@@ -11,6 +12,7 @@ from typing import Any, Mapping
 from backend.errors import PluginCompatibilityError, ResourceValidationError
 from backend.legion_workspace import remap_workspace_config
 from backend.sandbox.models import SandboxError
+from backend.sandbox.text_edits import TEXT_EDITS_SCHEMA
 from backend.plugins.registry import (
     PLUGIN_API_VERSION,
     CapabilityGrantDefinition,
@@ -516,7 +518,7 @@ class ConversationNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler
 
 
 class SandboxNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
-    portable_config_fields = frozenset({"status", "runtime"})
+    portable_config_fields = frozenset({"status", "runtime", "workspace_scope"})
 
 
 class TextNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
@@ -716,6 +718,18 @@ async def _inspect_sandbox(
     return await context.inspect_sandbox(capability.agent_id, capability.target_id, **options.model_dump())
 
 
+async def _list_sandbox_files(context, capability, values):
+    from backend.sandbox_workspace import WorkspaceList
+    from backend.capabilities.provider import _validate_tool_request
+    return await context.sandbox_workspace_action(capability, "list", _validate_tool_request(WorkspaceList, values))
+
+
+async def _read_sandbox_file(context, capability, values):
+    from backend.sandbox_workspace import WorkspacePreview
+    from backend.capabilities.provider import _validate_tool_request
+    return await context.sandbox_workspace_action(capability, "preview", _validate_tool_request(WorkspacePreview, values))
+
+
 async def _start_sandbox(context, capability, values):
     if set(values) - {"include_shared_python"} or ("include_shared_python" in values and type(values["include_shared_python"]) is not bool):
         raise ResourceValidationError("sandbox start accepts only include_shared_python (boolean)")
@@ -828,6 +842,7 @@ def _register_builtin(registry: PluginRegistration, sandbox_config_model: type[S
         "plugin_defaults": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"node_document"}),
             host_only=True, read_visibility="scope_only", default={}),
         "data": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"node_document"}), default={}),
+        "workspace_bindings": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"node_document"}), default={}, host_only=True, read_visibility="scope_only"),
         "document": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"node_document"}), default={}),
         "execution": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"node_document"}), default={}),
     }))
@@ -852,6 +867,9 @@ def _register_builtin(registry: PluginRegistration, sandbox_config_model: type[S
         "legion_context": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=run_only),
         "input": StateFieldDefinition(
             value_type=str, allowed_scope_kinds=run_only
+        ),
+        "task_prompt": StateFieldDefinition(
+            value_type=str, allowed_scope_kinds=run_only, host_only=True, read_visibility="scope_only"
         ),
         "progress": StateFieldDefinition(
             value_type=float, allowed_scope_kinds=run_only
@@ -952,8 +970,8 @@ def _register_builtin(registry: PluginRegistration, sandbox_config_model: type[S
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
         selectors=EXECUTION_SELECTORS,
-        description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently in the shared workspace and HOME. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command and do not roll back completed writes; inspect effects before retrying. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. Use direct python3 -c only for short probes; save longer programs with write_sandbox_text_file and then execute the saved file with direct argv. Pack runtime default environments and Skill environments are prepared automatically in private managed profiles, including for shell commands. Without a Pack profile, macOS Seatbelt prepares managed Python for direct python/python3; use python_environment=managed for indirect Python. python_environment=none cannot bypass a required Pack profile. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines and compound commands can hide earlier failures: use bash -o pipefail or download with curl -f to a file and only execute it after success; check stderr and every expected file as well as exit_code. Use install_python_packages only for explicit ad hoc shared Python dependencies; Pack dependencies follow their declarations and are prepared automatically.',
-        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "python_environment": {"type": "string", "enum": ["auto", "managed", "none"], "description": "macOS Seatbelt Python preparation: auto for direct python commands, managed for commands that invoke Python indirectly, none for system-only commands. Required Pack profiles are always prepared and reject none. Other runtimes use their managed Python."}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1, "description": "Host observation budget; returns operation_id if still running. Use wait_sandbox_operation later, not a duplicate submission."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 36000, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+        description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently with shared HOME. The host assigns the workspace from persistent global/session/group organization; inspect_sandbox reports it. Relative command, Skill and file-tool paths use that same directory. Global mode writes directly in the root. Session/group mode writes only in its assigned named folder; all other workspace files are read only. Existing sessions keep their historical binding after organization changes. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command and do not roll back completed writes; inspect effects before retrying. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. Use direct python3 -c only for short probes; save longer programs with write_sandbox_text_file and then execute the saved file with direct argv. Pack runtime default environments and Skill environments follow their declarations: managed profiles prepare on use, while legacy-shared profiles reuse host-prepared shared Python, including for shell commands. Leave python_environment=auto for normal execution. Windows AppContainer and macOS Seatbelt use managed Python for all commands and reject none. On runtimes with optional Python, managed also prepares it for indirect Python commands; none is only available without a required Pack profile. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines and compound commands can hide earlier failures: use bash -o pipefail or download with curl -f to a file and only execute it after success; check stderr and every expected file as well as exit_code. Use install_python_packages only for explicit ad hoc shared Python dependencies; Pack dependencies follow their declarations and are prepared automatically.',
+        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "python_environment": {"type": "string", "enum": ["auto", "managed", "none"], "description": "Default auto follows runtime capabilities. Windows AppContainer and macOS Seatbelt always use managed Python and reject none. On runtimes with optional Python, managed prepares it for indirect Python commands; none omits it only when no Pack profile is required. Pack environments follow their declared management mode."}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1, "description": "Host observation budget; returns operation_id if still running. Use wait_sandbox_operation later, not a duplicate submission."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 36000, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.write_text_file', tool_name='write_sandbox_text_file',
         target_parameter='sandbox', target_capabilities=frozenset({'sandbox.execute'}),
@@ -961,10 +979,7 @@ def _register_builtin(registry: PluginRegistration, sandbox_config_model: type[S
         input_schema={"type": "object", "properties": {
             "path": {"type": "string", "minLength": 1, "description": "Workspace-relative path using forward slashes; no traversal."},
             "content": {"type": "string", "minLength": 1, "description": "Complete UTF-8 file contents (at most 256 KiB)."},
-            "edits": {"type": "array", "minItems": 1, "maxItems": 20, "items": {
-                "type": "object", "properties": {"old": {"type": "string", "minLength": 1},
-                    "new": {"type": "string"}}, "required": ["old", "new"], "additionalProperties": False},
-                "description": "Sequential exact replacements; include enough context for each old text to occur once."},
+            "edits": deepcopy(TEXT_EDITS_SCHEMA),
             "overwrite": {"type": "boolean", "default": False}},
             "required": ["path"], "oneOf": [
                 {"required": ["content"], "not": {"required": ["edits"]}},
@@ -988,6 +1003,19 @@ def _register_builtin(registry: PluginRegistration, sandbox_config_model: type[S
         kind='sandbox.run_skill_script', tool_name='run_skill_script', target_parameter='sandbox',
         description='Run a file from the selected Skill in the selected sandbox. Both resources require independent live authorization. The current bundle is mounted read-only outside the workspace; cwd and generated outputs use the sandbox workspace.',
         input_schema=skill_script_schema(), selectors=(SKILL_SELECTOR, *EXECUTION_SELECTORS), target_capabilities=frozenset({"sandbox.execute"})), _run_skill_script)
+    from backend.sandbox_workspace import WorkspaceList, WorkspacePreview
+    registry.register_capability(CapabilityDefinition(
+        kind='sandbox.list_files', tool_name='list_sandbox_files', target_parameter='sandbox', read_only=True,
+        description='List files in an authorized Sandbox workspace without running commands or writing files. '
+            'Use a relative directory path; query optionally searches filenames recursively. Follow next_cursor until '
+            'null before concluding that the search scope has no matches. A directory page does not inspect file contents.',
+        input_schema=WorkspaceList.model_json_schema()), _list_sandbox_files)
+    registry.register_capability(CapabilityDefinition(
+        kind='sandbox.read_file', tool_name='read_sandbox_file', target_parameter='sandbox', read_only=True,
+        description='Preview bounded UTF-8 text from an authorized workspace-relative file without execution or writes. '
+            'Returns text with offset, total_chars and next_offset; follow pages only as needed. Images/binary/oversized '
+            'files return a state rather than content. A preview is file evidence, not scientific validation.',
+        input_schema=WorkspacePreview.model_json_schema()), _read_sandbox_file)
     from backend.sandbox.history import SandboxInspection
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.inspect', tool_name='inspect_sandbox', target_parameter='sandbox',
@@ -1136,14 +1164,14 @@ def _register_builtin(registry: PluginRegistration, sandbox_config_model: type[S
         description="The agent can run commands in this isolated workplace. Starting and stopping require manual control.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.write_text_file'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.wait'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.write_text_file'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.list_files'), CapabilityGrantDefinition(kind='sandbox.read_file'), CapabilityGrantDefinition(kind='sandbox.wait'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         canvas_requires_confirmation=True, id="execute_manage", label="Execute + Start/Stop", short_label="execute + manage",
         description="The agent can run commands, start this Sandbox and stop it, including active commands.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='sandbox.start'), CapabilityGrantDefinition(kind='sandbox.stop'), CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.write_text_file'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.wait'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.start'), CapabilityGrantDefinition(kind='sandbox.stop'), CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.write_text_file'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.list_files'), CapabilityGrantDefinition(kind='sandbox.read_file'), CapabilityGrantDefinition(kind='sandbox.wait'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",
@@ -1177,6 +1205,8 @@ class CorePlugin:
         from backend.plugins.shadow_collection import register_shadow_collection
         register_shadow_collection(registration)
         _register_builtin(registration, self.sandbox_config_model)
+        from backend.runs.tools import register_run_history
+        register_run_history(registration)
         from backend.file_preview import register_file_preview
         register_file_preview(registration)
         from backend.execution_graph import register as register_execution_graph

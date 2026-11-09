@@ -65,7 +65,7 @@ def read_key(services, history_key, sandbox_id):
 def recent_summaries(services, sandbox_id, *, caller=None, run_id=None, limit=3, include_output=False):
     """The Agent view uses the same receipts as the UI, with smaller output tails."""
     fields = ("id", "operation_kind", "phase", "caller", "run_id", "argv", "started_at", "state", "exit_code", "timed_out", "cancelled", "termination_reason",
-              "cancellation_reason", "error", "duration_seconds")
+              "cancellation_reason", "error", "duration_seconds", "working_directory")
     entries = [entry for entry in read(services, sandbox_id)
                if (caller is None or entry.get("caller") == caller) and (run_id is None or entry.get("run_id") == run_id)]
     return [

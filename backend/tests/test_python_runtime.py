@@ -1,4 +1,4 @@
-"""Atomic managed-Python bootstrap: a failed download never corrupts base."""
+"""Atomic managed-Python bootstrap: a failed copy never corrupts base."""
 import json
 from pathlib import Path
 
@@ -10,19 +10,27 @@ from backend.sandbox.models import SandboxPreparationError
 
 def make_runtime(tmp_path: Path) -> python_runtime.SharedPythonRuntime:
     runtime = python_runtime.SharedPythonRuntime(tmp_path, darwin_store=tmp_path / "machine-cache")
-    runtime._ensure_uv = lambda: "uv"  # type: ignore[method-assign]
+    runtime._uv = lambda: "uv"  # type: ignore[method-assign]
     return runtime
 
 
 def fake_python(root: Path, label: str) -> Path:
-    distribution = root / f"cpython-3.12-{label}"
+    distribution = root / f"cpython-{python_runtime.DARWIN_MANAGED_PYTHON}-{label}"
     binary = distribution / "bin" / "python3"
     binary.parent.mkdir(parents=True)
     binary.write_text("#!/bin/sh\n", encoding="utf-8")
-    stdlib = distribution / "lib" / "python3.12" / "os.py"
+    stdlib = distribution / "lib" / f"python{python_runtime.DARWIN_MANAGED_PYTHON}" / "os.py"
     stdlib.parent.mkdir(parents=True)
     stdlib.write_text("# standard library marker\n", encoding="utf-8")
+    from backend.sandbox.darwin_python_copy import source_identity
+    (root / 'backend-source.json').write_text(json.dumps(source_identity()))
     return binary
+
+
+@pytest.fixture(autouse=True)
+def backend_copy(monkeypatch):
+    monkeypatch.setattr(python_runtime.SharedPythonRuntime, '_copy_backend_python',
+                        lambda self, root: fake_python(root, 'fresh'))
 
 
 def test_darwin_bootstrap_failure_leaves_base_untouched(tmp_path, monkeypatch):
@@ -60,7 +68,7 @@ def test_darwin_bootstrap_swaps_staging_in_after_verification(tmp_path, monkeypa
     monkeypatch.setattr(runtime, "_run", run)
     runtime._ensure_darwin()
     # The verified staging tree replaced the stale partial base atomically.
-    assert "cpython-3.12-fresh" in {path.name for path in runtime.base.iterdir()}
+    assert f"cpython-{python_runtime.DARWIN_MANAGED_PYTHON}-fresh" in {path.name for path in runtime.base.iterdir()}
     assert not stale.exists()
     assert not (runtime.root / "base.partial").exists()
     assert not (runtime.root / "base.previous").exists()

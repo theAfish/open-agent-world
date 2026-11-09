@@ -120,6 +120,9 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
 
 export function SandboxSettings({ card, onDirtyChange, compact = false }: { card: WorldCard; onDirtyChange?: (dirty: boolean) => void; compact?: boolean }) {
   useLocale();
+  const updateCard = useWorldStore(state => state.updateCard);
+  const [scopeSaving, setScopeSaving] = useState(false);
+  const [scopeError, setScopeError] = useState('');
   const edges = useWorldStore((state) => state.edges);
   const saveConfig = useWorldStore((state) => state.saveSandboxConfig);
   const stopSandbox = useWorldStore((state) => state.stopSandbox);
@@ -170,6 +173,20 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
   const limitsAvailable = selectedLimits?.resource_limits_available !== false;
 
   return <div className="expanded-stack sandbox-controls sandbox-settings-page nowheel">
+    <section className="sandbox-settings-section">
+      <label className="field-label"><span>{t('Workspace sharing')}</span>
+        <select aria-label={t('Workspace sharing')} value={String(card.config.workspace_scope ?? 'session')} disabled={scopeSaving || card.ephemeral}
+          onChange={event => {
+            setScopeSaving(true); setScopeError('');
+            void updateCard(card.id, { config: { workspace_scope: event.target.value as 'shared' | 'session' | 'group' } }, { throwOnError: true })
+              .catch(error => setScopeError(apiErrorMessage(error))).finally(() => setScopeSaving(false));
+          }}>
+          <option value="shared">{t('Global shared')}</option><option value="session">{t('Session')}</option><option value="group">{t('Group')}</option>
+        </select>
+      </label>
+      <p className="sandbox-help">{t('Changes apply to new sessions. Existing sessions keep their historical workspace. Other workspace files are read only in session/group mode.')}</p>
+      {scopeError && <p role="alert" className="sandbox-error">{scopeError}</p>}
+    </section>
     <section className="sandbox-settings-section">
       <form className="sandbox-config-form" onSubmit={(event) => {
         event.preventDefault();

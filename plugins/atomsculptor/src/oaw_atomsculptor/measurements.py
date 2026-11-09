@@ -47,7 +47,7 @@ class Constraint(Control):
     check_ids: Annotated[list[Name], Field(max_length=12)] = Field(default_factory=list,
         description="HOST requirement IDs this executed check covers; partial checks never imply all requirements passed.")
     regions: Annotated[list[Name], Field(max_length=12)] = Field(default_factory=list,
-        description="Keys in coverage identifying the actual tested populations, including allowed boundaries separately.")
+        description="Required when check_ids is nonempty: keys in coverage identifying the actual tested populations, including allowed boundaries separately.")
     controls: Annotated[list[Control], Field(max_length=8)] = Field(default_factory=list,
         description="Tests of the checker on known passing/failing controls. passed means the expected verdict was obtained.")
 
@@ -95,7 +95,7 @@ class Artifact(Contract):
     units: Annotated[str, Field(min_length=1, max_length=100)]
     frame: Frame
     layout: ArtifactLayout | None = None
-    components: Annotated[dict[Name, Annotated[int, Field(gt=0)]], Field(min_length=1, max_length=8)]
+    components: Annotated[dict[Name, Count], Field(min_length=1, max_length=8)]
 
     @model_validator(mode="before")
     @classmethod
@@ -160,7 +160,7 @@ class Measurement(Contract):
     measurement_revision: Name | None = None
     constraints: Annotated[list[Constraint], Field(max_length=12)] = Field(default_factory=list)
     coverage: Annotated[dict[Name, Count], Field(max_length=12)] = Field(default_factory=dict,
-        description="Flat region -> integer sample count. Put parameters or nested statistics in values, not coverage.")
+        description="Flat region -> integer sample count. A zero blocks checks that reference this region, not unrelated checks. Put parameters or nested statistics in values, not coverage.")
     artifacts: Annotated[list[Artifact], Field(max_length=8)] = Field(default_factory=list)
     assumption_invalid: bool = False
     contradiction: Annotated[str, Field(max_length=1200)] = ""
@@ -195,24 +195,56 @@ class Measurement(Contract):
         return self
 
 
-def measurement_contract():
+def measurement_contract(*, include_schema=True):
     """Generated from exactly the same types used by the stdout parser."""
-    return {"schema": Measurement.model_json_schema(),
+    candidate_example = Measurement.model_validate({"kind": "candidate", "measurement_revision": "example-v1",
+        "coverage": {"inspected_entries": 4},
+        "constraints": [{"name": "example_requirement", "passed": False,
+            "reason": "Illustrative failed verdict; replace with actual executed measurements.",
+            "regions": ["inspected_entries"], "check_ids": ["<HOST build requirement ID>"]}],
+        "artifacts": [{"path": "candidate.npz", "units": "angstrom", "components": {"component_a": 4},
+            "frame": {"origin": [0, 0, 0], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+            "layout": {"format": "npz", "primary_dataset": "positions"}}]})
+    return {**({"schema": Measurement.model_json_schema()} if include_schema else {}),
+            "reference": {"skill_id": "structure_inspect", "file_path": "references/measurement-contract.json",
+                "reader": "read_skill or read_skills with the authorized Skill/toolbox selector"},
+            "candidate_example": {"oaw_measurements": candidate_example.model_dump(exclude_defaults=True)},
+            "report_kinds": "emit_measurements defaults to diagnostic: useful intermediate evidence, not build completion. "
+                "A build candidate needs explicit kind=candidate, measurement_revision, measured constraints with the "
+                "actual HOST check_ids and inspected coverage. File/document delivery also needs the actual saved file "
+                "in artifacts and structure_path when advancing. The example is a shape illustration, not a verdict, "
+                "coordinate frame or requirement ID to copy; preserve actual failures and independent validation.",
             "data_limits": DATA_LIMITS.copy(),
             "encoding": 'Print ONE line: OAW_MEASUREMENTS {"oaw_measurements": <schema object>}. A marked bare object is also accepted.',
             "example": {"oaw_measurements": {"schema_version": 1, "kind": "diagnostic",
                 "measurement_revision": "input-v1", "values": {"measured_length": 2.4},
                 "coverage": {"input_atoms": 12},
                 "constraints": [{"name": "input_population", "passed": True, "regions": ["input_atoms"]}]}},
-            "meaning": "Data fields never imply acceptance. Preserve failed checks. Use HOST check_ids for requirement coverage; independent validation remains required. "
+            "meaning": "Data fields never imply acceptance. Preserve failed checks. Use HOST check_ids for requirement coverage; each check with check_ids needs nonempty regions naming its tested coverage populations. Independent validation remains required. "
                 "coverage counts inspected populations, not output matches: for absence checks use inspected_entries/directories and put found_files=0 in values. "
-                "An empty tested population cannot prove a check. Record actual sample_count, search scope/range and untested hypotheses in metadata; a sample verdict does not prove an unexecuted search."}
+                "An empty tested population cannot prove a check that references it; unused zero counts do not invalidate other evidence. Artifact components may honestly be zero. "
+                "Record actual sample_count, search scope/range and untested hypotheses in metadata; a sample verdict does not prove an unexecuted search."}
+
+
+def coverage_issue(name, count, check_ids=()):
+    return {"name": "coverage:" + name, "passed": False,
+            "code": "population_not_reported" if count is None else "empty_test_population",
+            "field": "oaw_measurements.coverage." + name, "check_ids": list(check_ids),
+            "reason": "No inspected population was reported for this region." if count is None else
+                "No samples were measured in this declared region.",
+            "next_action": "For an absence check, report the actual inspected directory/entry population in coverage "
+                "and found_matches=0 in values, with the search scope in metadata. For a property check, no tested "
+                "objects means the property remains untested. Do not mark it passed or create synthetic objects to "
+                "prove properties of absent candidates; request plan review if the committed conditional check "
+                "does not apply to the observed state. Existing acceptance checks remain unchanged."}
 
 
 def constraint_failures(value):
     failures = [c for c in value.get("constraints", []) if not c["passed"]]
-    failures += [{"name": "coverage:" + name, "passed": False, "reason": "No samples were measured in this declared region."}
-                 for name,count in value.get("coverage",{}).items() if count == 0]
+    tested = {region for c in value.get("constraints", []) for region in c.get("regions", [])}
+    failures += [coverage_issue(name, count, [identity for c in value.get("constraints", [])
+                    if name in c.get("regions", []) for identity in c.get("check_ids", [])])
+                 for name,count in value.get("coverage",{}).items() if count == 0 and name in tested]
     failures += [{"name": "control:" + c["name"] + ":" + control["name"], "passed": False,
                   "reason": "The checker did not reproduce its expected control verdict."}
                  for c in value.get("constraints",[]) for control in c.get("controls",[]) if not control["passed"]]
@@ -232,12 +264,15 @@ def parse_measurements(stdout):
     """Last marked record wins; malformed evidence is never promoted or replaced by stale evidence."""
     if not isinstance(stdout,str):
         return None, []
-    for line in reversed(stdout.splitlines()[-40:]):
+    # The native stdout boundary already limits size. Trailing diagnostics must
+    # not hide the last report, including an invalid report requiring feedback.
+    for line in reversed(stdout.splitlines()):
         raw=line.strip(); marked=raw.startswith("OAW_MEASUREMENTS ")
         if marked:
             raw=raw[len("OAW_MEASUREMENTS "):]
         elif not raw.startswith("{") or '"oaw_measurements"' not in raw:
             continue
+        report_file = None
         try:
             # Native Sandbox output already has a 2 MiB bound. Accept its full
             # record for deterministic diagnostic projection before applying
@@ -250,6 +285,9 @@ def parse_measurements(stdout):
             value=envelope.get("oaw_measurements",envelope if marked else None)
             if not isinstance(value,dict) or not value:
                 raise ValueError("oaw_measurements must be a nonempty object")
+            metadata = value.get("metadata")
+            if isinstance(metadata, dict) and relative_path(metadata.get("oaw_report_file")):
+                report_file = metadata["oaw_report_file"]
             # Earlier callers duplicated identical fields at the envelope level.
             # Accept that unambiguous form, but never discard conflicting facts.
             if "oaw_measurements" in envelope:
@@ -279,10 +317,13 @@ def parse_measurements(stdout):
                     "actual_type":bounded.actual_type if isinstance(bounded, BoundedDataError) else type(error.get("input")).__name__,
                     **(bounded.details if isinstance(bounded, BoundedDataError) else {}),
                     "next_action":"Repair only this producer field using HOST measurement_contract. Keep bounded nested data; save oversized diagnostics as artifacts, not long JSON strings. Do not replan the science or invent a metric."})
+            if report_file and issues:
+                issues[0]["saved_report_file"] = report_file
             return None,issues
         except (ValueError,TypeError,AttributeError,OverflowError,RecursionError) as exc:
             return None,[{"code":"measurement_contract","field":"oaw_measurements","message":str(exc),
-                         "next_action":"Repair only the producer record using HOST measurement_contract; keep the measured data and scientific plan."}]
+                         "next_action":"Repair only the producer record using HOST measurement_contract; keep the measured data and scientific plan.",
+                         **({"saved_report_file": report_file} if report_file else {})}]
     return None, []
 
 

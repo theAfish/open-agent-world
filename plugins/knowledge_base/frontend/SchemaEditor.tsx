@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 import { PropertyBuilder } from "./PropertyBuilder";
 import { SchemaDraftChat } from "./SchemaDraftChat";
-import type { DraftApi, DraftSchema } from "./SchemaDraftChat";
+import type { DraftApi } from "./SchemaDraftChat";
 import { entryProperty } from "./schemaModel";
 
 export type SchemaItem = { id: string; name: string; description: string | null; domain: string;
@@ -30,21 +30,18 @@ type Props = {
   onSaved: (schema: SchemaItem) => Promise<void> | void;
   /** When set, the toolbar is the parent's: only the "New schema" button is rendered here. */
   compact?: boolean;
-  /** Offers "Draft with AI" in the editor; omitted where no model can be called. */
+  /** Offers "Draft with AI" in the editor; omitted where no agent is connected. */
   draft?: DraftApi;
 };
 
 /** Experiment record fields. General project extraction is configured in Spaces. */
 export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, compact, draft }: Props) {
   const [editor, setEditor] = useState<Editor>();
-  // The editor as it was before the last applied draft, so applying one can be undone.
-  const [undo, setUndo] = useState<Editor>();
 
-  const create = () => { setUndo(undefined); setEditor({ id: "", name: "", description: "", system_prompt: "", kind, definition: pretty(TEMPLATE) }); };
+  const create = () => { setEditor({ id: "", name: "", description: "", system_prompt: "", kind, definition: pretty(TEMPLATE) }); };
 
   const open = (id: string) => perform(async () => {
     const detail = (await call("schemas", { operation: "get", schema_id: id })).schema as SchemaDetail;
-    setUndo(undefined);
     setEditor({ id: detail.id, name: detail.name, description: detail.description ?? "",
       system_prompt: detail.system_prompt, definition: pretty(detail.definition), kind: detail.kind });
   });
@@ -58,18 +55,16 @@ export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, comp
     const result = editor.id
       ? await call("schema_manage", { operation: "update", schema_id: editor.id, ...payload })
       : await call("schema_manage", { operation: "create", ...payload });
-    setEditor(undefined); setUndo(undefined);
+    setEditor(undefined);
     await onSaved(result.schema as SchemaItem);
   });
 
-  const applyDraft = (result: DraftSchema) => editor && (setUndo(editor), setEditor({ ...editor, name: result.name,
-    description: result.description, system_prompt: result.system_prompt, definition: pretty(result.definition) }));
   const currentSchema = () => {
     // An untouched new schema is only the starter template, which would bias the draft.
     if (editor && !editor.id && !editor.name && !editor.system_prompt && editor.definition === pretty(TEMPLATE)) return undefined;
     let definition: unknown;
     try { definition = JSON.parse(editor?.definition ?? ""); } catch { definition = undefined; }
-    return { name: editor?.name ?? "", description: editor?.description ?? "", system_prompt: editor?.system_prompt ?? "", definition };
+    return { ...(editor?.id ? { schema_id: editor.id } : {}), name: editor?.name ?? "", description: editor?.description ?? "", system_prompt: editor?.system_prompt ?? "", definition };
   };
 
   return <div className="knowledge-schema-editor">
@@ -94,8 +89,8 @@ export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, comp
         </ul>
       </div>
       {editor && <div className="knowledge-form">
-        {draft && <SchemaDraftChat key={`draft-${editor.id}`} api={draft} current={currentSchema} onApply={applyDraft}
-          defaultOpen={!editor.id} onUndo={undo ? () => { setEditor(undo); setUndo(undefined); } : undefined} />}
+        {draft && <SchemaDraftChat key={`draft-${editor.id}`} api={draft} current={currentSchema} onSent={() => setEditor(undefined)}
+          defaultOpen={!editor.id} />}
         <label>{t("Name")}<input aria-label={t("Name")} value={editor.name} disabled={busy}
           onChange={event => setEditor({ ...editor, name: event.target.value })} /></label>
         <label>{t("Description")}<input aria-label={t("Description")} value={editor.description} disabled={busy}
@@ -108,7 +103,7 @@ export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, comp
         <div className="knowledge-formbar">
           <button type="button" className="knowledge-primary" disabled={busy || !editor.name || !editor.system_prompt}
             onClick={() => void save()}>{editor.id ? t("Save schema") : t("Create schema")}</button>
-          <button type="button" disabled={busy} onClick={() => { setEditor(undefined); setUndo(undefined); }}>{t("Cancel")}</button>
+          <button type="button" disabled={busy} onClick={() => setEditor(undefined)}>{t("Cancel")}</button>
         </div>
       </div>}
     </div>

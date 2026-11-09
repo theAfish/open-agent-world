@@ -140,7 +140,7 @@ async def delivery_setup(*, failing=False, unvalidated=False):
     assert e.workflow.advance(e, "probe", "box", "probe.py")["ok"]
     await execute(e, "build.py", result={"exit_code": 0, "command_id": "b1", "stdout": "built"})
     from test_workflow import validate
-    await validate(e)
+    await validate(e, skill="skill-node")
     await tool(e, "run_skill_script", {"sandbox": "box", "script": "scripts/structure_inspect.py",
         "argv": ["to_atomsculptor_document"]},
         {"exit_code": 0, "stdout": json.dumps({"input_structure_file": "cnt.extxyz", 
@@ -203,7 +203,9 @@ async def test_failed_validation_stops_the_pipeline_before_any_conversion_or_imp
     e, definitions, invoke, stopped, calls = await delivery_setup(failing=True)
     result = await run_delivery_step(e, definitions, invoke, stopped, call_id="deliver-call",
                                      sandbox="box", skill="skill-node", structure_path="cnt.extxyz",
-                                     target="structure", validate={})
+                                     # Stronger parameters require a fresh validation;
+                                     # the earlier bare validation is reusable only as-is.
+                                     target="structure", validate={"expected_count": 80})
     assert result["error"]["code"] == "delivery_validation_failed"
     assert [name for name, _ in calls] == ["run_skill_script"]
     assert e.workflow.current == "deliver"

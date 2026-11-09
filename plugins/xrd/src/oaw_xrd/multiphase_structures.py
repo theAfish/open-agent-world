@@ -44,6 +44,6 @@ def fitted_structures(candidates, combo, cells, *, source_kind):
             if source.get('sha256') and digest != source['sha256']:
                 raise ValueError('Input CIF SHA256 mismatch')
             output.append(structure_payload(identifier, label, text, cell=cells[index], source_kind=source_kind))
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
+        except (ValueError, KeyError, IndexError, TypeError, ImportError) as exc:
             output.append({'candidate_id': identifier, 'label': label, 'source_kind': source_kind, 'error': str(exc)})
     return output

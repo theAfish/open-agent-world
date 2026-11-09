@@ -41,6 +41,20 @@ class ModelStreamStalled(ConnectionError):
         super().__init__(message)
 
 
+def content_kinds(content: Any) -> frozenset[str]:
+    """Kinds visible at the adapter boundary, without retaining their payloads."""
+    kinds = set()
+    for part in getattr(content, "parts", None) or ():
+        if getattr(part, "text", None):
+            kinds.add("reasoning" if getattr(part, "thought", False) else "text")
+        for field, kind in (("function_call", "tool_call"), ("function_response", "tool_result"),
+                            ("inline_data", "media"), ("file_data", "media"),
+                            ("executable_code", "tool_call"), ("code_execution_result", "tool_result")):
+            if getattr(part, field, None) is not None:
+                kinds.add(kind)
+    return frozenset(kinds)
+
+
 def _request_size(request: Any) -> int:
     """Estimate bytes without retaining or emitting prompts, images or secrets."""
     contents = getattr(request, "contents", ()) or ()
@@ -77,6 +91,7 @@ class ModelTrace:
         self.recovery_deadlines: dict[str, tuple[asyncio.Timeout, float]] = {}
         self.context_windows = {}
         self.context_stats = {}
+        self.request_stream_metrics: dict[str, dict[str, Any]] = {}
         self.provenance = None
         self.invocations = getattr(checkpoint_store, "invocations", None)
         self._archived_tools: dict[tuple[str, str], tuple[str, str]] = {}
@@ -201,23 +216,16 @@ class ModelTrace:
         if role not in self._last_reasoning_emit or now - self._last_reasoning_emit[role] >= 0.25:
             self._emit_reasoning(role, pending[0], self._reasoning[role], final=False)
 
-    def note_activity(self, role: str, content: Any) -> None:
+    def note_activity(self, role: str, content: Any) -> frozenset[str]:
         """Record that the role's pending request delivered real streamed content.
 
         Empty partial/keepalive events must not postpone the stall watchdog.
         Reasoning, visible text, tool arguments and media all count as content.
         """
-        parts = getattr(content, "parts", None) or ()
-        has_content = any(
-            bool(getattr(part, "text", None)) or any(
-                getattr(part, field, None) is not None for field in (
-                    "function_call", "function_response", "inline_data", "file_data",
-                    "executable_code", "code_execution_result",
-                )
-            ) for part in parts
-        )
-        if has_content and role in self.pending:
+        kinds = content_kinds(content)
+        if kinds and role in self.pending:
             self._last_activity[role] = time.monotonic()
+        return kinds
 
     def stalled_stream(self) -> dict[str, Any] | None:
         """A silent stream, if one is currently pending.
@@ -340,6 +348,7 @@ class ModelTrace:
                 "context": self.context_stats.get(role), "elapsed_ms": elapsed_ms, "input_tokens": input_tokens,
                 "output_tokens": output_tokens, "max_output_tokens": output_limit,
                 "finish_reason": finish_reason, "reasoning_available": bool(reasoning),
+                "stream_metrics": self.request_stream_metrics.pop(role, None),
                 "text": (f"{role.replace('_', ' ')} · model request {request_id} returned in {elapsed_ms / 1000:.1f}s"
                          + (" (output limit reached)" if limit_reached else
                             " (likely at output limit)" if at_output_cap else "")

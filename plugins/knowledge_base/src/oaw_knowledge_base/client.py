@@ -4,16 +4,29 @@ The MKB client owns a daemon thread that runs durable jobs, so it has to outlive
 single resource action: a client opened and closed inside one handler would kill the
 markdown conversion it just submitted. Clients are therefore cached by node id and
 closed only on shutdown or deletion.
+
+Where the original bytes live is a deployment decision, not a card setting: MKB's
+``sql:`` store keeps them in ``knowledge.db`` (the default), ``file:///root`` puts
+them on a filesystem, ``s3://bucket?endpoint=…`` on any S3-compatible service. The
+choice is recorded in the database the first time it is opened and must not change
+afterwards — every source row points into exactly one store, and silently opening
+it against another would make all retained evidence unreadable.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
+from urllib.parse import urlparse
 
 from .errors import KnowledgeError
 
 FILE_NAME = "knowledge.db"
 DEFAULT_COLLECTION = "Knowledge base"
+DEFAULT_OBJECT_STORE = "sql:"
+OBJECT_STORE_ENV = "OAW_KB_OBJECT_STORE_URL"
+OBJECT_STORE_ACCESS_KEY_ENV = "OAW_KB_OBJECT_STORE_ACCESS_KEY"
+OBJECT_STORE_SECRET_KEY_ENV = "OAW_KB_OBJECT_STORE_SECRET_KEY"
 
 _clients: dict[str, object] = {}
 _lock = threading.Lock()
@@ -26,6 +39,50 @@ INSTALL_HINT = (
 
 def database_path(storage_path):
     return storage_path / FILE_NAME
+
+
+def configured_object_store(object_store_url=None):
+    """The evidence store this process is deployed with: an explicit URL, else the
+    environment, else MKB's in-database store."""
+    value = (object_store_url or os.environ.get(OBJECT_STORE_ENV) or "").strip()
+    return value or DEFAULT_OBJECT_STORE
+
+
+def _object_store_credentials(url, resolve_secret=None):
+    if urlparse(url).scheme != "s3":
+        return None, None
+
+    def secret(name):
+        return (resolve_secret(name) if resolve_secret else None) or os.environ.get(name) or None
+
+    return secret(OBJECT_STORE_ACCESS_KEY_ENV), secret(OBJECT_STORE_SECRET_KEY_ENV)
+
+
+def _check_object_store(kb, engine, url):
+    """Refuse to open retained evidence against a store other than the one it was
+    written to. A database from before this record existed can only have used
+    ``sql:``, so one with sources and no record is treated as such."""
+    from sqlalchemy import Column, MetaData, String, Table, Text, insert, select
+
+    metadata = MetaData()
+    table = Table("oaw_kb_evidence_store", metadata,
+                  Column("key", String(64), primary_key=True),
+                  Column("value", Text, nullable=False))
+    metadata.create_all(engine, checkfirst=True)
+    with engine.begin() as connection:
+        recorded = connection.execute(
+            select(table.c.value).where(table.c.key == "object_store_url")).scalar_one_or_none()
+        if recorded is None:
+            if kb.sources.list(limit=1):
+                recorded = DEFAULT_OBJECT_STORE
+            else:
+                connection.execute(insert(table).values(key="object_store_url", value=url))
+                return
+    if recorded != url:
+        raise KnowledgeError(
+            f"This knowledge base keeps its original files in {recorded!r} but the deployment "
+            f"is configured for {url!r} ({OBJECT_STORE_ENV}). Restore the original setting; "
+            "moving retained evidence between stores is not done automatically.")
 
 
 def _prepare_file(path):
@@ -63,7 +120,7 @@ def _backfill_search_index(kb, engine):
         offset += len(batch)
 
 
-def _build(path, resolve_secret=None, resolve_model=None):
+def _build(path, resolve_secret=None, resolve_model=None, object_store_url=None):
     try:
         from mkb.sdk import KnowledgeBase
     except ImportError as error:  # pragma: no cover - depends on the deployment env
@@ -84,14 +141,25 @@ def _build(path, resolve_secret=None, resolve_model=None):
     # transactions: the graph, the search index and experiment records all live here.
     engine = create_engine(url, connect_args={"timeout": 30})
     graph_store = SqlGraphStore(engine)
+    store_url = configured_object_store(object_store_url)
+    access_key, secret_key = _object_store_credentials(store_url, resolve_secret)
     kb = KnowledgeBase.from_url(
         database_url=url,
-        object_store_url="sql:",  # object bytes live in the same file; no MinIO
+        object_store_url=store_url,
+        object_store_access_key=access_key,
+        object_store_secret_key=secret_key,
         graph_store=graph_store,
     )
     kb.initialize()
+    try:
+        _check_object_store(kb, engine, store_url)
+    except Exception:
+        kb.close()
+        engine.dispose()
+        raise
     kb.oaw_graph_store = graph_store
     kb.oaw_engine = engine
+    kb.oaw_object_store_url = store_url
     # Only callables live in memory; no secret or connection enters the durable
     # job database — the conversion job resolves both when it actually runs.
     kb.oaw_resolve_secret = resolve_secret
@@ -116,7 +184,8 @@ def collection(kb, name=None):
     return kb.collections.create(name=wanted)
 
 
-def open_client(node_id, storage_path, *, resolve_secret=None, resolve_model=None):
+def open_client(node_id, storage_path, *, resolve_secret=None, resolve_model=None,
+                object_store_url=None):
     path = database_path(storage_path)
     with _lock:
         cached = _clients.get(node_id)
@@ -127,7 +196,7 @@ def open_client(node_id, storage_path, *, resolve_secret=None, resolve_model=Non
                 cached.oaw_resolve_model = resolve_model
             return cached
     # Build outside the lock: initialize() touches the disk and can be slow.
-    kb = _build(path, resolve_secret, resolve_model)
+    kb = _build(path, resolve_secret, resolve_model, object_store_url)
     with _lock:
         cached = _clients.get(node_id)
         if cached is not None:

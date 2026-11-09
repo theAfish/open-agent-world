@@ -1,7 +1,9 @@
 import { t } from "@oaw/plugin-api";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { DraftInput } from "./DraftInput";
 import { RecordForm } from "./RecordForm";
+import { SchemaNode } from "./SchemaNode";
 import {
   KINDS, addProperty, choicesText, isRequired, isValidKey, kindOf, moveProperty, parseDefinition, propertiesOf,
   removeProperty, renameProperty, setChoices, setKind, setProperty, setRequired, setText, textOf,
@@ -15,45 +17,6 @@ const KIND_LABELS: Record<Kind, () => string> = {
   "number[]": () => t("List of numbers"), "string[]": () => t("List of text"), choice: () => t("One of…"),
   custom: () => t("Custom (JSON)"),
 };
-
-/** An input that applies its text on blur or Enter, so half-typed values never rewrite the schema.
- * `onCommit` may return an error message, which keeps the draft visible until it is fixed. */
-function DraftInput({ value, onCommit, label, disabled, placeholder }: {
-  value: string; onCommit: (text: string) => string | void; label: string; disabled: boolean; placeholder?: string;
-}) {
-  const [draft, setDraft] = useState(value);
-  const [error, setError] = useState<string>();
-  useEffect(() => { setDraft(value); setError(undefined); }, [value]);
-  const commit = () => {
-    if (draft === value) return;
-    const message = onCommit(draft);
-    if (message) setError(message); else setError(undefined);
-  };
-  return <span className="knowledge-draft">
-    <input aria-label={label} placeholder={placeholder} value={draft} disabled={disabled} aria-invalid={error ? true : undefined}
-      onChange={event => setDraft(event.target.value)} onBlur={commit}
-      onKeyDown={event => { if (event.key === "Enter") commit(); }} />
-    {error && <small className="knowledge-error">{error}</small>}
-  </span>;
-}
-
-function CustomJson({ prop, disabled, onChange }: { prop: Prop; disabled: boolean; onChange: (prop: Prop) => void }) {
-  const [draft, setDraft] = useState(pretty(prop));
-  const [invalid, setInvalid] = useState(false);
-  return <label className="knowledge-record-field">{t("Property JSON")}
-    <textarea aria-label={t("Property JSON")} rows={5} spellCheck={false} disabled={disabled} value={draft}
-      aria-invalid={invalid || undefined}
-      onChange={event => {
-        setDraft(event.target.value);
-        try {
-          const next = JSON.parse(event.target.value);
-          if (typeof next !== "object" || next === null || Array.isArray(next)) throw new Error();
-          setInvalid(false); onChange(next);
-        } catch { setInvalid(true); }
-      }} />
-    {invalid && <small className="knowledge-error">{t("Not valid JSON")}</small>}
-  </label>;
-}
 
 type RowProps = {
   definition: Definition; name: string; prop: Prop; first: boolean; last: boolean; disabled: boolean;
@@ -86,10 +49,10 @@ function PropertyRow({ definition, name, prop, first, last, disabled, update }: 
     return <li className="knowledge-property" aria-label={name}>
       <div className="knowledge-property-main is-custom">
         {nameInput}
-        <small className="knowledge-meta">{t("Not in the value / unit / description form; edit it as JSON.")}</small>
+        <span />
         {required}{actions}
       </div>
-      <CustomJson prop={prop} disabled={disabled} onChange={change} />
+      <SchemaNode node={prop} disabled={disabled} onChange={change} />
     </li>;
   }
   return <li className="knowledge-property" aria-label={name}>

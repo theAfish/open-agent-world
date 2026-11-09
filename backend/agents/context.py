@@ -13,6 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Literal
+from weakref import WeakValueDictionary
 
 from pydantic import BaseModel, Field
 from open_agent_world.context import (
@@ -107,7 +108,7 @@ class ContextStore:
     def __init__(self, database: Database, events: EventHub) -> None:
         self.database = database
         self.events = events
-        self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
         # A process restart cannot still be compacting. Keep the last checkpoint.
         with database.transaction() as db:
             db.execute("""UPDATE agent_contexts SET status_json = json_set(
@@ -380,7 +381,7 @@ class ManagedContext(AdkContextCompactor):
             self.store.save(self.agent_id, self.context_id, self.checkpoint, self.status, self.run_id,
                             session_context_id=self.session_context_id)
 
-    async def before_model(self, callback_context, llm_request):
+    async def before_model(self, callback_context, llm_request, *, working_transform=None):
         from google.genai import types
         del callback_context
         # ADK 2 drives its root node ahead of the public event iterator. The
@@ -399,6 +400,15 @@ class ManagedContext(AdkContextCompactor):
                 self.checkpoint, self.agent_id, self.context_id,
                 max_sequence=max(message["sequence"] for message in pending))
             self.checkpoint.contents.extend(incoming)
+        if working_transform is not None:
+            # Adapters may retain a bounded unsigned reasoning tail in the
+            # native working checkpoint. Apply that policy before accounting,
+            # never as a second character-based tool-history reducer.
+            from .request_window import signed_history
+            working = llm_request.model_copy(update={"contents": [types.Content.model_validate(c) for c in self.checkpoint.contents]})
+            if not signed_history(working):
+                working_transform(working)
+                self.checkpoint.contents = [c.model_dump(mode="json", exclude_none=True) for c in working.contents]
         window = self.trace.context_windows.get(self.trace_role) if self.trace is not None else None
         if window is not None:
             working = llm_request.model_copy(update={"contents": [types.Content.model_validate(c) for c in self.checkpoint.contents]})
@@ -440,7 +450,7 @@ class ManagedContext(AdkContextCompactor):
         if llm_request.config.max_output_tokens is None:
             llm_request.config.max_output_tokens = self.budget.output
 
-    async def reduce_final_request(self, request, *, protected=None):
+    async def reduce_final_request(self, request, *, protected=None, retain_protected=None):
         from copy import deepcopy
         from dataclasses import replace
         from google.genai import types
@@ -475,6 +485,12 @@ class ManagedContext(AdkContextCompactor):
             capacity = input_capacity(trial, self.budget)
             if size >= request_usage(request)["estimated_input_tokens"] or (capacity is not None and size > capacity):
                 raise RuntimeError("Final compacted request exceeds its continuation budget; retained context is unchanged")
+            # Host frames are refreshed by their adapter. Explicitly retained
+            # tool exchanges must also survive into the NEXT request, not only
+            # the wire snapshot being prepared now.
+            retained = [c.model_dump(mode="json", exclude_none=True) for c in pinned
+                        if retain_protected is not None and retain_protected(c)]
+            self.checkpoint.contents.extend(retained)
             request.contents = candidate
         except BaseException:
             self.checkpoint = saved

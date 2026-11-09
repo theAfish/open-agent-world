@@ -10,6 +10,7 @@ from backend.deployments import PublishRequest, release_spec
 from backend.errors import ResourceValidationError
 from open_agent_world.plugin_api import DeploymentSurface, NodeDeploymentDefinition
 from pydantic import BaseModel
+from backend.tests.plugin_support import publication_services
 
 
 def test_plugin_sections_freeze_only_visible_access():
@@ -52,7 +53,8 @@ def test_resource_results_projected_and_section_names_cannot_grant_builtin_acces
     monkeypatch.setattr("backend.deployment_workspace.invoke_resource_action", resource)
     access = DeploymentSurface(resource_actions={"query": {"answer"}}).model_dump(mode="json")
     app = FastAPI()
-    app.dependency_overrides[get_services] = lambda: None
+    services = publication_services()
+    app.dependency_overrides[get_services] = lambda: services
     app.include_router(workspace_router({"permissions": {"plugin": ["tasks", "terminal"]}, "plugin_access": {"plugin": access}}))
     with TestClient(app) as client:
         assert client.post("/workspace/nodes/plugin/resource/query", json={"arguments": {}}).json() == {"answer": 42}
@@ -74,7 +76,7 @@ def test_file_actions_require_publication_and_filter_results_like_json_actions(m
     monkeypatch.setattr('backend.deployment_workspace.invoke_resource_action', resource)
     access = DeploymentSurface(resource_actions={'query': {'answer'}}).model_dump(mode='json')
     app = FastAPI()
-    app.dependency_overrides[get_services] = lambda: None
+    app.dependency_overrides[get_services] = lambda: publication_services()
     app.include_router(workspace_router({'permissions': {'plugin': []}, 'plugin_access': {'plugin': access}}))
     with TestClient(app) as client:
         path = '/workspace/nodes/plugin/resource/query/files'
@@ -88,7 +90,6 @@ def test_file_actions_require_publication_and_filter_results_like_json_actions(m
 
 def test_project_bridge_requires_prepare_prompt_save_and_failure_grants(monkeypatch):
     import json
-    from types import SimpleNamespace
     calls = []
     async def run(node_id, request, services, progress=None):
         calls.append((node_id, request.space_id, request.project_ids, request.rerun))
@@ -100,9 +101,8 @@ def test_project_bridge_requires_prepare_prompt_save_and_failure_grants(monkeypa
     for missing in required:
         access[missing] = DeploymentSurface(resource_actions={k: set() for k in required - {missing}}).model_dump(mode="json")
     app = FastAPI()
-    from types import SimpleNamespace
-    app.dependency_overrides[get_services] = lambda: SimpleNamespace(world=SimpleNamespace(
-        get_card=lambda node: SimpleNamespace(config={"default_model": "oaw:model:pinned"})))
+    services = publication_services({'default_model': 'oaw:model:pinned'})
+    app.dependency_overrides[get_services] = lambda: services
     app.include_router(workspace_router({"permissions": {}, "plugin_access": access}))
     body = {"space_id": "space-1", "project_ids": ["project-1"], "model": "oaw:model:m1"}
     with TestClient(app) as client:
@@ -127,9 +127,8 @@ def test_optional_projection_review_requires_read_and_revision_grants(monkeypatc
     for missing in required:
         access[missing] = DeploymentSurface(resource_actions={k: set() for k in required - {missing}}).model_dump(mode="json")
     app = FastAPI()
-    from types import SimpleNamespace
-    app.dependency_overrides[get_services] = lambda: SimpleNamespace(world=SimpleNamespace(
-        get_card=lambda node: SimpleNamespace(config={"default_model": "oaw:model:pinned"})))
+    services = publication_services({'default_model': 'oaw:model:pinned'})
+    app.dependency_overrides[get_services] = lambda: services
     app.include_router(workspace_router({"permissions": {}, "plugin_access": access}))
     body = {"projection_id": "result-1", "model": "oaw:model:m1", "instruction": "Normalize reported units"}
     with TestClient(app) as client:
@@ -143,7 +142,6 @@ def test_knowledge_extract_bridge_needs_both_halves_published(monkeypatch):
     """Same gate, for the agent-free experiment extraction: a release
     only reaches it once both experiment_extract_prompt and experiment_save are
     published for this node."""
-    from types import SimpleNamespace
     calls = []
     async def fake_run_experiment_extract(node_id, request, services):
         calls.append((node_id, request.bundle_id, request.replace_drafts))
@@ -156,8 +154,8 @@ def test_knowledge_extract_bridge_needs_both_halves_published(monkeypatch):
         "experiment_extract_prompt": set(), "experiment_save": set()}).model_dump(mode="json")
     only_read = DeploymentSurface(resource_actions={"experiment_extract_prompt": set()}).model_dump(mode="json")
     app = FastAPI()
-    app.dependency_overrides[get_services] = lambda: SimpleNamespace(world=SimpleNamespace(
-        get_card=lambda node: SimpleNamespace(config={"default_model": "oaw:model:pinned"})))
+    services = publication_services({'default_model': 'oaw:model:pinned'})
+    app.dependency_overrides[get_services] = lambda: services
     app.include_router(workspace_router({"permissions": {}, "plugin_access": {
         "granted": both, "half": only_read}}))
     with TestClient(app) as client:

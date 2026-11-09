@@ -14,7 +14,7 @@ import { GlueLayer } from "./GlueLayer";
 import { reportInteraction } from "../state/interactions";
 import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, beginGlueEdit, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
-import { TerrainBackground } from './TerrainBackground';
+import { CanvasBackground } from './CanvasBackground';
 import { CanvasCardLayers } from './CanvasCardLayers';
 import { LegionDeploymentLayer } from './LegionDeploymentLayer';
 import { stableNode, stableNodeList } from './stableNodes';
@@ -188,6 +188,7 @@ export function WorldCanvas() {
   const createCard = useWorldStore((state) => state.createCard);
   const updateCard = useWorldStore((state) => state.updateCard);
   const instantiateLegion = useWorldStore((state) => state.instantiateLegion);
+  const placeLegionInstance = useWorldStore((state) => state.placeLegionInstance);
   const requestConnection = useWorldStore((state) => state.requestConnection);
   const selectEdge = useWorldStore((state) => state.selectEdge);
   const deleteSelectedEdge = useWorldStore((state) => state.deleteSelectedEdge);
@@ -917,6 +918,10 @@ export function WorldCanvas() {
   const placePaletteCard = useCallback((payload: PaletteDragPayload, event: Pick<MouseEvent, "clientX" | "clientY">) => {
     clearTransformationHints();
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    if (payload.kind === 'legion_instance') {
+      void placeLegionInstance(payload.id, position);
+      return;
+    }
     const packerId = factoryDropTarget(event);
     if (packerId && tutorialAllowsCanvasTarget(packerId, 'transform') && payload.kind === 'legion') {
       const legion = legions.find(item => item.id === payload.id);
@@ -960,7 +965,7 @@ export function WorldCanvas() {
     const legion = legions.find((item) => item.id === payload.id);
     if (!legion || legion.revision !== payload.revision) return;
     void instantiateLegion(payload.id, position);
-  }, [cards, catalog, createCard, instantiateLegion, legions, screenToFlowPosition, equipmentDropOwner, transformationTarget]);
+  }, [cards, catalog, createCard, instantiateLegion, placeLegionInstance, legions, screenToFlowPosition, equipmentDropOwner, transformationTarget]);
 
   const onDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1104,7 +1109,7 @@ export function WorldCanvas() {
         aria-label={t("Open Agent World spatial canvas")}
       >
         <CanvasCardLayers />
-        <TerrainBackground />
+        <CanvasBackground />
         <GlueLayer nodes={nodes} preview={gluePreview} />
         <ResizeLayer nodes={nodes} setNodes={setNodes} />
         <GenerationLayer />

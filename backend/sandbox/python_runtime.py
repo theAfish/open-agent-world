@@ -13,7 +13,6 @@ from pathlib import Path
 import platform
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -26,19 +25,11 @@ from .models import SandboxBusyError, SandboxOperationError, SandboxPreparationE
 # connection. uv still enforces its own connect/read timeouts for stalled I/O.
 PACKAGE_INSTALL_TIMEOUT = 1800
 RUNTIME_SETUP_TIMEOUT = 600
-# A slow download may take time, but several minutes without any changed
-# output/cache/staging file is a stuck bootstrap, not useful progress.
-DARWIN_PYTHON_DOWNLOAD_IDLE_TIMEOUT = 600
-DARWIN_PACKAGE_INSTALL_IDLE_TIMEOUT = 300
 # Setup, uv bootstrap, dependency preflight, and dependency installation.
 PREPARATION_TIMEOUT = 60 + RUNTIME_SETUP_TIMEOUT + 3 * PACKAGE_INSTALL_TIMEOUT + 120
 LAUNCHER_VERSION = 1
-DARWIN_MANAGED_PYTHON = "3.12"
-DARWIN_RUNTIME_VERSION = 1
-
-
-class _InstallationStalled(TimeoutError):
-    """The managed interpreter download made no observable progress."""
+DARWIN_MANAGED_PYTHON = f"{sys.version_info.major}.{sys.version_info.minor}"
+DARWIN_RUNTIME_VERSION = 2
 
 
 def validate_requirements(requirements):
@@ -115,11 +106,11 @@ class SharedPythonRuntime:
         self.base = self.root / "base"
         self.bin = self.venv / ("Scripts" if os.name == "nt" else "bin")
         self.python = self.bin / ("python.exe" if os.name == "nt" else "python")
-        # The distribution is machine/user-level, but the venv remains scoped
-        # to this OAW profile. A new checkout must not redownload CPython.
+        # Keep the existing shared cache path so cached wheels survive this
+        # migration. The base is now a backend copy, not a Python download.
         self.darwin_store = (Path(darwin_store) if darwin_store is not None else
             Path.home() / "Library" / "Application Support" / "OpenAgentWorld" /
-            "shared-python" / f"cpython-{DARWIN_MANAGED_PYTHON}-{platform.machine().lower()}-v{DARWIN_RUNTIME_VERSION}").resolve()
+            "shared-python" / f"cpython-{DARWIN_MANAGED_PYTHON}-{platform.machine().lower()}-v1").resolve()
 
     @property
     def installer_python(self) -> Path:
@@ -137,12 +128,12 @@ class SharedPythonRuntime:
         return str(managed) if managed.is_file() else shutil.which("uv")
 
     def _uv_cache(self) -> Path:
-        # CPython and wheel downloads survive a development-profile reset or
+        # Runtime copies and cached wheels survive a development-profile reset or
         # a new source checkout; uv itself manages concurrent cache access.
         return self.darwin_store / "cache" if sys.platform == "darwin" else self.root / "cache"
 
     def _darwin_base_python(self, root: Path | None = None) -> Path | None:
-        """Locate CPython inside OAW's private uv installation directory."""
+        """Locate a copied CPython inside OAW's private runtime directory."""
         root = self.base if root is None else root
         if not root.is_dir():
             return None
@@ -161,24 +152,17 @@ class SharedPythonRuntime:
                     return candidate
         return None
 
-    def _ensure_uv(self) -> str:
-        """Return uv, bootstrapping a private copy with the backend Python."""
+    def _create_venv(self, base, *, clear=False):
+        """Use the same venv/installer preparation on every native platform."""
         uv = self._uv()
         if uv:
-            return uv
-        bootstrap_python = Path(sys.executable)
-        if not bootstrap_python.is_file():
-            raise SandboxPreparationError(
-                "Cannot bootstrap uv: the Python interpreter running the OAW backend is unavailable")
-        tools = self.root / "tools"
-        tools.mkdir(parents=True, exist_ok=True)
-        self._run([bootstrap_python, "-I", "-m", "pip", "--isolated", "install",
-            "--only-binary", ":all:", "--no-deps", "--target", tools, "uv"])
-        uv = self._uv()
-        if not uv:
-            raise SandboxPreparationError(
-                f"uv was installed but its executable was not found below {tools}")
-        return uv
+            self._run([uv, "--no-config", "--cache-dir", self._uv_cache(), "venv", "--python", base,
+                       "--no-python-downloads", *(["--clear"] if clear else []), self.venv])
+        else:
+            self._run([base, "-I", "-m", "venv", self.venv])
+            # A pristine venv only: never execute user package hooks on the host.
+            self._run([self.python, "-I", "-m", "pip", "--isolated", "install",
+                "--only-binary", ":all:", "--no-deps", "--target", self.root / "tools", "uv"])
 
     def _darwin_swap_pending(self) -> bool:
         return any((self.root / name).exists() for name in (
@@ -207,7 +191,7 @@ class SharedPythonRuntime:
             commit_marker.unlink()
         else:
             # A terminated bootstrap may have left the old pair parked here.
-            # Restore it before attempting another download.
+            # Restore it before attempting another preparation.
             if previous_base.exists():
                 if self.base.exists():
                     shutil.rmtree(self.base)
@@ -217,8 +201,20 @@ class SharedPythonRuntime:
                     shutil.rmtree(self.venv)
                 previous_venv.rename(self.venv)
 
-    def _cached_darwin_base(self, uv: str | None = None) -> Path:
-        """Keep one verified CPython distribution across profiles/checkouts.
+    def _darwin_source_matches(self, root: Path) -> bool:
+        from .darwin_python_copy import matches_source
+        return matches_source(root)
+
+    def _copy_backend_python(self, root: Path) -> None:
+        from .darwin_python_copy import copy_backend_python
+        try:
+            copy_backend_python(root)
+        except (RuntimeError, subprocess.CalledProcessError) as exc:
+            detail = getattr(exc, 'stderr', None) or str(exc)
+            raise SandboxPreparationError('Cannot copy backend Python for macOS: ' + detail[-2000:]) from exc
+
+    def _cached_darwin_base(self) -> Path:
+        """Keep a verified backend-runtime copy across profiles/checkouts.
 
         The cache is never mounted into Seatbelt. Each profile copies it into
         its own read-only sandbox runtime path and creates its own venv there.
@@ -226,15 +222,14 @@ class SharedPythonRuntime:
         store = self.darwin_store
         base, staging, previous = (store / name for name in
             ("base", "base.partial", "base.previous"))
-        # Another OAW checkout may be downloading into this store. The lock
-        # must outlive that download, not expire at the normal 60-second limit.
+        # Serialize copies from this backend, including across OAW checkouts.
         with mutation_lock(store, wait_seconds=PACKAGE_INSTALL_TIMEOUT + 60):
-            if self._darwin_base_python(base) is not None:
+            if self._darwin_base_python(base) is not None and self._darwin_source_matches(base):
                 for leftover in (staging, previous):
                     if leftover.exists():
                         shutil.rmtree(leftover, ignore_errors=True)
                 return base
-            if self._darwin_base_python(previous) is not None:
+            if self._darwin_base_python(previous) is not None and self._darwin_source_matches(previous):
                 if base.exists():
                     shutil.rmtree(base)
                 previous.rename(base)
@@ -246,18 +241,13 @@ class SharedPythonRuntime:
             try:
                 # Seed from an existing profile when upgrading an older OAW
                 # checkout. No network is needed if it already has Python.
-                if self._darwin_base_python() is not None:
-                    # uv distributions can contain relative links which reach
+                if self._darwin_base_python() is not None and self._darwin_source_matches(self.base):
+                    # Copied distributions can contain relative links which reach
                     # outside this tree. Preserve their contents, not link
                     # text that will break when copied to a new location.
                     shutil.copytree(self.base, staging, symlinks=False, ignore=_ignore_dangling_links)
                 else:
-                    if uv is None:
-                        uv = self._ensure_uv()
-                    staging.mkdir(parents=True)
-                    self._run([uv, "--no-config", "--cache-dir", store / "cache",
-                        "python", "install", "--install-dir", staging, "--no-bin",
-                        DARWIN_MANAGED_PYTHON])
+                    self._copy_backend_python(staging)
                 if self._darwin_base_python(staging) is None:
                     raise SandboxPreparationError(
                         f"No usable CPython {DARWIN_MANAGED_PYTHON} was prepared below {staging}")
@@ -278,10 +268,31 @@ class SharedPythonRuntime:
                 if staging.exists():
                     shutil.rmtree(staging, ignore_errors=True)
 
+    def _restore_darwin_packages(self, previous_base: Path, previous_venv: Path) -> None:
+        """Keep an existing OAW environment when the copied base has the same ABI."""
+        source = previous_venv / 'lib' / f'python{DARWIN_MANAGED_PYTHON}' / 'site-packages'
+        if not source.is_dir():
+            return
+        old_python = self._darwin_base_python(previous_base)
+        if old_python is None:
+            return
+        probe = "import json,platform,sysconfig;print(json.dumps([platform.machine(),sysconfig.get_config_var('SOABI')]))"
+        from .darwin_python_copy import _command
+        if _command([old_python, '-I', '-S', '-c', probe]).strip() != _command([self.installer_python, '-I', '-S', '-c', probe]).strip():
+            return
+        target = self.venv / 'lib' / f'python{DARWIN_MANAGED_PYTHON}' / 'site-packages'
+        shutil.copytree(source, target, dirs_exist_ok=True, symlinks=False,
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        # Package launchers already point at the same final venv path. Keep
+        # those while retaining the freshly-created interpreter/activation files.
+        for script in (previous_venv / 'bin').iterdir():
+            if script.is_file() and not (self.bin / script.name).exists() and not script.name.startswith('python'):
+                shutil.copy2(script, self.bin / script.name)
+
     def _ensure_darwin(self) -> None:
         """Provision self-contained CPython and a venv below OAW storage.
 
-        A verified download is swapped in with rollback for the previous base
+        A verified backend copy is swapped in with rollback for the previous base
         and venv. The venv is built from the interpreter's final path: uv
         records that absolute path, so a staging path would break it.
         """
@@ -289,13 +300,12 @@ class SharedPythonRuntime:
         previous_base = self.root / "base.previous"
         previous_venv = self.root / "venv.previous"
         commit_marker = self.root / "darwin-bootstrap.commit"
-        uv = self._ensure_uv()
-        cached_base = self._cached_darwin_base(uv)
+        cached_base = self._cached_darwin_base()
         staging = self.root / "base.partial"
         shutil.rmtree(staging, ignore_errors=True)
         try:
             shutil.copytree(cached_base, staging, symlinks=False, ignore=_ignore_dangling_links)
-            if self._darwin_base_python(staging) is None:
+            if self._darwin_base_python(staging) is None or not self._darwin_source_matches(staging):
                 raise SandboxPreparationError(
                     f"Cached CPython {DARWIN_MANAGED_PYTHON} is not usable below {staging}")
             moved_base = moved_venv = swapped_base = venv_started = False
@@ -315,11 +325,12 @@ class SharedPythonRuntime:
                 # uv records the interpreter path in this venv. Build it at
                 # its final location, but retain the old pair until it works.
                 venv_started = True
-                self._run([uv, "--no-config", "--cache-dir", self._uv_cache(),
-                    "venv", "--python", base, "--no-python-downloads", "--clear", self.venv])
+                self._create_venv(base, clear=True)
                 if not self.python.is_file() or not (self.venv / "pyvenv.cfg").is_file():
                     raise SandboxPreparationError(
-                        f"uv did not create a usable macOS Python venv below {self.venv}")
+                        f"Could not create a usable macOS Python venv below {self.venv}")
+                if moved_venv:
+                    self._restore_darwin_packages(previous_base, previous_venv)
                 commit_marker.write_text("ready", encoding="utf-8")
             except Exception:
                 try:
@@ -421,19 +432,18 @@ class SharedPythonRuntime:
                   and ready.get("launcher_version") == LAUNCHER_VERSION)
         if sys.platform == "darwin":
             usable = (usable and ready.get("darwin_runtime_version") == DARWIN_RUNTIME_VERSION
-                      and self._darwin_base_python() is not None)
+                      and self._darwin_base_python() is not None and self._darwin_source_matches(self.base))
         return {**self.environment_metadata(), "last_install_state": latest.get("state"),
             "ready": usable,
             "distribution_cached": (self._darwin_base_python(self.darwin_store / "base") is not None
+                                    and self._darwin_source_matches(self.darwin_store / "base")
                                     if sys.platform == "darwin" else None),
             "last_install_started_at": latest.get("time"),
             "last_install_elapsed_seconds": latest.get("elapsed_seconds"),
             "phase": phase if latest.get("state") == "running" else None,
             "seconds_without_progress": (max(0, round(time.time() - progress_at))
                                          if latest.get("state") == "running" else None),
-            "idle_limit_seconds": ((DARWIN_PYTHON_DOWNLOAD_IDLE_TIMEOUT if phase == "python_download"
-                                    else DARWIN_PACKAGE_INSTALL_IDLE_TIMEOUT)
-                                   if latest.get("state") == "running" and "install" in arguments else None),
+            "idle_limit_seconds": None,
             "output_tail": tail("install-output.log", 8192),
             "note": "Progress observation only; use operation receipts for current execution status."}
 
@@ -459,47 +469,6 @@ class SharedPythonRuntime:
                             pass
         return latest
 
-    def _run_darwin_install(self, argv, output, environment, timeout):
-        """Bound silent macOS downloads independently of the overall deadline."""
-        idle_limit = (DARWIN_PYTHON_DOWNLOAD_IDLE_TIMEOUT if "python" in argv
-                      else DARWIN_PACKAGE_INSTALL_IDLE_TIMEOUT)
-        process = subprocess.Popen([str(a) for a in argv], stdin=subprocess.DEVNULL,
-            stdout=output, stderr=subprocess.STDOUT, cwd=self.root, env=environment,
-            start_new_session=True)
-        started = last_progress = time.monotonic()
-        marker = self._progress_mtime()
-        try:
-            while True:
-                try:
-                    code = process.wait(timeout=2)
-                    return subprocess.CompletedProcess(argv, code)
-                except subprocess.TimeoutExpired:
-                    now = time.monotonic()
-                    updated = self._progress_mtime()
-                    if updated > marker:
-                        marker, last_progress = updated, now
-                    if now - last_progress >= idle_limit:
-                        raise _InstallationStalled(
-                            f"Managed macOS Python installation made no observable progress for "
-                            f"{idle_limit}s; check the network or "
-                            f"{self.root / 'install-output.log'} before retrying")
-                    if now - started >= timeout:
-                        raise subprocess.TimeoutExpired(argv, timeout)
-        finally:
-            if process.poll() is None:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    process.wait()
-
     def _run(self, argv):
         environment = {k: v for k, v in os.environ.items() if not k.upper().startswith(("PYTHON", "PIP_", "UV_")) and k.upper() not in {"VIRTUAL_ENV", "CONDA_PREFIX"}}
         output_path = self.root / "install-output.log"
@@ -519,14 +488,11 @@ class SharedPythonRuntime:
             # Pipes discarded TimeoutExpired's captured output and hid the phase
             # that stalled (resolution, download, unpacking, or installation).
             with output_path.open("wb") as output:
-                if sys.platform == "darwin" and "install" in argv:
-                    result = self._run_darwin_install(argv, output, environment, timeout)
-                else:
-                    result = subprocess.run([str(a) for a in argv], stdin=subprocess.DEVNULL,
-                        stdout=output, stderr=subprocess.STDOUT, timeout=timeout,
-                        cwd=self.root, env=environment,
-                        **({"creationflags": 0x08000000} if os.name == "nt" else {}))
-        except (OSError, subprocess.TimeoutExpired, _InstallationStalled) as exc:
+                result = subprocess.run([str(a) for a in argv], stdin=subprocess.DEVNULL,
+                    stdout=output, stderr=subprocess.STDOUT, timeout=timeout,
+                    cwd=self.root, env=environment,
+                    **({"creationflags": 0x08000000} if os.name == "nt" else {}))
+        except (OSError, subprocess.TimeoutExpired) as exc:
             tail = output_tail()
             with (self.root / "install.log").open("a", encoding="utf-8") as log:
                 log.write(json.dumps({**record, "state": "failed", "elapsed_seconds": time.monotonic() - started,
@@ -551,7 +517,7 @@ class SharedPythonRuntime:
                 metadata = {}
             if sys.platform != "darwin" or (
                 metadata.get("darwin_runtime_version") == DARWIN_RUNTIME_VERSION
-                and self._darwin_base_python() is not None
+                and self._darwin_base_python() is not None and self._darwin_source_matches(self.base)
             ):
                 return
         if sys.platform == "darwin":
@@ -572,16 +538,7 @@ class SharedPythonRuntime:
                     shutil.copytree(source / name, self.base / name, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("site-packages", "__pycache__", "*.pth", "sitecustomize.py", "usercustomize.py"))
             base = self.base / "python.exe"
-        uv = self._uv()
-        if uv:
-            self._run([uv, "--no-config", "--cache-dir", self._uv_cache(), "venv", "--python", base, "--no-python-downloads", self.venv])
-        else:
-            self._run([base, "-I", "-m", "venv", self.venv])
-            # This is still a pristine venv, before any user packages. Bootstrap
-            # a standalone installer outside the execution environment so future
-            # installations never run Python code or .pth files from that venv.
-            self._run([self.python, "-I", "-m", "pip", "--isolated", "install",
-                "--only-binary", ":all:", "--no-deps", "--target", self.root / "tools", "uv"])
+        self._create_venv(base)
         ready.write_text(json.dumps({"python": str(self.python)}), encoding="utf-8")
 
     def prepare_sync(self, requirements=(), bootstrap_key=None):
@@ -593,7 +550,7 @@ class SharedPythonRuntime:
             metadata = {}
         runtime_current = (sys.platform != "darwin" or (
             metadata.get("darwin_runtime_version") == DARWIN_RUNTIME_VERSION
-            and self._darwin_base_python() is not None
+            and self._darwin_base_python() is not None and self._darwin_source_matches(self.base)
         ))
         if (not requirements and self.python.is_file() and runtime_current
             and (sys.platform != "darwin" or not self._darwin_swap_pending())
@@ -665,6 +622,11 @@ class SharedPythonRuntime:
             raise SandboxPreparationError(str(exc)) from exc
 
     def environment(self, environment):
+        if sys.platform == "darwin":
+            base = self._darwin_base_python()
+            certificate = base.parent.parent / "ssl" / "cert.pem" if base else None
+            if certificate is not None and certificate.is_file():
+                environment.setdefault("SSL_CERT_FILE", str(certificate))
         environment.update(PATH=str(self.bin) + os.pathsep + environment["PATH"],
             VIRTUAL_ENV=str(self.venv), PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
 

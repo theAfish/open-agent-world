@@ -35,6 +35,7 @@ export function useConversationComposer({
   const [outgoing, setOutgoing] = useSurfaceDraft(surfaceDraftKey(conversationId, 'outgoing'), NO_OUTGOING);
   const revealOutgoing = useRef(false);
   const [preferredAgentId, setPreferredAgentId] = useSurfaceDraft<string | undefined>(surfaceDraftKey(conversationId, 'conversation-agent', activeSessionId), undefined);
+  const [continuationRunId, setContinuationRunId] = useSurfaceDraft<string | undefined>(surfaceDraftKey(conversationId, 'conversation-continuation-run', activeSessionId), undefined);
   const [mentionCaret, setMentionCaret] = useState<number>();
   const [mentionIndex, setMentionIndex] = useState(0);
   const messageInput = useRef<HTMLTextAreaElement>(null);
@@ -104,17 +105,20 @@ export function useConversationComposer({
       id: messageId, conversation_id: conversationId, session_id: activeSession.id,
       sender_kind: "user", sender_name: t("You"), content, mention_agent_ids: targets,
       attachments,
+      continuation_run_id: continuationRunId,
       created_at: new Date().toISOString(),
     };
     revealOutgoing.current = true;
     setOutgoing((current) => [...current, { message, status: "sending" }]);
     setDraft("");
+    setContinuationRunId(undefined);
     setAttachments([]);
     setMentionCaret(undefined);
     try {
       const result = await worldApi.postConversationMessage(conversationId, activeSession.id, {
         content,
         message_id: messageId,
+        continuation_run_id: continuationRunId,
         mention_agent_ids: targets,
         ...(attachments.length ? { attachments: attachments.map(({ version_id, path }) => ({ version_id, path })) } : {}),
       });
@@ -154,6 +158,7 @@ export function useConversationComposer({
     }
   }, [outgoing]);
   const restoreMessageDraft = (message: ConversationMessage) => {
+    setContinuationRunId(message.continuation_run_id);
     setDraft(message.content);
     setAttachments(message.attachments ?? []);
     setOutgoing(current => current.filter(item => item.message.id !== message.id));
@@ -161,7 +166,7 @@ export function useConversationComposer({
   };
 
   return {
-    draft, setDraft, attachments, setAttachments, attachmentError, fileInput, messageInput,
+    draft, setDraft, attachments, setAttachments, attachmentError, fileInput, messageInput, continuationRunId, setContinuationRunId,
     selectedAgentId, setPreferredAgentId, completion, mentionIndex, setMentionIndex,
     setMentionCaret, chooseMention, submit, restoreMessageDraft, transfers, intake, uploading,
     visibleOutgoing, messages,

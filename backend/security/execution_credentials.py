@@ -2,6 +2,7 @@
 import json
 from cryptography.fernet import InvalidToken
 from backend.errors import ResourceValidationError
+from backend.security.llm_settings import SecretStorageError
 
 
 class ExecutionCredentialStore:
@@ -30,6 +31,22 @@ class ExecutionCredentialStore:
             return connection.execute("SELECT 1 FROM application_settings WHERE key = ?",
                 (self._key(node_id, reference),)).fetchone() is not None
 
+    def readable(self, node_id, reference):
+        """Authenticate the binding with this host's key without decrypting its value."""
+        with self.database.locked() as connection:
+            row = connection.execute("SELECT value_json FROM application_settings WHERE key = ?",
+                (self._key(node_id, reference),)).fetchone()
+        if row is None:
+            return False
+        try:
+            token = json.loads(row["value_json"])
+            if not isinstance(token, str):
+                return False
+            self.settings_store._fernet(create=False).extract_timestamp(token.encode())
+            return True
+        except (InvalidToken, ValueError, OSError, SecretStorageError):
+            return False
+
     def resolve(self, node_id, reference):
         with self.database.locked() as connection:
             row = connection.execute("SELECT value_json FROM application_settings WHERE key = ?",
@@ -38,7 +55,7 @@ class ExecutionCredentialStore:
             raise ResourceValidationError(f"Credential requirement {reference!r} is unbound; bind it on this Environment Profile")
         try:
             return self.settings_store._fernet(create=False).decrypt(json.loads(row["value_json"]).encode()).decode()
-        except (InvalidToken, ValueError, OSError):
+        except (InvalidToken, ValueError, OSError, SecretStorageError):
             raise ResourceValidationError("Execution credential cannot be decrypted on this host; explicitly rebind it") from None
 
 

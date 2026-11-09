@@ -128,9 +128,17 @@ def test_runtime_defaults_bind_ordinary_commands_compose_skills_and_preserve_gra
     runner = Path(native.last_argv[3])
     recipe = json.loads(runner.with_name('recipe.json').read_text())
     assert recipe['mode'] == 'command' and recipe['sources'][0]['owner'] == 'atomsculptor'
-    assert recipe['python'] == ['ase>=3.22', 'matplotlib>=3.7', 'numpy>=1.23', 'pymatgen>=2024.0']
+    assert recipe['management'] == 'legacy-shared'
+    assert recipe['python'] == ['ase>=3.22', 'matplotlib>=3.7', 'mp-api', 'numpy>=1.23', 'pandas', 'pymatgen>=2024.0', 'rdkit']
     assert native.last_cwd == backend._sandboxes_root / sandbox['id'] / 'workspace'
     value = client.get(f"/api/nodes/{skill['id']}/document").json()['value']
+    value['runtime_requirements'] = [{'owner': 'atomsculptor', 'environment': 'structure-inspect'}]
+    edit(client, skill, 'replace', value)
+    assert run(client, agent, sandbox, skill)['exit_code'] == 0
+    recipe = json.loads(Path(native.last_argv[3]).with_name('recipe.json').read_text())
+    assert recipe['management'] == 'legacy-shared'
+    assert {source['environment'] for source in recipe['sources']} == {'modelling', 'structure-inspect'}
+    assert native.last_network_enabled is False
     value['runtime_requirements'] = [{'owner': 'matcreator', 'environment': 'ase'}]
     edit(client, skill, 'replace', value)
     assert run(client, agent, sandbox, skill)['exit_code'] == 0

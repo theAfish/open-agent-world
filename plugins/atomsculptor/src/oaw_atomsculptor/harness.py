@@ -17,6 +17,13 @@ from open_agent_world.plugin_api.model_runtime import RequestRetryPolicy
 from open_agent_world.plugin_api.tool_execution import tool_payload as _payload
 
 
+def _command_result_reference(sandbox, command_id):
+    if not all(isinstance(value, str) and value.strip() for value in (sandbox, command_id)):
+        return None
+    return {"reader": "wait_sandbox_operation", "arguments": {
+        "sandbox": sandbox, "operation_id": command_id, "wait_seconds": 0}}
+
+
 class HarnessStopped(AgentRuntimeError):
     harness_stopped = True
 
@@ -37,19 +44,19 @@ class HarnessLimits(BaseModel):
     closeout_reserve_seconds: int = Field(default=180, ge=0, le=1800)
     unexecuted_write_limit: int = Field(default=2, ge=2, le=10)
     repeated_error_limit: int = Field(default=3, ge=2, le=10)
-    # A hard request ceiling, not a measure of whether reasoning is stalled.
     # OAW's shared first-content/idle watchdog owns stream health detection.
-    model_action_seconds: int = Field(default=600, ge=1, le=3600)
-    action_recovery_seconds: int = Field(default=600, ge=1, le=3600)
+    model_action_seconds: int | None = Field(default=None, ge=1, le=3600,
+        description="Optional per-provider-attempt wall-clock ceiling; null uses native OAW stream watchdogs without an additional action deadline.")
+    action_recovery_seconds: int | None = Field(default=None, ge=1, le=3600,
+        description="Optional recovery allowance when model_action_seconds is set; null inherits it. Recovery never shortens that ceiling.")
     request_recovery: RequestRetryPolicy = Field(default_factory=RequestRetryPolicy,
         description="Native OAW model-request retry policy; recover only unpublished responses, never replay completed tools.")
     script_execution_seconds: int = Field(default=120, ge=1, le=3600)
     recovered_action_output_tokens: int | None = Field(default=None, ge=1024, le=262144)
     model_requests_without_progress: int | None = Field(default=None, ge=2, le=20,
         description="Optional no-progress request brake; null disables it. The former persisted default 6 migrates to null.")
-    working_history_chars: int = Field(default=48000, ge=8000, le=256000)
-    inline_probe_limit: int = Field(default=2, ge=1, le=6)
-    inline_probe_chars: int = Field(default=1600, ge=128, le=8192)
+    inline_probe_limit: int = Field(default=2, ge=1, le=6, description="Advisory threshold for saving repeated inline checks; not an execution cutoff.")
+    inline_probe_chars: int = Field(default=1600, ge=128, le=8192, description="Advisory size for saving an inline input check as a reusable script.")
     # Working-memory knobs from the 2026-10 architecture review. Defaults keep
     # established behaviour except the bounded reasoning tail, which replaces
     # "drop every unsigned thought" with "keep a bounded recent tail".
@@ -60,8 +67,8 @@ class HarnessLimits(BaseModel):
     @classmethod
     def upgrade_legacy_defaults(cls, value):
         # OAW serializes defaults into existing Agent cards. Updating only
-        # Field defaults would leave those cards on the rejected 60/30 policy.
-        # Upgrade that exact legacy pair; preserve other custom ceilings and
+        # Field defaults would leave those cards on the former fixed deadlines.
+        # Upgrade the exact legacy pairs; preserve other custom ceilings and
         # validate their types/ranges normally. Do not mutate caller config.
         if not isinstance(value, Mapping):
             return value
@@ -78,8 +85,8 @@ class HarnessLimits(BaseModel):
             upgraded["max_run_seconds"] = None
         if (type(value.get("model_action_seconds")) is int
                 and type(value.get("action_recovery_seconds")) is int
-                and value["model_action_seconds"] == 60 and value["action_recovery_seconds"] == 30):
-            upgraded.update(model_action_seconds=600, action_recovery_seconds=600)
+                and (value["model_action_seconds"], value["action_recovery_seconds"]) in {(60, 30), (600, 600)}):
+            upgraded.update(model_action_seconds=None, action_recovery_seconds=None)
         # Cards persist the old defaults. Migrate the exact old output policy
         # together, not a separately customized specialist/Run/recovery cap.
         if (type(value.get("max_output_tokens")) is int and value["max_output_tokens"] == 65536
@@ -88,7 +95,7 @@ class HarnessLimits(BaseModel):
                      type(value.get("recovered_action_output_tokens")) is int and value["recovered_action_output_tokens"] == 4096)):
             upgraded.update(specialist_output_tokens=None,
                             recovered_action_output_tokens=None)
-        for field in ("max_output_tokens", "closeout_reserve_tokens", "incremental_edit_hint"):
+        for field in ("max_output_tokens", "closeout_reserve_tokens", "incremental_edit_hint", "working_history_chars"):
             upgraded.pop(field, None)
         return upgraded
 
@@ -151,7 +158,8 @@ class RunEvidence:
         self.inline_pending: dict[str, dict[str, Any]] = {}
         self._host_evidence_texts: set[str] = set()
         self._host_static_texts: set[str] = set()
-        self._working_context_texts: set[str] = set()
+        from .working_context import RetrievalProgress
+        self.retrieval_progress = RetrievalProgress()
         self.skill_operations: dict[str, Mapping[str, Any]] = {}
         self.outputs: dict[tuple[str, str], dict[str, Any]] = {}
         self.receipt_issues: dict[tuple[str, str], dict[str, Any]] = {}
@@ -164,6 +172,8 @@ class RunEvidence:
         self.failures: dict[tuple[str, str, str], tuple[str, int]] = {}
         self.correction_feedback: dict[str, Any] | None = None
         self.block_reason: str | None = None
+        self.continuation = None
+        self._continuation_repair = None
 
     @property
     def experiment_history(self) -> list[dict[str, Any]]:
@@ -186,6 +196,32 @@ class RunEvidence:
             "kind": "status", "role": role, "text": text,
             **details,
         }))
+
+    def sandbox_wait_progress(self, payload, *, sandbox, workflow_event):
+        """Forward native preparation/execution facts without another model turn."""
+        from open_agent_world.tool_activity import public_tool_payload
+        python = payload.get("shared_python")
+        python = python if isinstance(python, dict) else {}
+        preparing = payload.get("phase") == "preparing_python" or payload.get("waiting_for_shared_python") is True
+        details = {k: payload[k] for k in ("phase", "command_started", "started_at") if k in payload}
+        if preparing:
+            text = "Preparing shared Python dependencies; requested command has not started"
+            details["installer"] = {k: python[k] for k in ("phase", "last_install_state", "seconds_without_progress") if k in python}
+            lines = str(python.get("output_tail") or "").strip().splitlines()
+            if lines:
+                details["installer"]["latest_output"] = lines[-1].strip()[-240:]
+                text += ". Latest installer log: " + details["installer"]["latest_output"]
+            if python.get("seconds_without_progress") is not None:
+                # This age comes from log/cache mtimes. A recent update is an
+                # observation of activity, not an installer-stall diagnosis.
+                text += f" (last observed installer/cache activity {python['seconds_without_progress']}s ago)"
+        elif payload.get("phase") == "executing" and payload.get("command_started") is not False:
+            text = "Sandbox command is running"
+        else:
+            text = "Waiting for Sandbox operation"
+        safe = public_tool_payload({"name": "wait_sandbox_operation", "response": details})["response"]
+        self.notice("structure_builder", text, workflow_event=workflow_event,
+                    operation_id=payload.get("operation_id"), sandbox=sandbox, operation_progress=safe)
 
     def stop(self, reason: str) -> None:
         raise HarnessStopped(f"AtomSculptor stopped before completion: {reason}. "
@@ -214,14 +250,26 @@ class RunEvidence:
         self._rejected_actions[fingerprint] = {"role": role, "feedback_offered": False}
 
     def closeout_checkpoint(self, reason):
+        current = self.scripts.get(self.current_script_key) or self.latest_experiment()
+        repair_source = ({"sandbox": current.sandbox, "script_path": current.path, "command_id": current.command_id,
+                          "source": self.script_sources.get((current.sandbox, current.path))}
+                         if current and self.workflow.current in {"probe", "build"}
+                         and (current.phase == "written" or current.phase == "executed"
+                              and current.execution_sequence > self.workflow.anchor) else None)
         return {"status": "unfinished", "reason": str(reason), "stage": self.workflow.current,
+                "repair_source": repair_source,
                 "plan_revision": self.workflow.plan_revision,
                 "scripts": [vars(item).copy() for item in self.scripts.values()],
-                "last_assessments": self.experiment_history[-3:], "plan": self.workflow.snapshot(),
+                "last_assessments": self.experiment_history[-3:],
+                "plan": {**self.workflow.snapshot(), "pending_experiment": deepcopy(self.workflow.pending_experiment)},
+                "inline_measurements": deepcopy(self.actions.inline_measurements[-2:]),
+                "inline_attempts": self.actions.inline_attempts,
+                "selection_snapshot": deepcopy(self.selection_snapshot),
+                "continuation_evidence": deepcopy(self.continuation),
                 "validated_files": list(self.outputs.values()), "document_import_revisions": dict(self.imports),
                 "document_confirmations": dict(self.confirmed),
-                "pending_operations": list(self.pending), "pending_skill_operations": list(self.skill_operations),
-                "unknown_executions": list(self.executions), "unknown_imports": dict(self.delivery_uncertainty),
+                "pending_operations": [*self.pending, *self.inline_pending], "pending_skill_operations": list(self.skill_operations),
+                "unknown_executions": [*self.executions, *self.inline_executions], "unknown_imports": dict(self.delivery_uncertainty),
                 "model_requests": self.model_requests, "output_tokens": self.output_tokens,
                 "argument_issue": self.steps.argument_issue,
                 "execution_steps": self.steps.snapshot(),
@@ -231,6 +279,195 @@ class RunEvidence:
                 "output_budget": self.output_budget(),
                 "working_decision": self.working_decision(),
                 "continuation": "Inspect these saved artifacts and native receipts before continuing; never replay unknown commands."}
+
+    def restore_continuation(self, checkpoint, source_run_id):
+        """Reuse native planning history; live validation and read-back stay fresh."""
+        if not isinstance(checkpoint, Mapping) or not self.workflow.required:
+            return False
+        saved = checkpoint.get("plan")
+        if not isinstance(saved, Mapping):
+            return False
+        from .workflow import validate_plan
+        parsed, issues = validate_plan({"status": "planned", "delivery": saved.get("delivery"),
+            "stages": saved.get("plan"), "assumptions": saved.get("assumptions", [])})
+        if issues or not parsed:
+            return False
+        stage = saved.get("current_stage")
+        if stage == "complete":
+            stage = "deliver"  # Reconfirm the live document before closing again.
+        revision = saved.get("plan_revision", 1)
+        if type(revision) is not int or revision < 1:
+            return False
+        ids = [s["id"] for s in parsed["stages"]]
+        if stage not in ids:
+            return False
+        # A changed turn-start selection may describe a different document/task.
+        if "selection_snapshot" in checkpoint and checkpoint["selection_snapshot"] != self.selection_snapshot:
+            return False
+        workflow = self.workflow
+        workflow.plan = deepcopy(parsed["stages"])
+        workflow.active = bool(saved.get("active"))
+        workflow.delivery = parsed["delivery"]
+        workflow.assumptions = deepcopy(parsed.get("assumptions", []))
+        workflow.index = ids.index(stage)
+        workflow.plan_revision = revision
+        workflow.checkpoints = [deepcopy(row) for row in saved.get("checkpoints", [])
+                                if row.get("stage") in ids[:workflow.index]]
+        workflow.review_request = deepcopy(saved.get("review_request"))
+        workflow.review_history = deepcopy(saved.get("review_history", []))
+        # Do not copy active dispatches, validation, source caches or confirmations.
+        # Those describe past resource states, not current admission/acceptance.
+        self.continuation = {"source_run_id": source_run_id, "stage": stage,
+            "scripts": deepcopy(checkpoint.get("scripts", []))[-8:],
+            "current_experiment": {k: deepcopy(v) for k, v in (checkpoint.get("current_experiment") or {}).items()
+                if k not in {"measurements", "measurement_issues", "execution_inputs", "native_measurement_reference"}},
+            "artifact_handoffs": deepcopy(checkpoint.get("artifact_handoffs", []))[-8:],
+            "pending_operations": deepcopy(checkpoint.get("pending_operations", [])),
+            "pending_skill_operations": deepcopy(checkpoint.get("pending_skill_operations", [])),
+            "unknown_executions": deepcopy(checkpoint.get("unknown_executions", [])),
+            "unknown_imports": deepcopy(checkpoint.get("unknown_imports", {})),
+            "policy": "Historical evidence only. Read saved files/results before reuse; validate current files and read back current document revisions. Never replay unresolved effects."}
+        experiment = self.continuation["current_experiment"]
+        if experiment.get("command_id") and experiment.get("sandbox"):
+            experiment["result_reference"] = _command_result_reference(experiment["sandbox"], experiment["command_id"])
+        prior = checkpoint.get("continuation_evidence") or {}
+        for field in ("scripts", "current_experiment", "artifact_handoffs"):
+            missing = (not self.continuation[field].get("command_id") if field == "current_experiment"
+                       else not self.continuation.get(field))
+            if missing and prior.get(field):
+                self.continuation[field] = deepcopy(prior[field])
+        experiment = self.continuation["current_experiment"]
+        self.actions.inline_measurements = deepcopy(checkpoint.get("inline_measurements", []))[-2:]
+        attempts = checkpoint.get("inline_attempts")
+        self.actions.inline_attempts = attempts if type(attempts) is int and attempts >= 0 else len(self.actions.inline_measurements)
+        for row in self.actions.inline_measurements:
+            row.setdefault("source_run_id", source_run_id)
+            row["evidence_kind"] = "exploratory_command_output_not_scientifically_validated"
+            for key in ("stdout", "stderr"):
+                # Legacy previews did not save completeness; do not invent it.
+                row.setdefault(key + "_chars", None)
+                row.setdefault(key + "_truncated", None)
+            row["result_reference"] = _command_result_reference(row.get("sandbox"), row.get("command_id"))
+            if row.get("exit_code") == 0:
+                self.actions.successful_measurements.add((row["sandbox"], row["source_version"]))
+        # Preserve completed import identities, but require a new live read-back.
+        self.imports = deepcopy(checkpoint.get("document_import_revisions", {}))
+        self.import_details = {target: {} for target in self.imports}
+        self.delivery_uncertainty = deepcopy(checkpoint.get("unknown_imports", {}))
+        if stage in {"probe", "build"}:
+            action = saved.get("pending_experiment") or workflow.plan[workflow.index]["experiment"]
+            workflow.schedule_experiment(action, origin="continuation")
+            candidate = next((row for row in self.continuation["scripts"]
+                if row.get("sandbox") == experiment.get("sandbox") and row.get("path") == experiment.get("script_path")
+                and row.get("command_id") == experiment.get("command_id") and row.get("phase") == "executed"), None)
+            if (candidate and type(experiment.get("exit_code")) is int
+                    and isinstance(experiment.get("command_id"), str) and experiment["command_id"]
+                    and candidate.get("exit_code") == experiment["exit_code"]
+                    and not any(row.get("sandbox") == candidate["sandbox"]
+                        and row.get("command_id") == candidate["command_id"] for row in workflow.checkpoints)):
+                self._continuation_repair = {"script": candidate, "source": deepcopy(checkpoint.get("repair_source"))}
+            else:
+                candidate = next((row for row in reversed(self.continuation["scripts"])
+                    if row.get("path") == action.get("artifact") and row.get("phase") == "written"), None)
+                if candidate:
+                    self._continuation_repair = {"script": candidate, "source": deepcopy(checkpoint.get("repair_source"))}
+            if self._continuation_repair:
+                self.continuation["repair_state"] = "awaiting current source and native command receipt"
+                self.continuation["script_restored"] = False
+            if any(action.get(key) for key in ("depends_on", "evidence_refs", "input_paths")):
+                # Historical execution IDs are not current-Run prerequisites.
+                # Ask for an explicit reconciliation, rather than advertise IDs
+                # that this Run's dependency validator would inevitably reject.
+                workflow.review_request = workflow.review_request or {
+                    "reason": "Reconcile the saved input artifacts in HOST continuation before reusing cross-Run dependencies. Preserve the construction method and all acceptance checks; this is not a scientific probe.",
+                    "stage": stage, "source_run_id": source_run_id}
+        self.notice("atom_sculptor", "Restored committed plan from native Run checkpoint",
+                    workflow_event="continuation_restored", source_run_id=source_run_id, stage=stage)
+        return True
+
+    async def reconcile_continuation(self, definitions, invoke, stopped):
+        """Recover unfinished saved work through authorized native reads only.
+
+        Completed scientific checks are never restored. Changed or legacy
+        (source-less) checkpoints expose the live file for editing, without
+        attributing a historical failure to its current bytes.
+        """
+        pending = self._continuation_repair
+        if not pending or not self.continuation:
+            return
+        self._continuation_repair = None
+        history = self.continuation
+        if any(history.get(k) for k in ("pending_operations", "pending_skill_operations", "unknown_executions", "unknown_imports")):
+            history["repair_state"] = "unresolved effects; collect native receipts before any replay"
+            return
+        operations = {self.semantic_tool(d.name): d for d in definitions}
+        item = pending["script"]
+        needs_receipt = item["phase"] == "executed"
+        required = {"read_sandbox_file"} | ({"wait_sandbox_operation"} if needs_receipt else set())
+        if not required <= operations.keys():
+            history["repair_state"] = "current read/result capabilities required; saved source not restored"
+            return
+        from open_agent_world.plugin_api.tool_execution import execute_tool
+        import asyncio
+        async def native(name, args):
+            if stopped.is_set():
+                raise asyncio.CancelledError()
+            return _payload((await execute_tool(lambda: invoke(operations[name].capability_id, args))).response)
+        sandbox, path, command = item["sandbox"], item["path"], item["command_id"]
+        receipt = {}
+        if needs_receipt:
+            receipt = await native("wait_sandbox_operation", {"sandbox": sandbox, "operation_id": command, "wait_seconds": 1})
+            if (receipt.get("command_id") != command or type(receipt.get("exit_code")) is not int
+                    or receipt.get("exit_code") != item.get("exit_code")):
+                history["repair_state"] = "historical command could not be reconfirmed; inspect native receipts, do not replay"
+                return
+        chunks, offset, total = [], 0, None
+        while True:
+            page = await native("read_sandbox_file", {"sandbox": sandbox, "path": path, "offset": offset, "limit": 8000})
+            if (page.get("state") != "text" or page.get("path") != path or page.get("offset") != offset
+                    or not isinstance(page.get("text"), str) or type(page.get("total_chars")) is not int
+                    or total is not None and page["total_chars"] != total):
+                history["repair_state"] = "saved source unavailable or changed during read; inspect the current file"
+                return
+            total = page["total_chars"]
+            chunks.append(page["text"])
+            offset += len(page["text"])
+            if not page.get("truncated"):
+                break
+            if page.get("next_offset") != offset or not page["text"]:
+                history["repair_state"] = "saved source read incomplete; inspect the current file"
+                return
+        source = "".join(chunks)
+        if len(source) != total or not source.strip():
+            history["repair_state"] = "saved source read incomplete or empty"
+            return
+        expected = pending["source"] or {}
+        same = (expected.get("sandbox") == sandbox and expected.get("script_path") == path
+                and expected.get("command_id") == command and expected.get("source") == source)
+        version = item.get("version", 1)
+        version = version if type(version) is int and version >= 1 else 1
+        key = (sandbox, path)
+        script = ScriptEvidence(sandbox, path, version=version if same else version + 1, unexecuted_writes=0)
+        self.scripts[key], self.script_sources[key], self.current_script_key = script, source, key
+        if needs_receipt:
+            self.execution_observations[key] = "Historical command (exit=" + str(receipt["exit_code"]) + "):\n" + str(receipt.get("stderr", ""))[:3000]
+        failed_source_confirmed = same and needs_receipt and receipt["exit_code"] != 0
+        if failed_source_confirmed:
+            self.execution_sequence += 1
+            script.phase, script.exit_code, script.command_id = "executed", receipt["exit_code"], command
+            script.execution_sequence = self.execution_sequence
+            self.execution_receipts[script.execution_sequence] = {
+                "command_id": command, "sandbox": sandbox, "script_path": path, "source_version": script.version,
+                "plan_revision": self.workflow.plan_revision, "stage": self.workflow.current,
+                "source_run_id": history["source_run_id"], "stderr": str(receipt.get("stderr", "")),
+                "stdout": str(receipt.get("stdout", ""))}
+        history["repair_state"] = ("saved source restored for patch/rerun; no execution result is promoted" if not needs_receipt else
+            "failed execution and current source reconfirmed; patch the reported cause" if failed_source_confirmed else
+            "saved source and completed command reconfirmed; source is editable, but historical measurements and acceptance are not restored" if same else
+            "live saved source restored for patch/rerun; historical output is context only, current bytes were not confirmed as the executed version")
+        history["script_restored"] = True
+        self.notice("structure_builder", history["repair_state"], workflow_event="continuation_script_restored",
+                    source_run_id=history["source_run_id"], sandbox=sandbox, script_path=path, failed_source_confirmed=failed_source_confirmed)
 
     def semantic_tool(self, name):
         from .execution_steps import STEP_TOOL_MODES
@@ -339,23 +576,29 @@ class RunEvidence:
         planned = self.workflow.pending_experiment
         if planned and (planned["plan_revision"] != self.workflow.plan_revision or planned["stage"] != self.workflow.current):
             planned = None
+        from .execution_steps import step_field_defaults
+        inherited = step_field_defaults(self)
         return {"plan_revision": self.workflow.plan_revision, "stage": self.workflow.current,
+                "stage_goal": (self.workflow.plan[self.workflow.index]["goal"]
+                    if self.workflow.plan and self.workflow.current in {"probe", "build"} else None),
                 "current_subtask": {"state": "execute_planned_step" if planned and planned.get("origin") != "stage" else
                     "assess_result" if pending else "execute_planned_step" if planned else "choose_one_experiment",
                     "subtask_id": planned.get("subtask_id") if planned else step.get("subtask_id") if step else latest.get("subtask_id") if latest else None,
+                    "scope": planned.get("scope") if planned else experiment.get("scope"),
                     "artifact": planned["artifact"] if planned else step["script_path"] if step else experiment.get("artifact"),
-                    "question": planned["question"] if planned else step["question"][:600] if step and pending else
+                    "question": inherited["question"][:600] if "question" in inherited else
                         latest["next_step"][:600] if latest else experiment.get("question"),
                     "method": planned.get("method") if planned else None,
-                    "expected_output": planned.get("expected_output", "Measure only the current unknown; save intermediate data") if planned else
-                        step["expected_output"][:600] if step and pending else "Measure only the current unknown; save intermediate data",
-                    "stop_condition": planned["stop_condition"] if planned else step["stop_condition"][:600] if step and pending else experiment.get("stop_condition"),
+                    "expected_output": inherited.get("expected_output", "Measure only the current unknown; save intermediate data")[:600],
+                    "stop_condition": inherited.get("stop_condition", experiment.get("stop_condition", ""))[:600],
                     "depends_on": planned.get("depends_on", []) if planned else [],
                     "evidence_refs": planned.get("evidence_refs", []) if planned else [],
                     "input_paths": planned.get("input_paths", [a["path"] for a in self.artifact_handoffs.values()]) if planned else
                         [a["path"] for a in step.get("input_artifacts", [])] if step else [],
                     "required_previous_assessment": pending,
                     "execution_sequence": current.execution_sequence if current else None},
+                "continuation": ({"source_run_id": self.continuation["source_run_id"],
+                                  "stage": self.continuation["stage"]} if self.continuation else None),
                 "retained_facts": [{"execution_sequence": seq, "measurements": self.measurement_summary(seq)}
                     for seq, _ in self.relevant_measurements()[:2] if planned],
                 "last_decision": {k: latest[k][:400] if isinstance(latest[k], str) else latest[k]
@@ -367,6 +610,7 @@ class RunEvidence:
                     "script_version": r["script_version"]} for r in sorted(self.workflow.review_history,
                         key=lambda row: (row.get("stage") == self.workflow.current, row.get("plan_revision", 0)), reverse=True)[:2]],
                 "decision_checkpoint": self.decision_checkpoint(),
+                "retrieval_progress": self.retrieval_progress.snapshot(),
                 "instruction": "Use the host decision, artifact frames and executed contradictions. Do not reconstruct a future algorithm from reasoning tails."}
 
     def decision_checkpoint(self):
@@ -411,13 +655,14 @@ class RunEvidence:
         return {"used_tokens": self.output_tokens}
 
     def time_budget(self):
+        script_timeout = {"default_script_timeout_seconds": self.limits.script_execution_seconds,
+            "script_timeout_guidance": "Default only when timeout_seconds is omitted. An explicit finite command timeout overrides this default within the tool's declared bounds; the default is not a hard cap. A configured total Run deadline still applies.",
+            "request_timeout_guidance": "model_action_seconds=null disables the additional Builder wall-clock ceiling; native OAW first-content/idle watchdogs and request retries still apply. An explicit ceiling is per provider attempt, separate from the total Run deadline, and retries restart it. A wall-clock timeout does not prove a network fault."}
         if self.limits.max_run_seconds is None:
-            return {"total_seconds": None, "remaining_seconds": None,
+            return {**script_timeout, "total_seconds": None, "remaining_seconds": None,
                     "closeout_reserve_seconds": 0, "construction_seconds": None,
                     "phase": "closeout" if self.closing_reason else "experiment",
-                    "effective_brakes": {"remaining_output_tokens": None,
-                        "request_limit": self.limits.max_model_requests, "model_action_seconds": self.limits.model_action_seconds,
-                        "script_execution_seconds": self.limits.script_execution_seconds,
+                    "effective_brakes": {"request_limit": self.limits.max_model_requests, "model_action_seconds": self.limits.model_action_seconds,
                         "no_progress_requests": self.limits.model_requests_without_progress,
                         "repeated_error_limit": self.limits.repeated_error_limit, "stream_watchdog": "native OAW policy"},
                     "closeout_instruction":
@@ -425,7 +670,7 @@ class RunEvidence:
                         "each script still needs a finite stopping rule. Validate and deliver when ready."}
         remaining = round(self.remaining_seconds, 3)
         reserve = min(self.limits.closeout_reserve_seconds, self.limits.max_run_seconds * .2)
-        return {"total_seconds": self.limits.max_run_seconds, "remaining_seconds": remaining,
+        return {**script_timeout, "total_seconds": self.limits.max_run_seconds, "remaining_seconds": remaining,
                 "closeout_reserve_seconds": reserve, "construction_seconds": max(0, round(remaining - reserve, 3)),
                 "phase": "closeout" if remaining <= reserve else "experiment",
                 "closeout_instruction": "Reserve time for independent validation and requested delivery. "
@@ -443,12 +688,44 @@ class RunEvidence:
         self.notice("atom_sculptor", "Authorized modelling tools checked", workflow_event="modelling_capabilities",
                     tools=self.tool_semantics)
 
+    def protected_context(self, request, window):
+        """Pin current host facts and the latest complete explicit retrieval."""
+        reads = {id(c) for c in window.retrieval_context(request)}
+        host_texts = self._host_static_texts | self._host_evidence_texts
+        return lambda content: id(content) in reads or any(
+            getattr(part, "text", None) in host_texts for part in (content.parts or []))
+
+    def clear_host_frames(self, request, bindings):
+        """Replace only this Run's unsigned derived frames, never user history."""
+        from open_agent_world.plugin_api.model_runtime import signed_history
+        signed = signed_history(request)
+        if signed:
+            return True
+        host_texts = self._host_evidence_texts | self._host_static_texts
+        retained = []
+        for content in request.contents:
+            original_parts = getattr(content, "parts", None) or []
+            parts = [part for part in original_parts
+                     if not (getattr(content, "role", None) == "user"
+                         and getattr(part, "text", None) in host_texts
+                         and not getattr(part, "function_call", None)
+                         and not getattr(part, "function_response", None))]
+            if len(parts) == len(original_parts):
+                retained.append(content)
+            elif parts:
+                retained.append(content.model_copy(update={"parts": parts}) if hasattr(content, "model_copy") else
+                                bindings.types.Content(role=getattr(content, "role", None), parts=parts))
+        request.contents[:] = retained
+        return False
+
     def before_model(self, role: str, request: Any, bindings: Any, output_limit: int | None) -> None:
         self._context_role = role
         self._reference_cache = None
         self._source_reference_cache = {}
         logs = getattr(self.trace, "invocations", None)
         window = getattr(self.trace, "context_windows", {}).get(role)
+        if window is not None and (role == "structure_builder" or self.direct_builder and role == "atom_sculptor"):
+            self.retrieval_progress.observe(self, request, window)
         if logs is not None and window is not None:
             # Scope was set by the runtime before this callback. Reissue actual
             # evidence on fresh delegations and read the native store in batches.
@@ -528,6 +805,7 @@ class RunEvidence:
             static = {
                 "execution_role": role,
                 "original_user_request": self.original_request,
+                "continuation_evidence": self.continuation,
                 "turn_start_structure_selection": self.selection_snapshot,
                 "authorized_tools": self.tool_semantics,
                 "sandbox_python_environments": self.sandbox_environments,
@@ -542,8 +820,15 @@ class RunEvidence:
                     # of sending the same acceptance text three times.
                     checks = {stage["id"]: [r["id"] for r in requirements if r["stage"] == stage["id"]]
                               for stage in self.workflow.plan or []}
-                    visible_plan = [{**{k: deepcopy(v) for k, v in stage.items() if k != "checks"},
-                                     "check_ids": checks[stage["id"]]} for stage in visible_plan or []]
+                    stage_views = []
+                    for stage in visible_plan or []:
+                        view = {k: deepcopy(v) for k, v in stage.items() if k not in {"checks", "experiment"}}
+                        view["check_ids"] = checks[stage["id"]]
+                        objective = stage.get("experiment", {}).get("objective")
+                        if objective is not None:
+                            view["optimization_objective"] = deepcopy(objective)
+                        stage_views.append(view)
+                    visible_plan = stage_views
                 static["modelling_plan_context"] = {
                     "plan": visible_plan,
                     "acceptance_checks": checks,
@@ -555,10 +840,17 @@ class RunEvidence:
                     "requirements": requirements,
                 }
                 if role == "structure_builder":
-                    static["modelling_plan_context"]["check_text_source"] = "requirements: each id maps to its full committed check text; plan.check_ids and acceptance_checks reference these IDs."
+                    static["modelling_plan_context"]["current_action_source"] = "working_decision.current_subtask in HOST RUN EVIDENCE; the stage goal is not the next action's required output."
+                    static["modelling_plan_context"]["check_text_source"] = "requirements: each id maps to a Planner-proposed interpretation of the original request, not a direct user quotation. plan.check_ids and acceptance_checks reference these IDs; method_checks are optional diagnostics, not acceptance IDs."
             if role == "structure_builder":
                 from .measurements import measurement_contract
-                static["measurement_contract"] = measurement_contract()
+                # Report-only graphs may have no authorized Skill reader. Keep
+                # the schema inline there instead of advertising an unreadable reference.
+                feedback = self.correction_feedback or {}
+                reference_unavailable = ((feedback.get("read_dependency") or {}).get("file_path") ==
+                    "references/measurement-contract.json" and feedback.get("role") == role)
+                static["measurement_contract"] = measurement_contract(include_schema=reference_unavailable or not any(
+                    name in {"read_skill", "read_skills"} for name in self.tool_semantics.values()))
                 if self.steps.helper_module:
                     static["modelling_io"] = self.steps.helper_contract()
                 if "modelling_plan_context" in static:
@@ -566,6 +858,7 @@ class RunEvidence:
                         {k: row[k][:800] if isinstance(row[k], str) else row[k]
                          for k in ("plan_revision", "reason", "stage", "execution_sequence", "script_path", "script_version") if k in row}
                         for row in self.workflow.review_history]
+            static["authorized_tools_scope"] = "Graph-native authorization map, not the currently callable list; composite tools are separate. Use this request's actual tool declarations. Document delivery tools open after the build checkpoint completes."
             static_text = ("HOST STABLE CONTEXT (not a tool invocation). Committed request, resources "
                            "and plan; one current copy in working history, retained unchanged until "
                            "its facts change. Each API request still includes this frame. "
@@ -587,8 +880,6 @@ class RunEvidence:
                 "document_import_revisions": self.imports,
                 "document_confirmations": self.confirmed,
                 "delivery_issue": self.delivery_issue,
-                "available_tools": [d.name for t in getattr(request.config, "tools", None) or []
-                                    for d in getattr(t, "function_declarations", None) or []],
                 "unknown_imports": self.delivery_uncertainty,
                 "file_validation_and_exports": list(self.outputs.values())[-4:],
                 "file_receipt_issues": list(self.receipt_issues.values())[-4:],
@@ -596,7 +887,6 @@ class RunEvidence:
                 "output_budget": {"selected_model_limit": output_limit,
                     "specialist_limit": self.limits.specialist_output_tokens,
                     "recovered_action_limit": self.limits.recovered_action_output_tokens,
-                    "remaining_run_tokens": None,
                     "effective_request_limit": getattr(config, "max_output_tokens", None)},
                 "modelling_workflow": view,
                 "execution_steps": self.steps.snapshot(),
@@ -614,32 +904,12 @@ class RunEvidence:
             if snapshot["correction_feedback"]:
                 snapshot["correction_feedback"] = {k: v for k,v in snapshot["correction_feedback"].items()
                                                    if k != "current_experiment"}
-            text = ("HOST RUN EVIDENCE (not a tool invocation). The original user request in the stable frame "
-                    "is authoritative; delegation advice and derived assumptions must "
-                    "not add user constraints. A written script contains the real saved source, "
-                    "even if a UI log redacts it. Execute it and inspect the result before "
-                    "rewriting it. Never infer validated/exported/imported/confirmed from written "
-                    "or executed alone. The stable frame earlier in this context carries the "
-                    "committed plan, authorized tools and turn-start selection.\n" + json.dumps(snapshot, ensure_ascii=False))
+            text = ("HOST RUN EVIDENCE (not a tool invocation). Current receipts and state; "
+                    "the stable frame retains the request and plan. Tool declarations specify "
+                    "what is callable now. Advisory signals do not replace model decisions.\n" + json.dumps(snapshot, ensure_ascii=False))
             # Recovery invokes this callback on the same request. Replace only
             # snapshots actually emitted by this Run, never user text or receipts.
-            host_texts = self._host_evidence_texts | self._host_static_texts
-            signed = any(getattr(p, "thought_signature", None) for c in request.contents for p in (getattr(c, "parts", None) or []))
-            retained = []
-            for content in request.contents:
-                original_parts = getattr(content, "parts", None) or []
-                parts = [part for part in original_parts
-                         if not (not signed and getattr(content, "role", None) == "user"
-                             and getattr(part, "text", None) in host_texts
-                             and not getattr(part, "thought_signature", None)
-                             and not getattr(part, "function_call", None)
-                             and not getattr(part, "function_response", None))]
-                if len(parts) == len(original_parts):
-                    retained.append(content)
-                elif parts:
-                    retained.append(content.model_copy(update={"parts": parts}) if hasattr(content, "model_copy") else
-                                    bindings.types.Content(role=getattr(content, "role", None), parts=parts))
-            request.contents[:] = retained
+            signed = self.clear_host_frames(request, bindings)
             self._host_static_texts.add(static_text)
             if not any(getattr(part, "text", None) == static_text
                        for content in request.contents
@@ -652,14 +922,11 @@ class RunEvidence:
             self._host_evidence_texts.add(text)
             request.contents.append(bindings.types.Content(
                 role="user", parts=[bindings.types.Part.from_text(text=text)]))
-            if role == "structure_builder" and self.steps.available:
-                from .working_context import focus_history
-                focus_history(self, request, bindings)
 
     def _current_source_head(self, role: str, limit: int = 800) -> dict[str, Any] | None:
         """Expose the newest saved script's head so native exact edits are possible
         without a model turn spent re-reading the file. Native exact text matching stays authoritative."""
-        if role != "structure_builder" or not self.scripts:
+        if (role != "structure_builder" and not (self.direct_builder and role == "atom_sculptor")) or not self.scripts:
             return None
         key = self.current_script_key or next(reversed(self.scripts))
         source = self.script_sources.get(key)
@@ -706,7 +973,7 @@ class RunEvidence:
                 excerpt = "".join(lines[start:start + 24])[:2400]
         result = {"sandbox": key[0], "path": key[1], "version": item.version,
                 "source_chars": len(source), "source_head": source[:limit],
-                "reader": {"tool": "read_modelling_source", "paging": "offset and limit in characters; native-confirmed saved source snapshot"},
+                "reader": {"tool": "read_modelling_source", "paging": "offset/limit in characters; or start_line/end_line, literal query, Python symbol. Returns raw text with line positions and version."},
                 "error_line": error_line, "excerpt_start_line": start + 1}
         reference = self._source_reference_cache.get(key)
         if reference and reference["version"] == item.version:
@@ -737,6 +1004,11 @@ class RunEvidence:
             if not isinstance(args, Mapping):
                 return None
             name = self.semantic_tool(getattr(tool, "name", ""))
+            rejected = self.actions.rejected_call(role, getattr(tool, "name", ""),
+                getattr(tool_context, "function_call_id", None))
+            if rejected is not None:
+                self.record_rejection(role, getattr(tool, "name", name), args, rejected)
+                return rejected
             if name == "finish_task" and role == "planner" and set(args) - {"result"}:
                 self.workflow.plan_issues = [{"field": "finish_task.result." + key,
                     "message": "Place plan fields inside result, not beside it."} for key in sorted(set(args) - {"result"})]
@@ -759,6 +1031,8 @@ class RunEvidence:
             from .execution_steps import STEP_TOOL_MODES, argument_error
             actual_name = getattr(tool, "name", "")
             if actual_name in STEP_TOOL_MODES:
+                from .execution_steps import fill_step_fields
+                fill_step_fields(self, args)
                 rejected = argument_error(actual_name, args)
                 if rejected:
                     self.steps.retain_target_rejection(self, actual_name, args, rejected)
@@ -784,7 +1058,7 @@ class RunEvidence:
                 if generated and (not exported or exported["phase"] != "exported"):
                     return {"ok": False, "error": {"code": "independent_validation_required", "message":
                         "Generated output has no independent validation/conversion receipt for this file. "
-                        "Run the authorized structure-inspect Skill with run_skill_script, then convert that "
+                        "Run the authorized structure_inspect Skill with run_skill_script, then convert that "
                         "same validated file before importing. Copied scripts and arbitrary stdout are not trusted receipts.",
                         "receipt_issue": issue or {"reason": "missing_conversion_receipt"}}}
             if name == "write_sandbox_text_file":
@@ -812,26 +1086,26 @@ class RunEvidence:
             if name == "execute_command":
                 argv = args.get("argv", [])
                 source = inline_python(argv)
-                measuring = self.actions.enabled(self, role) and self.workflow.current == "probe"
-                if measuring and not self.scripts and source is None:
+                measuring = self.actions.enabled(self, role) and self.workflow.current in {"probe", "build"}
+                if measuring and self.workflow.current == "probe" and not self.scripts and source is None:
                     return self.workflow.error("input_measurement_required", "Before a saved probe exists, use "
                         "direct python3 -c for one small input measurement, or save the probe file. "
                         "Shell wrappers and unrelated scripts are not input-measurement receipts.")
                 if measuring and source is not None:
                     if self.scripts:
-                        return self.workflow.error("saved_probe_required", "Execute the saved probe file; "
+                        return self.workflow.error("saved_probe_required", "Execute the saved experiment file; "
                             "an inline command cannot replace its execution receipt.")
-                    if self.actions.inline_attempts >= self.limits.inline_probe_limit:
-                        return self.workflow.error("inline_probe_limit", "Inline measurement limit reached. "
-                            "Save the input-measurement script and execute it; do not continue command-only exploration.")
-                    if not source.strip() or len(source) > self.limits.inline_probe_chars:
-                        return self.workflow.error("inline_probe_size", f"Use one nonempty measurement of at most "
-                            f"{self.limits.inline_probe_chars} Python characters, or save it as the probe file.")
+                    if not source.strip():
+                        return self.workflow.error("inline_probe_size", "Supply nonempty Python or save an experiment script.")
+                    if (self.actions.inline_attempts >= self.limits.inline_probe_limit
+                            or len(source) > self.limits.inline_probe_chars):
+                        self.notice(role, "Consider a saved experiment script for reusable input checks; inline results do not complete a saved-script checkpoint.",
+                            workflow_event="inline_probe_advisory", advisory=True)
                     self.actions.inline_attempts += 1
                     source_key = (sandbox, source)
                     self.inline_source_versions.setdefault(source_key, len(self.inline_source_versions) + 1)
                     self.inline_executions[call_id] = {"sandbox": sandbox,
-                        "source_version": self.inline_source_versions[source_key]}
+                        "source_version": self.inline_source_versions[source_key], "stage": self.workflow.current}
                 if isinstance(argv, (list, tuple)):
                     # Match an actual direct Python file invocation, not wc/cat,
                     # a shell string, python -c/-m, or an unrelated probe.
@@ -894,7 +1168,7 @@ class RunEvidence:
             call_id = str(getattr(tool_context, "function_call_id", ""))
             if name in {"inspect_sandbox", "start_sandbox"} and isinstance(result.get("state"), str):
                 self.actions.sandbox_states[sandbox] = result["state"]
-            if name in {"inspect_sandbox", "start_sandbox"} and isinstance(result.get("python_environment"), dict):
+            if name in {"inspect_sandbox", "start_sandbox", "install_python_packages"} and isinstance(result.get("python_environment"), dict):
                 self.sandbox_environments[sandbox] = dict(result["python_environment"])
             # Different commands in one Sandbox are different dependencies.
             # Compare stable exit/error evidence, never command IDs or timing.
@@ -910,6 +1184,16 @@ class RunEvidence:
                           json.dumps(operation_args, sort_keys=True, default=str))
             error = tool_response.get("error") if isinstance(tool_response, Mapping) else None
             if isinstance(error, Mapping):
+                if error.get("command_dispatched") is False:
+                    self.executions.pop(call_id, None)
+                    operation = str(tool_response.get("operation_id") or args.get("operation_id") or "")
+                    self.pending.pop(operation, None)
+                if error.get("type") == "SandboxPreparationError" and sandbox:
+                    previous = self.sandbox_environments.get(sandbox, {})
+                    dependencies = {**previous.get("dependencies", {}), "ready": False,
+                                    "state": "failed", "error": error.get("message")}
+                    self.sandbox_environments[sandbox] = {**previous, "ready": False, "preparing": False,
+                                                         "dependencies": dependencies}
                 # Typed tools can reject inside their implementation, after the
                 # pre-dispatch callback. Give those definite host rejections
                 # the same corrective-feedback policy as pre-dispatch rejects.
@@ -927,6 +1211,10 @@ class RunEvidence:
             parameter_error = isinstance(error, Mapping) and error.get("kind") == "argument_validation"
             host_rejection = isinstance(error, Mapping) and error.get("kind") in {
                 "workflow_state", "step_contract", "execution_unknown", "plan_review", "workflow_blocked"}
+            read_dependency = {key: deepcopy(args[key]) for key in (
+                "sandbox", "target", "toolbox", "skill_id", "file_path", "path", "script_path",
+                "file_name", "invocation_id", "resource_id", "node_id", "file")
+                if key in args and args[key] is not None} if name in READ_DEPENDENCIES else None
             if error:
                 # Only host-created rejection kinds bypass dependency counting.
                 # Real native failures retain their existing bounded policy.
@@ -936,7 +1224,9 @@ class RunEvidence:
                     "code": error.get("code") if isinstance(error, Mapping) else None,
                     "message": str(error.get("message", error) if isinstance(error, Mapping) else error)[:1600],
                     "command_dispatched": error.get("command_dispatched") if isinstance(error, Mapping) else None,
-                    "current_experiment": self.current_experiment()}
+                    "current_experiment": self.current_experiment(), "call_id": call_id}
+                if read_dependency is not None:
+                    self.correction_feedback["read_dependency"] = read_dependency
                 if host_rejection:
                     self.correction_feedback.update({k: deepcopy(error[k]) for k in
                         ("field", "expected_script_path", "actual_script_path", "issues") if k in error})
@@ -950,9 +1240,20 @@ class RunEvidence:
                     recovery = error.setdefault("recovery", {})
                     recovery["current_experiment"] = self.current_experiment()
                     recovery.setdefault("next_action", action)
-            elif (tool_response and isinstance(tool_response, Mapping) and tool_response.get("ok") is not False
-                  and name not in READ_DEPENDENCIES):
-                self.correction_feedback = None
+            elif tool_response and isinstance(tool_response, Mapping) and tool_response.get("ok") is not False:
+                feedback = self.correction_feedback
+                prior_read = feedback.get("read_dependency") if feedback else None
+                resolved_read = bool(prior_read and feedback.get("role") == role
+                    and feedback.get("plan_revision") == self.workflow.plan_revision
+                    and self.semantic_tool(feedback["tool"]) == name
+                    and feedback.get("kind") not in {"execution_unknown", "plan_review", "workflow_blocked"}
+                    and read_dependency is not None
+                    and all(read_dependency.get(key) == value for key, value in prior_read.items()))
+                # A corrected read may add a previously missing selector. Page
+                # sizes and representation flags do not identify the resource.
+                # Unrelated reads still cannot erase unresolved modelling facts.
+                if name not in READ_DEPENDENCIES or resolved_read:
+                    self.correction_feedback = None
             if parameter_error and name == "run_modelling_step":
                 self.steps.argument_failures += 1
                 self.steps.argument_issue = dict(error)
@@ -1033,15 +1334,22 @@ class RunEvidence:
                     self.inline_pending[operation] = measurement
                 else:
                     exit_code = result.get("exit_code")
+                    stdout = str(result.get("stdout", "") or "")
+                    stderr = str(result.get("stderr", "") or tool_response.get("error", "") or "") if isinstance(tool_response, Mapping) else ""
                     observation = {key: measurement[key] for key in ("sandbox", "source_version")}
-                    observation.update({"exit_code": exit_code if type(exit_code) is int else None,
-                        "stdout": str(result.get("stdout", ""))[:1000],
-                        "stderr": str(result.get("stderr", "") or tool_response.get("error", ""))[:1000]
-                                  if isinstance(tool_response, Mapping) else ""})
+                    observation.update({"command_id": result.get("command_id") or operation or None,
+                        "stage": measurement.get("stage"),
+                        "exit_code": exit_code if type(exit_code) is int else None,
+                        "stdout": stdout[:1000], "stderr": stderr[:1000]})
+                    for key, text in (("stdout", stdout), ("stderr", stderr)):
+                        observation[key + "_chars"] = len(text)
+                        observation[key + "_truncated"] = len(text) > 1000
+                    observation["evidence_kind"] = "exploratory_command_output_not_scientifically_validated"
+                    observation["result_reference"] = _command_result_reference(sandbox, observation["command_id"])
                     self.actions.inline_measurements.append(observation)
                     if type(exit_code) is int and exit_code == 0:
                         self.actions.successful_measurements.add((measurement["sandbox"], measurement["source_version"]))
-                    self.notice(role, "Inline input measurement returned; saved probe checkpoint still required",
+                    self.notice(role, "Inline measurement returned; subsequent experiments use a saved script",
                         workflow_event="inline_measurement", **observation)
             group = self.executions.pop(call_id, [])
             operation = str(result.get("operation_id") or result.get("command_id") or "")
@@ -1144,7 +1452,17 @@ class RunEvidence:
                                     stage="confirmed", target=target, revision=result["revision"])
             return None  # Preserve the actual tool response.
 
-        return {"before_tool_callback": before_tool, "after_tool_callback": after_tool}
+        async def on_tool_error(tool, args, tool_context, error):
+            # ADK resolves a tool name before before_tool_callback. An unknown
+            # name reaches this hook directly; return its actual policy denial.
+            rejected = self.actions.rejected_call(role, getattr(tool, "name", ""),
+                getattr(tool_context, "function_call_id", None))
+            if rejected is not None:
+                self.record_rejection(role, getattr(tool, "name", ""), args, rejected)
+            return rejected
+
+        return {"before_tool_callback": before_tool, "after_tool_callback": after_tool,
+                "on_tool_error_callback": on_tool_error}
 
     def _invalidate_file(self, sandbox: str, path: str, reason: str) -> None:
         """Invalidate changed bytes and their exports, not unrelated scripts.
@@ -1168,13 +1486,13 @@ class RunEvidence:
             self.stop("execution or document outcome remains unconfirmed")
         if any(self.confirmed.get(target) != revision for target, revision in self.imports.items()):
             self.stop("document import has no matching read-back confirmation")
-        if self.workflow.active and self.workflow.current != "complete" and not self.workflow.blocked:
+        if (self.workflow.active or self.workflow.required and self.workflow.plan is not None) and self.workflow.current != "complete" and not self.workflow.blocked:
             self.stop(f"modelling stage {self.workflow.current} has no completed checkpoint or explicit blocked report")
 
     def _observe_skill(self, role: str, args: Mapping[str, Any], result: Mapping[str, Any]) -> None:
         script = args.get("script_path") or args.get("script")
         argv = args.get("argv")
-        if result.get("exit_code") != 0 or not isinstance(argv, list) or not argv:
+        if type(result.get("exit_code")) is not int or result["exit_code"] != 0 or not isinstance(argv, list) or not argv:
             return
         try:
             report = json.loads(result.get("stdout", ""))
@@ -1183,6 +1501,24 @@ class RunEvidence:
         if not isinstance(report, dict):
             return
         sandbox = str(args.get("sandbox", ""))
+        # Native Skill outputs can be inputs without a custom modelling script.
+        # Do not infer physical metadata or treat command success as acceptance.
+        command_id = result.get("command_id")
+        if sandbox and isinstance(command_id, str) and command_id:
+            from .measurements import relative_path
+            paths = []
+            for key, value in report.items():
+                if key == "output_files" and isinstance(value, list):
+                    paths.extend(value)
+                elif key == "output_file" or key.startswith("output_") and key.endswith("_file"):
+                    paths.append(value)
+            for path in dict.fromkeys(p for p in paths if relative_path(p)):
+                self._invalidate_file(sandbox, path, "native_skill_output")
+                self.artifact_handoffs[(sandbox, path)] = {
+                    "sandbox": sandbox, "path": path, "command_id": command_id,
+                    "skill": args.get("skill"), "script": script, "source": "native_skill_output",
+                    "candidate_eligible": False, "scientific_validation": "not_validated",
+                    "result_reference": _command_result_reference(sandbox, command_id)}
         if script == "scripts/interface_builder.py":
             for candidate in report.get("interface_candidates", []):
                 path = candidate.get("file_name") if isinstance(candidate, dict) else None
@@ -1197,8 +1533,11 @@ class RunEvidence:
             path = report.get("file")
             if isinstance(path, str) and report.get("passed") is True:
                 key = (sandbox, posixpath.normpath(path))
+                from .delivery import validation_identity
                 self.outputs[key] = {"sandbox": sandbox, "path": key[1], "phase": "validated",
-                    "measurements": report, "execution_sequence": self.execution_sequence}
+                    "measurements": report, "execution_sequence": self.execution_sequence,
+                    "validation": validation_identity(args, self.environment_revisions.get(sandbox, 0)),
+                    "command_id": result.get("command_id")}
                 self.receipt_issues.pop(key, None)
                 self.notice(role, f"Independent file validation passed · {path}", stage="validated",
                             path=path, command_id=result.get("command_id"))

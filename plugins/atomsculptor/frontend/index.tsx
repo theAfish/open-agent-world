@@ -95,8 +95,14 @@ function Workspace({ card, host, level }: PluginViewProps) {
   const [redo, setRedo] = useState<Snapshot[]>([]);
   const [clipboard, setClipboard] = useState<Omit<Atom, "id" | "layer_id">[]>([]);
   const [mode, setMode] = useState<EditorMode>("select");
-  const [cameraView, setCameraView] = useState<CameraView>("iso");
-  const [projection, setProjection] = useState<CameraProjection>("perspective");
+  const [cameraView, setCameraView] = useState<CameraView>(() => {
+    const saved = host.draft?.get()?.cameraView;
+    return saved === 'x' || saved === 'y' || saved === 'z' ? saved : 'iso';
+  });
+  const [projection, setProjection] = useState<CameraProjection>(() => host.draft?.get()?.projection === 'orthographic' ? 'orthographic' : 'perspective');
+  useEffect(() => {
+    host.draft?.set({ ...host.draft.get(), cameraView, projection });
+  }, [host.draft, cameraView, projection]);
   const [cameraNonce, setCameraNonce] = useState(0);
   const [measurement, setMeasurement] = useState<number[]>([]);
   const [selectionVisible, setSelectionVisible] = useState(true);

@@ -1,5 +1,5 @@
 ---
-name: surface-defect-creation
+name: surface_defect_creation
 description: Plan and validate vacancies, substitutions, interstitials and other defects in an existing atomic structure.
 when_to_use: Use when the user asks to introduce defects or dopants into a bulk, surface or nanotube structure.
 ---

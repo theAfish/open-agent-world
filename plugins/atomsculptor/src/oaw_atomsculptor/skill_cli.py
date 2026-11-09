@@ -12,7 +12,7 @@ import inspect
 import json
 from pathlib import Path
 from types import NoneType, UnionType
-from typing import Any, Callable, Union, get_args, get_origin
+from typing import Any, Callable, Literal, Union, get_args, get_origin
 
 
 def workspace_root() -> Path:
@@ -45,6 +45,8 @@ def resolve_output_path(output_name: str) -> Path:
 
 def annotation_to_cli_type(annotation: Any) -> str:
     origin = get_origin(annotation)
+    if origin is Literal:
+        return annotation_to_cli_type(type(get_args(annotation)[0]))
     if annotation in (inspect._empty, Any, str):
         return "string"
     if annotation is int:
@@ -64,6 +66,15 @@ def annotation_to_cli_type(annotation: Any) -> str:
 
 def _coerce(value: str, annotation: Any) -> Any:
     origin = get_origin(annotation)
+    if origin is Literal:
+        for choice in get_args(annotation):
+            try:
+                parsed = _coerce(value, type(choice))
+                if type(parsed) is type(choice) and parsed == choice:
+                    return choice
+            except (TypeError, ValueError):
+                pass
+        raise ValueError(f"Expected one of {get_args(annotation)!r}, got: {value!r}")
     if annotation in (inspect._empty, Any, str):
         return value
     if annotation is int:
@@ -104,6 +115,7 @@ def build_cli_parser(*, prog: str, description_lines: list[str], tool_functions:
                 f"--{parameter.name.replace('_', '-')}",
                 dest=parameter.name,
                 required=parameter.default is inspect._empty,
+                choices=[str(choice) for choice in get_args(parameter.annotation)] if get_origin(parameter.annotation) is Literal else None,
                 help=f"({annotation_to_cli_type(parameter.annotation)})",
             )
     return parser

@@ -53,6 +53,10 @@ def archived_tool_callbacks(trace, role, callbacks=None):
 
     async def on_error(tool, args, tool_context, error):
         identity = identities.get(context_id(tool_context))
+        if identity is None and context_id(tool_context):
+            # SDK name resolution may fail before before_tool_callback runs.
+            identity = trace.archive_tool_start(role, context_id(tool_context), getattr(tool, "name", "tool"), args)
+            identities[context_id(tool_context)] = identity
         try:
             result = await call(callbacks.get("on_tool_error_callback"), tool=tool, args=args,
                                 tool_context=tool_context, error=error)
@@ -66,6 +70,7 @@ def archived_tool_callbacks(trace, role, callbacks=None):
             else:
                 # ADK uses a non-None replacement as the function response;
                 # after_tool_callback is not guaranteed on this recovery path.
+                archive.tool_arguments(identity, args, overridden=True)
                 archive.finish_tool(identity, result)
         return result  # None preserves the SDK's real exception behavior.
 

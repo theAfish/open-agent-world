@@ -1,7 +1,7 @@
 ---
-name: interface-builder
+name: interface_builder
 description: Build a coherent lattice-matched interface between two bulk structures using the pymatgen ZSL algorithm.
-when_to_use: Use to create a strain-matched film/substrate interface from two bulk crystals. Read the `interface-building` skill first for tolerance tuning, gap sizing, and termination considerations.
+when_to_use: Use to create a strain-matched film/substrate interface from two bulk crystals. Read the `interface_building` skill first for tolerance tuning, gap sizing, and termination considerations.
 entry: scripts/interface_builder.py
 ---
 
@@ -14,7 +14,7 @@ script writes candidate files; use a fresh Atom Structure revision and
 `record_interface_candidates` for a structured candidate workflow. Do not
 import a candidate into the open Structure without an explicit selection.
 Registration stores an unverified draft, not a scientific pass. Before importing
-the selected saved file, independently validate it through structure-inspect and
+the selected saved file, independently validate it through structure_inspect and
 convert that same file to the document format. Geometry/strain metadata alone do
 not establish physical stability; use task-specific checks and explicit physics.
 
@@ -31,4 +31,4 @@ python3 scripts/interface_builder.py build_interface \
 For dissimilar lattices try relaxed tolerances: `--max-length-tol 0.15
 --max-angle-tol 0.1`. If the lowest-strain match still breaks structural
 units (PS4 tetrahedra, dimers, …), build the slab manually with
-`surface-builder` and stack — see the `interface-building` skill.
+`surface_builder` and stack — see the `interface_building` skill.

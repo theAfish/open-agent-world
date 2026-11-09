@@ -37,11 +37,10 @@ def python_entrypoint(argv):
 
 
 def needs_managed_python(argv, mode="auto", *, skill=False):
-    """Select Seatbelt's optional Python environment without parsing a shell.
+    """Classify Python requests for host preparation tracking.
 
-    A shell can invoke anything, so callers must explicitly request ``managed``
-    when a shell command needs OAW's Python. Skill runs retain the historical
-    managed environment by default, including executable scripts with shebangs.
+    Native backends can select managed Python for additional command types.
+    Their capability flags decide whether omitting that runtime is supported.
     """
     if not isinstance(mode, str) or mode not in {"auto", "managed", "none"}:
         raise SandboxValidationError("python_environment must be auto, managed, or none")

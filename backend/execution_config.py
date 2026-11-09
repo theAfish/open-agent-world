@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Literal
+from backend.errors import ResourceValidationError
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition
@@ -203,7 +204,10 @@ def _resolve_environment_chains(services, chains, shared, *, folder_mounts=None)
                 if folder_mounts is None:
                     raise SandboxValidationError("This caller does not support folder variables")
                 store = GlobalExecutionFolderStore(services.database, services.settings.data_root) if source == "global" else folder_store(services)
-                binding = store.resource(owner, value)
+                try:
+                    binding = store.resource(owner, value)
+                except ResourceValidationError:
+                    raise ResourceValidationError(f"Path variable {name!r} requires rebinding; choose its file or folder again and save") from None
                 if name.upper() == "PATH" and binding.kind != "folder":
                     raise SandboxValidationError("PATH extensions require a folder")
                 folder_mounts.append(FolderMount(name, binding.path, binding.access, binding.kind, index if structured else None))
@@ -213,7 +217,10 @@ def _resolve_environment_chains(services, chains, shared, *, folder_mounts=None)
                     text = shared.secrets[value.secret_ref]
                 elif source == "global":
                     from backend.security.execution_credentials import GlobalExecutionCredentialStore
-                    text = GlobalExecutionCredentialStore(services.database, services.settings.data_root).resolve(None, value.secret_ref)
+                    try:
+                        text = GlobalExecutionCredentialStore(services.database, services.settings.data_root).resolve(None, value.secret_ref)
+                    except ResourceValidationError:
+                        raise ResourceValidationError(f"Global secret variable {name!r} requires rebinding in Settings > Sandbox") from None
                 else:
                     text = resolve_environment_secret(services, owner, name, value.secret_ref)
                 secrets.append(text)
@@ -232,12 +239,24 @@ def _configuration_summaries(services, variables, shared):
         configured = True
         shown = value.value if isinstance(value, EnvironmentValue) else value
         folder_access = None
-        folder_error = None
+        binding_error = None
         available = None
+        binding = None
+        if secret:
+            store = global_credentials if source == "global" else services.execution_credentials
+            configured = value.secret_ref in shared.secrets if source == "shared" else store.configured(owner, value.secret_ref)
+            available = configured if source == "shared" else store.readable(owner, value.secret_ref)
+            if configured and not available:
+                binding_error = "Re-enter the secret and save."
         if folder:
             store = GlobalExecutionFolderStore(services.database, services.settings.data_root) if source == "global" else folder_store(services)
             configured = store.configured(owner, value.reference)
-            binding = store.folder(owner, value.reference) if configured else None
+            if configured:
+                try:
+                    binding = store.folder(owner, value.reference)
+                except (ResourceValidationError, ValueError):
+                    available = False
+                    binding_error = "Choose the file or folder again and save."
             shown = binding.path if binding else None
             folder_access = binding.access.value if binding else None
             if binding:
@@ -251,15 +270,15 @@ def _configuration_summaries(services, variables, shared):
                     available = True
                 except (ValueError, OSError, SandboxValidationError) as error:
                     available = False
-                    folder_error = str(error)
+                    binding_error = str(error)
         result.append({"name": name, "source": source, "owner": owner, "secret": secret,
             "operation": getattr(value, "operation", "replace"), "separator": getattr(value, "separator", None),
             "folder": folder, "kind": binding.kind if folder and binding else None, "value": None if secret else shown,
-            **({"access": folder_access, "error": folder_error, "available": available,
-                "status": "unconfigured" if not configured else "path_unavailable" if available is False else "configured",
-                "validation_scope": "host_path"} if folder else {}),
-            "configured": (value.secret_ref in shared.secrets if source == "shared" else
-                           (global_credentials if source == "global" else services.execution_credentials).configured(owner, value.secret_ref)) if secret else configured})
+            **({"error": binding_error, "available": available,
+                "status": "unconfigured" if not configured else
+                    ("rebind_required" if secret or binding is None else "path_unavailable") if available is False else "configured"} if secret or folder else {}),
+            **({"access": folder_access, "validation_scope": "host_path"} if folder else {}),
+            "configured": configured})
     return result
 
 

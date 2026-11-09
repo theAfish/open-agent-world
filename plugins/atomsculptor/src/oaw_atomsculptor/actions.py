@@ -3,12 +3,22 @@ from __future__ import annotations
 
 import json
 import posixpath
+from copy import deepcopy
 from open_agent_world.plugin_api.tool_execution import collect_operation_result, OperationReceiptMismatch
 from open_agent_world.plugin_api.sandbox import python_entrypoint
 
 
+SERIAL_ACTION_INSTRUCTION = (
+    "Each response may contain one tool call, or multiple read-only calls. "
+    "A call that may change state must be the only tool call in its response, "
+    "even when targets or output files differ. Starting or collecting Sandbox work "
+    "requires a single-call response even if it preserves the input file. "
+    "Unknown operations also require a single-call response."
+)
+
+
 READ_DEPENDENCIES = {"read_tool_result", "read_modelling_source", "read_skill", "read_skills", "preview_file", "inspect_artifacts", "list_resources",
-                     "list_toolbox_members", "inspect_sandbox", "inspect_atom_structure", "observe_atom_structure"}
+                     "list_toolbox_members", "inspect_sandbox", "list_sandbox_files", "read_sandbox_file", "inspect_atom_structure", "observe_atom_structure"}
 
 
 def inline_python(argv):
@@ -36,11 +46,38 @@ class ExecutionActions:
         self.validated_files = set()
         self.readbacks = set()
         self.output_token_ceiling = None
+        self.response_rejections = []
 
     def enabled(self, evidence, role):
         return evidence.workflow.active and role == "structure_builder" and not evidence.workflow.blocked
 
-    def next_action(self, evidence):
+    def environment_action(self, evidence):
+        """Keep dependency failures out of scientific repair/replanning."""
+        if evidence.workflow.current not in {"probe", "build"}:
+            return None
+        latest = evidence.latest_experiment()
+        environments = evidence.sandbox_environments
+        boxes = [latest.sandbox] if latest else list(environments)
+        if not latest and any(environments[box].get("ready") for box in boxes):
+            return None
+        for box in boxes:
+            status = environments.get(box, {})
+            dependencies = status.get("dependencies") or {}
+            if dependencies.get("state") in {"failed", "not_ready"} or status.get("warmup_error"):
+                names = evidence.workflow.tool_names or frozenset()
+                retry = ("Retry start_sandbox, then inspect_sandbox." if status.get("warmup_error") else
+                    "Retry the native install_python_packages with the declared requirements " +
+                    json.dumps(dependencies["requirements"]) + ", then inspect_sandbox." if dependencies.get("requirements") else
+                    "Retry the declared Pack preparation in the application, or report blocked with the exact environment error.")
+                return ("Infrastructure preparation failed for Sandbox " + box + ": " +
+                    str(dependencies.get("error") or status.get("warmup_error") or "Declared Pack dependencies are not ready") +
+                    ". " + retry + " If preparation cannot complete, report blocked with this receipt. "
+                    "Preserve the saved modelling source and method; do not scan interpreters, create another environment, "
+                    "or redesign the model to work around missing packages.",
+                    {"finish_task"} | ({"install_python_packages", "inspect_sandbox", "start_sandbox", "read_tool_result"} & names))
+        return None
+
+    def next_action(self, evidence, *, structure_path=""):
         workflow = evidence.workflow
         names = workflow.tool_names or frozenset()
         exits = {"finish_task", "advance_modelling_stage"}
@@ -52,6 +89,12 @@ class ExecutionActions:
             return ("Collect the running script result with wait_sandbox_operation; do not edit or restart it. "
                     "Use cancel_command for a confirmed non-converging command, then collect its termination receipt.",
                     exits | {"wait_sandbox_operation"} | ({"cancel_command"} & names))
+        continuation = evidence.continuation or {}
+        if continuation.get("script_restored") is False:
+            return ("The saved failed execution could not yet be reconciled: " + str(continuation.get("repair_state")) +
+                    ". Inspect the scoped native result/file references in HOST continuation or report blocked. "
+                    "Do not overwrite the saved script or replay unresolved commands.",
+                    {"finish_task"} | ((READ_DEPENDENCIES | {"wait_sandbox_operation"}) & names))
         if workflow.current == "complete":
             return "All workflow checkpoints are complete. Report the actual saved artifacts and confirmed revision with finish_task; do not execute or import again.", {"finish_task"}
         if evidence.closing_reason:
@@ -62,6 +105,9 @@ class ExecutionActions:
                     ". Inspect native tool receipts and the live Structure; do not replay import or delivery. "
                     "If no receipt proves the outcome, finish_task status=blocked with these pending references.",
                     {"finish_task"} | ({"inspect_atom_structure", "inspect_sandbox", "read_tool_result"} & names))
+        environment = self.environment_action(evidence)
+        if environment:
+            return environment
         unconfirmed = {target: revision for target, revision in evidence.imports.items()
                        if evidence.confirmed.get(target) != revision}
         if unconfirmed:
@@ -90,14 +136,18 @@ class ExecutionActions:
                 "Return finish_task status=blocked with the exact field, expected/observed layout and guard command receipt. "
                 "Do not regenerate the consumer, repeat this unchanged guard, or review an old science execution.",
                 {"finish_task"} | (READ_DEPENDENCIES & names))
-        signal = workflow.host_signal
-        if signal and signal["plan_revision"] == workflow.plan_revision:
-            return (f"Native execution signal: {signal['reason']} Return finish_task status={signal['outcome']} "
-                    "with reason, sandbox and script_path of this execution; retain measurements for Planner.", {"finish_task"})
+        observation = evidence.experiment_observations.get(latest.execution_sequence) if latest else None
+        if observation and observation["plan_revision"] == workflow.plan_revision:
+            if observation["outcome"] == "needs_plan_review":
+                return "Your recorded assessment requests Planner review. Return its evidence through finish_task status=needs_plan_review.", {"finish_task"}
+            if observation["outcome"] == "blocked":
+                return "Your recorded assessment reports a blocker. Return it through finish_task status=blocked with retained artifacts.", {"finish_task"}
         protocol = workflow.protocol_issues(evidence)
         if protocol:
             return ("Measurement protocol repair in Builder: " + json.dumps(protocol, ensure_ascii=False) +
-                    " Patch only the producer's output fields, reusing saved calculation results. Preserve failed checks. "
+                    " Patch only the producer's output fields, reusing saved calculation results. If metadata.oaw_report_file "
+                    "exists, load that native report in the producer's reporting branch and re-emit it; use argv to skip "
+                    "the scientific calculation. Preserve measured values and failed checks; missing scientific facts need execution. "
                     "Use HOST measurement_contract, not guesses about wrappers or invented objectives. "
                     "This does not consume a scientific Planner review.",
                     exits | {"run_modelling_step", "write_sandbox_text_file", "execute_command"})
@@ -131,24 +181,83 @@ class ExecutionActions:
                     "No new script ran; do not replan, derive numerical results, or repeat code in thoughts.",
                     exits | {"run_modelling_step"})
         if workflow.probe_ready(evidence):
-            return ("All committed input checks have measured pass evidence. Complete this input checkpoint now with "
-                    "advance_modelling_stage(stage='observe', outcome='ready', hypothesis=..., measurement=..., next_step=...). "
-                    "A new script matching the committed build artifact may instead combine previous_assessment and construction "
-                    "in run_modelling_step; the host advances the checkpoint before executing it. "
-                    "Use the existing receipt; construction is the next stage. Do not add another input verifier or remeasure these facts.",
-                    exits | {"run_modelling_step"})
+            return ("The current input checks have reported pass evidence. This does not change your assessment. "
+                    "Choose ready to advance the input checkpoint, continue with a justified input experiment, "
+                    "or request review with the actual evidence. Existing artifacts and receipts remain available.", None)
+        ready = workflow.ready_execution(evidence)
+        if ready is not None and not structure_path:
+            structure_path = evidence.experiment_observations[ready.execution_sequence].get("structure_path", "")
+        complete = workflow.checkpoint_arguments(evidence, structure_path)
+        if complete:
+            return ("The current build checkpoint has execution, assessment and independent validation receipts. "
+                    "Call advance_modelling_stage with arguments " + json.dumps(complete, ensure_ascii=False) +
+                    ". This completes build, then opens delivery tools; stage is the current checkpoint, not the destination. "
+                    "Reuse the recorded assessment and validation. No additional script or validation is needed "
+                    "for these receipts; further scientific work needs a justified remaining question.", None)
+        if ready is not None:
+            measured = evidence.measurement_reports.get(ready.execution_sequence, {})
+            paths = workflow.execution_artifact_paths(evidence, ready)
+            if not paths and not workflow.uses_measurement_contract(evidence):
+                paths = [path for (box, path), output in evidence.outputs.items()
+                         if box == ready.sandbox and output.get("phase") == "validated"
+                         and output.get("execution_sequence", -1) >= ready.execution_sequence]
+            observation = evidence.experiment_observations[ready.execution_sequence]
+            structure_path = structure_path or observation.get("structure_path", "") or (paths[0] if len(paths) == 1 else "")
+            checked = workflow.experiment_checkpoint(evidence, workflow.current, ready.sandbox, ready.path, structure_path)
+            arguments = {"stage": workflow.current, "sandbox": ready.sandbox, "script_path": ready.path}
+            if structure_path:
+                arguments["structure_path"] = structure_path
+            advance = "advance_modelling_stage with arguments " + json.dumps(arguments, ensure_ascii=False)
+            if checked.get("ok"):
+                return ("The current assessment is already ready and its checkpoint evidence is present. Call " +
+                        advance + ". Reuse the recorded assessment; do not return subtask_complete or repeat computation.", None)
+            issue = checked["error"]
+            if issue["code"] == "validation_required" and structure_path:
+                return ("The current assessment is already ready. Independently validate the bound candidate " +
+                        json.dumps(structure_path) + " with validate_modelling_artifact and task-appropriate checks, then call " +
+                        advance + ". Do not resubmit the assessment or return subtask_complete.", None)
+            return ("The current assessment is already ready, but its checkpoint needs this correction: " +
+                    json.dumps(issue, ensure_ascii=False) + ". Correct only the indicated evidence or argument, then use " +
+                    advance + ". Keep the recorded assessment; subtask_complete requires outcome=continue.", None)
+        if workflow.current in {"probe", "build"}:
+            if not self.sandbox_states and "inspect_sandbox" in names:
+                return "Inspect the authorized Sandbox state before the current action.", exits | {"inspect_sandbox", "inspect_atom_structure"}
+            unavailable = [(box, state) for box, state in self.sandbox_states.items() if state not in {"ready", "running"}]
+            if unavailable and not any(state in {"ready", "running"} for state in self.sandbox_states.values()):
+                box, state = unavailable[0]
+                if "start_sandbox" not in names:
+                    evidence.stop(f"Sandbox {box} is {state}; connect Execute + Start/Stop or start it from its card")
+                return f"Start Sandbox {box} ({state}); obtain readiness before computing.", exits | {"start_sandbox"}
         planned = workflow.pending_experiment
         if (planned and planned["plan_revision"] == workflow.plan_revision and planned["stage"] == workflow.current
                 and planned.get("origin", "planner_review") != "stage"):
-            return (("Planner review retained the native facts and rejected method. Execute the next minimal experiment: "
-                    if planned.get("origin", "planner_review") == "planner_review" else "Execute the current HOST subtask contract: ")
-                    + json.dumps(planned, ensure_ascii=False) + ". Reuse HOST artifact_handoffs; read only a specific missing field. "
+            return ("Use HOST current_subtask target " + json.dumps(planned["artifact"], ensure_ascii=False) +
+                    " for the next useful saved result, distinct from the final stage goal. "
+                    "Reuse HOST artifact_handoffs; read only a specific missing field. "
                     "If the last execution needs reassessment under this plan, include previous_assessment with the code action. "
-                    "Do not repeat a full inventory or design later stages before this result.",
-                    exits | {"run_modelling_step", "patch_modelling_step", "rewrite_modelling_step", "rerun_modelling_step"}
-                    | (READ_DEPENDENCIES & names))
+                    "The stage checks are final acceptance. If the method spans several computations, save and execute "
+                    "the next useful intermediate at this target; compute the first unresolved quantity in code "
+                    "and leave choices that depend on it until its result. A partial saved result need not pass all stage checks. "
+                    "Before any source is saved, stage=refine with reason and next_experiment can narrow this action "
+                    "without claiming a failed execution or changing acceptance. A finite construction may finish directly.", None)
         observation = evidence.experiment_observations.get(latest.execution_sequence) if latest else None
         if latest and (observation is None or observation["plan_revision"] != workflow.plan_revision):
+            from .measurements import constraint_failures
+            measured = evidence.measurement_reports.get(latest.execution_sequence, {})
+            checks = [row for row in workflow.requirement_coverage(evidence, execution=latest)
+                      if row["stage"] == "build"]
+            if (workflow.current == "build" and latest.exit_code == 0
+                    and measured.get("kind") == "candidate" and not constraint_failures(measured)
+                    and checks and all(row["status"] == "reported_pass" for row in checks)):
+                paths = workflow.execution_artifact_paths(evidence, latest)
+                return ("The execution returned a saved candidate with all current build checks reported pass. "
+                        "Briefly assess the actual output with advance_modelling_stage(stage='observe', "
+                        "hypothesis=..., measurement=..., outcome=..., next_step=...). "
+                        "Choose ready only if justified; independent validation remains required. "
+                        "Current artifact paths: " + json.dumps(paths) + ". Reuse this execution; "
+                        "do not create another verifier or construction step merely to record the assessment. "
+                        "If the reported result has a real unresolved failure, explain it and choose a repair or review.",
+                        exits | {"run_modelling_step"})
             if evidence.steps.available:
                 return (f"Use returned facts from {latest.path} (command_id={latest.command_id}) for ONE next code action, "
                         "combining its brief previous_assessment with the new/patch/rewrite/rerun tool. "
@@ -158,7 +267,7 @@ class ExecutionActions:
                         "If one small next experiment/repair is justified, use run_modelling_step (new source), "
                         "patch_modelling_step (exact edits), rewrite_modelling_step (full source) or rerun_modelling_step "
                         "(saved script+inputs), with previous_assessment. Keep measurement to facts already in stdout/stderr; "
-                        "do not derive the whole future algorithm before recording them. Use one sample before search. "
+                        "do not derive the whole future algorithm before recording them. A sample before search is recommended. "
                         "Report an optimization objective only if the current build plan declares it; mark assumption_invalid "
                         "when measured evidence contradicts the method. To finish a stage or request review without "
                         "new code, use advance_modelling_stage or finish_task.", exits | {"run_modelling_step"})
@@ -167,11 +276,6 @@ class ExecutionActions:
                     "outcome='continue'/'ready'/'needs_plan_review'/'blocked', next_step=...). "
                     "Use actual stdout/stderr; exit_code=0 alone does not prove the hypothesis. "
                     "Keep this assessment brief. Do no new topology derivation before recording it.", exits)
-        if observation and observation["outcome"] == "needs_plan_review" and observation["plan_revision"] == workflow.plan_revision:
-            return ("Return this measured contradiction via finish_task with status=needs_plan_review, reason, "
-                    "sandbox and script_path; the coordinator must obtain Planner review before new construction.", {"finish_task"})
-        if observation and observation["outcome"] == "blocked":
-            return "Report this measured blocker through finish_task status=blocked and limitations; preserve saved artifacts.", {"finish_task"}
         if workflow.current == "deliver":
             return ("Deliver the validated candidate with ONE run_delivery_step action: it validates that exact file "
                     "with explicit acceptance parameters, converts it, imports with a fresh revision and reads back, "
@@ -191,8 +295,8 @@ class ExecutionActions:
                     return (f"Inspect actual stderr from {item.path}; patch the failing part and rerun. "
                             "Request plan review with this execution if an assumption is contradicted.", None)
                 return (f"Use the measured output of {item.path} to implement ONE remaining construction or "
-                        "analysis step in saved Python, execute it, and inspect its result. If this measured subgoal is complete, "
-                        "finish_task status=subtask_complete with one next_experiment for a fresh delegation; keep same-goal repairs here. Reuse saved arrays "
+                        "analysis step in saved Python, execute it, and inspect its result. If this measured subgoal is complete "
+                        "and its recorded assessment is continue, use finish_task status=subtask_complete with one next_experiment for a fresh delegation; keep same-goal repairs here. Reuse saved arrays "
                         "and modules; do not restart the whole derivation. When all requested checks are met, "
                         "independently validate the saved structure before advancing build. A partial result "
                         "is useful evidence, not proof of a finished candidate.", None)
@@ -202,29 +306,23 @@ class ExecutionActions:
                         "whole construction. Otherwise advance probe with that saved-script receipt.",
                         None)
             return "Inspect actual stderr, repair the saved probe or request plan review if the assumption is invalid.", None
-        if not self.sandbox_states and "inspect_sandbox" in names:
-            return "Inspect the authorized Sandbox state; do no construction reasoning before it is ready.", exits | {"inspect_sandbox", "inspect_atom_structure"}
-        unavailable = [(box, state) for box, state in self.sandbox_states.items() if state not in {"ready", "running"}]
-        if unavailable and not any(state in {"ready", "running"} for state in self.sandbox_states.values()):
-            box, state = unavailable[0]
-            if "start_sandbox" not in names:
-                evidence.stop(f"Sandbox {box} is {state}; connect Execute + Start/Stop or start it from its card")
-            return f"Start Sandbox {box} ({state}); obtain readiness before computing.", exits | {"start_sandbox"}
         if workflow.current == "build":
-            action = workflow.plan[workflow.index]["experiment"]
-            return (f"Implement the committed construction method in {action['artifact']}; generate known inputs "
-                    "and measure derived values in that code. Produce the first candidate now when the construction "
-                    "fits this finite action; otherwise save the necessary construction intermediate. "
+            action = workflow.pending_experiment or workflow.plan[workflow.index]["experiment"]
+            return (f"Implement the next executable result of the committed method in {action['artifact']}; generate known inputs "
+                    "and measure derived values in that code. If a later choice depends on an unknown quantity, "
+                    "compute it and save the useful intermediate first; decide the dependent code from that output. "
+                    "Produce a candidate directly when the finite construction is already concrete. "
+                    "The stage checks are final acceptance, not a requirement to solve every uncertainty before this step. "
                     f"Current question: {action['question']} Method: {action['method']} "
                     "Inspect actual candidate failures before choosing a repair. Keep final acceptance checks "
                     "unchanged; stop at the experiment's finite limit.", None)
         action = workflow.plan[0]["experiment"]
         save = ("Save the input-measurement script at " + action["artifact"] + "; answer: " + action["question"] +
-                ". Scope=input_measurement: choose the smallest primitive fact first; do not design, "
-                "fit or search for the final candidate. Candidate work belongs to build, after this checkpoint.")
+                ". Scope=input_measurement: answer the missing input question using a method appropriate to it. "
+                "Candidate acceptance belongs to build.")
         if self.inline_attempts < evidence.limits.inline_probe_limit and not self.successful_measurements:
-            save = ("Compute ONE primitive input now using direct argv [python3, -c, short Python source] "
-                    f"(at most {evidence.limits.inline_probe_chars} characters); print the result instead of "
+            save = ("You may obtain a missing input using direct argv [python3, -c, short Python source] "
+                    f"(prefer under {evidence.limits.inline_probe_chars} characters); print the result instead of "
                     "calculating or enumerating alternatives in thought. You may instead " + save[0].lower() + save[1:] +
                     " An inline measurement is exploratory evidence, not the saved-script stage checkpoint.")
         elif self.inline_measurements:
@@ -310,6 +408,7 @@ class ExecutionActions:
         requires_closeout = (feedback and feedback.get("plan_revision") == evidence.workflow.plan_revision
                              and feedback.get("kind") in {"plan_review", "workflow_blocked"})
         if (repair and not requires_closeout and not evidence.closing_reason
+                and not self.environment_action(evidence)
                 and evidence.time_budget()["phase"] != "closeout"
                 and not evidence.steps.target_recovery(evidence)
                 and not (evidence.executions or evidence.pending or evidence.inline_pending or evidence.skill_operations)):
@@ -335,20 +434,23 @@ class ExecutionActions:
             if evidence.workflow.current == "build":
                 current_tools.add("run_skill_script")
             self.allowed = current_tools
-            self.last_action += (" Use run_modelling_step for new scripts (source required in arguments), "
-                "patch_modelling_step for repairs (exact edits required), rerun_modelling_step for saved inputs, "
-                "or rewrite_modelling_step for an explicit replacement. Answer ONE current question with code, measured expected_output "
-                "and a finite stop_condition. The host saves and executes it without another model turn in between. "
-                "Check current_experiment.assessment_status: pending requires one brief assessment, either separately with observe "
-                "or combined using previous_assessment. Recorded means OMIT previous_assessment and proceed using the immutable host record. "
-                "Do not solve later questions before this result. Reuse saved artifacts; patch one measured failure at a time.")
+            if evidence.workflow.ready_execution(evidence) is None:
+                self.last_action += (" Use run_modelling_step for new scripts (source required in arguments), "
+                    "patch_modelling_step for repairs (exact edits required), rerun_modelling_step for saved inputs, "
+                    "or rewrite_modelling_step for an explicit replacement. Answer ONE current question with code, measured expected_output "
+                    "and a finite stop_condition. The host saves and executes it without another model turn in between. "
+                    "Check current_experiment.assessment_status: pending requires one brief assessment, either separately with observe "
+                    "or combined using previous_assessment. Recorded means OMIT previous_assessment and proceed using the immutable host record. "
+                    "Do not solve later questions before this result. Reuse saved artifacts; patch one measured failure at a time.")
         if (self.allowed is not None and evidence.workflow.current in {"probe", "build"}
-                and evidence.artifact_handoffs and not evidence.workflow.host_signal
+                and evidence.artifact_handoffs
+                and not self.environment_action(evidence)
                 and not evidence.workflow.review_request and not evidence.workflow.blocked and not evidence.closing_reason
                 and evidence.time_budget()["phase"] != "closeout"
                 and not (evidence.executions or evidence.pending or evidence.inline_pending or evidence.skill_operations)):
             self.allowed.add("validate_modelling_artifact")
-            self.last_action += " Independent validation is available for exact HOST artifact paths; reuse validate_modelling_artifact before writing another verifier."
+            if evidence.workflow.ready_execution(evidence) is None:
+                self.last_action += " Independent validation is available for exact HOST artifact paths; reuse validate_modelling_artifact before writing another verifier."
         feedback = evidence.correction_feedback
         if (feedback and feedback.get("role") == role and feedback.get("plan_revision") == evidence.workflow.plan_revision
                 and feedback["kind"] in {"workflow_state", "step_contract"}):
@@ -373,8 +475,8 @@ class ExecutionActions:
             config.max_output_tokens = min(config.max_output_tokens or ceiling, ceiling)
             self.output_token_ceiling = config.max_output_tokens
         if evidence.output_recoveries.get(role, 0):
-            self.last_action += (" Output-limit recovery has been used: continue with a saved, executable "
-                                 "step based on actual evidence; do not repeat the discarded derivation.")
+            self.last_action += (" Output-limit recovery has been used: follow the current next action "
+                                 "using saved facts and native receipts; do not repeat the discarded derivation.")
         if config is not None and bindings is not None:
             declarations = []
             for tool in getattr(config, "tools", None) or []:
@@ -389,12 +491,11 @@ class ExecutionActions:
                     if repair:
                         tool.function_declarations = [d for d in tool.function_declarations
                             if d.name not in STEP_TOOL_MODES or STEP_TOOL_MODES[d.name] in {"patch", "rewrite", "rerun"}]
-                        for d in tool.function_declarations:
-                            if d.name == "rewrite_modelling_step":
-                                d.parameters_json_schema["required"].append("rewrite_reason")
                     if not evidence.scripts:
                         tool.function_declarations = [d for d in tool.function_declarations
                             if d.name not in STEP_TOOL_MODES or STEP_TOOL_MODES[d.name] == "new"]
+                    if not evidence.script_sources:
+                        tool.function_declarations = [d for d in tool.function_declarations if d.name != "read_modelling_source"]
                     if evidence.steps.argument_issue:
                         from .execution_steps import STEP_TOOL_MODES
                         tool.function_declarations = [d for d in tool.function_declarations
@@ -411,7 +512,9 @@ class ExecutionActions:
 
     def snapshot(self):
         return {"next_action": self.last_action, "requests_without_progress": self.requests_without_progress,
-                "action_recoveries": self.recoveries, "sandbox_states": self.sandbox_states,
+                "action_recoveries": self.recoveries,
+                "action_recovery_policy": "Correct the current rejected action; the cumulative count is telemetry, not a Run limit.",
+                "sandbox_states": self.sandbox_states,
                 "inline_attempts": self.inline_attempts, "inline_measurements": self.inline_measurements[-2:],
                 "recovered_output_token_ceiling": self.output_token_ceiling}
 
@@ -445,28 +548,59 @@ class ExecutionActions:
                             workflow_event="sandbox_start_coalesced", duplicate_calls=omitted)
 
     def dependent_batch(self, evidence, parts):
-        """Allow parallel independent reads; keep state-changing steps serial.
-
-        Unknown operations are serialized too. Never partially dispatch a batch
-        and pretend the withheld half has a successful function response.
-        """
+        """Identify mixed/non-read-only batches without guessing dependencies."""
         calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
         readonly = READ_DEPENDENCIES
         return len(calls) > 1 and not all(evidence.semantic_tool(c.name) in readonly for c in calls)
 
-    def recovery_instruction(self):
-        return "HOST EXECUTION ACTION RECOVERY: " + (self.last_action or "Take the next executable step.") + \
-            " If observed execution contradicts a planning assumption, finish_task with JSON " \
-            "status=needs_plan_review, reason, sandbox and script_path of that execution. " \
-            "Otherwise use an authorized tool or report blocked. " \
-            "Return one dependent action per response; independent reads may be parallel. " \
-            "Do not repeat derivations. No tools from the discarded response ran. Existing receipts remain authoritative."
+    def prepare_response(self, evidence, parts, request=None, role="structure_builder"):
+        """Keep the response/call IDs intact; reject unsafe calls at dispatch.
+
+        Read-only calls in a mixed batch can run. Writes and unknown effects
+        still need a single-call response; no dependencies are guessed from argv.
+        """
+        calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
+        mixed = self.dependent_batch(evidence, parts)
+        advertised = {d.name for t in getattr(getattr(request, "config", None), "tools", None) or []
+                      for d in getattr(t, "function_declarations", None) or []} if request is not None else None
+        for call in calls:
+            semantic = evidence.semantic_tool(call.name)
+            if (self.allowed is not None and semantic not in self.allowed
+                    or advertised is not None and call.name not in advertised):
+                result = evidence.workflow.error("disallowed_tool", "This tool is unavailable in the current host state.")
+                result["error"]["allowed_tools"] = sorted(advertised if advertised is not None else self.allowed)
+            elif mixed and semantic not in READ_DEPENDENCIES:
+                result = evidence.workflow.error("non_readonly_tool_batch",
+                    "This call was not dispatched: state-changing or unknown effects require a single-call response. "
+                    "Other read-only calls in this response may return their own results. Use the modelling/delivery composite for dependent steps.")
+            else:
+                continue
+            result["error"].update(call_id=call.id, tool=call.name)
+            self.response_rejections.append((role, call.id, call.name, result))
+
+    def rejected_call(self, role, name, call_id):
+        for index, (expected_role, expected_id, tool, result) in enumerate(self.response_rejections):
+            # SDKs can fill defaults or assign IDs after generation. Every call
+            # with this name has the same batch/availability restriction.
+            if expected_role == role and tool == name and (not expected_id or expected_id == call_id):
+                self.response_rejections.pop(index)
+                return deepcopy(result)
+        return None
+
+    def recovery_instruction(self, error=None):
+        details = " Rejected response: " + json.dumps(error, ensure_ascii=False) + "." if error else ""
+        return ("HOST EXECUTION ACTION RECOVERY: " + (self.last_action or "Take the next executable step.") + details +
+            " If observed execution contradicts a planning assumption, finish_task with JSON "
+            "status=needs_plan_review, reason, sandbox and script_path of that execution. "
+            "Otherwise use an authorized tool or report blocked. " + SERIAL_ACTION_INSTRUCTION +
+            " Do not repeat derivations. No tools from the discarded response ran. Existing receipts remain authoritative.")
 
 
 async def collect_script_operation(evidence, definitions, invoke, semantic_name, arguments, result, stopped):
     """Await existing OAW receipts inside one tool action, never rerun code.
 
-    Only a tracked custom script's command is collected. Each observation uses
+    Saved scripts, admitted inline measurements and dependency preparations
+    have no intervening model decision. Each observation uses
     the live capability provider; missing permission and errors return normally.
     Run cancellation/deadline remain owned by the runtime and native worker.
     """
@@ -480,8 +614,10 @@ async def collect_script_operation(evidence, definitions, invoke, semantic_name,
     entry = python_entrypoint(argv)
     key = (sandbox, posixpath.normpath(entry[1])) if entry and entry[0] == "script" else None
     saved = semantic_name == "execute_command" and key in evidence.scripts
-    pending = semantic_name == "wait_sandbox_operation" and operation in evidence.pending
-    if not (saved or pending):
+    inline = semantic_name == "execute_command" and inline_python(argv) is not None
+    preparation = semantic_name == "install_python_packages"
+    pending = semantic_name == "wait_sandbox_operation" and (operation in evidence.pending or operation in evidence.inline_pending)
+    if not (saved or inline or preparation or pending):
         return result
     waiter = next((d for d in definitions if evidence.semantic_tool(d.name) == "wait_sandbox_operation"), None)
     if waiter is None:
@@ -492,11 +628,11 @@ async def collect_script_operation(evidence, definitions, invoke, semantic_name,
         remaining = evidence.remaining_seconds
         if remaining is not None and remaining <= .01:
             evidence.stop("run time budget reached while collecting a Sandbox command")
-        evidence.notice("structure_builder", "Waiting for saved script operation; no additional model request",
-            workflow_event="modelling_command_wait", operation_id=operation, sandbox=sandbox)
         return 30 if remaining is None else min(30, remaining)
     try:
         return await collect_operation_result(result, lambda op, seconds: invoke(waiter.capability_id,
-            {"sandbox": sandbox, "operation_id": op, "wait_seconds": seconds}), stopped, before_wait=before_wait)
+            {"sandbox": sandbox, "operation_id": op, "wait_seconds": seconds}), stopped, before_wait=before_wait,
+            on_progress=lambda payload: evidence.sandbox_wait_progress(payload, sandbox=sandbox,
+                workflow_event="modelling_command_wait"))
     except OperationReceiptMismatch as exc:
         return exc.pending

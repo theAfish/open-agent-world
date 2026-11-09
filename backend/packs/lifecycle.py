@@ -1,6 +1,6 @@
 """References and process leases for host-managed Pack resources.
 
-Only explicitly registered, content-addressed directories are removable. Source
+Only explicitly registered directories with validated identities are removable. Source
 trees, host site-packages, external programs, credentials and Pack user data
 never enter this ledger. OS locks, rather than PIDs or timestamps, protect live
 processes across application restarts and concurrent profile instances.
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 from contextlib import contextmanager, ExitStack
+import json
 from pathlib import Path
 import re
 import shutil
@@ -22,6 +23,7 @@ _PROCESS_PINS = ExitStack()
 atexit.register(_PROCESS_PINS.close)
 _KINDS = {
     'environment': ('environment:', 'runtime/environments'),
+    'environment-stage': ('stage:', 'runtime/staging'),
     'adapter-wheel': ('adapter:', 'packs/adapter-wheels'),
     'modules': ('modules:', 'packs/cache/modules'),
 }
@@ -59,7 +61,14 @@ class ManagedResourceLedger:
             raise ValueError('Unknown managed resource kind')
         prefix, directory = _KINDS[kind]
         digest = resource_id.removeprefix(prefix)
-        if not resource_id.startswith(prefix) or not re.fullmatch(r'[a-f0-9]{64}', digest):
+        if kind == 'environment-stage':
+            fingerprint, _, name = digest.partition(':')
+            valid = re.fullmatch(r'[a-f0-9]{64}', fingerprint) and re.fullmatch(
+                rf'(?:{fingerprint}-(?:invalid-)?)[a-f0-9]{{32}}|[a-f0-9]{{32}}', name)
+            digest = name
+        else:
+            valid = re.fullmatch(r'[a-f0-9]{64}', digest)
+        if not resource_id.startswith(prefix) or not valid:
             raise ValueError('Managed resources require a content digest')
         expected = self.root / directory / digest
         candidate = Path(path).absolute()
@@ -165,32 +174,58 @@ class ManagedResourceLedger:
                     continue
                 claims = [claim for claim in self._claims(db, row['id']) if claim['consumer'] not in releasing]
                 durable = [claim for claim in claims if not claim['lease']]
-                action = 'retain' if durable else 'defer' if claims else 'remove'
+                recovery = self._recoverable_stage(row)
+                preparing = installation_is_active(self._preparation_lock(row))
+                action = 'retain' if durable or recovery else 'defer' if claims or preparing else 'remove'
                 result.append({'id': row['id'], 'kind': row['kind'], 'action': action,
-                    'reason': 'Referenced by another Pack' if durable else
-                        'A running process still uses this resource; cleanup follows restart' if claims else
+                    'reason': 'Verified installation work is retained for retry' if recovery else
+                        'Referenced by another Pack' if durable else
+                        'A running process still uses this resource; cleanup follows restart' if claims or preparing else
                         'No remaining Pack references',
                     'consumers': [claim['consumer'] for claim in claims]})
         return result
 
     def _preparation_lock(self, row):
         digest = row['id'].split(':', 1)[1]
-        if row['kind'] == 'environment':
+        if row['kind'] in {'environment', 'environment-stage'}:
+            digest = digest.split(':', 1)[0]
             return self.root / 'runtime/locks' / (digest + '.lock')
         if row['kind'] == 'adapter-wheel':
             return self.root / 'packs/adapter-locks' / (digest + '.lock')
         return self.root / 'packs/cache/modules' / (digest + '.lock')
 
-    def collect(self):
+    def _recoverable_stage(self, row):
+        if row['kind'] != 'environment-stage':
+            return False
+        fingerprint = row['id'].split(':')[1]
+        path = self._path(row['id'], self.root / row['path'], row['kind'])
+        operation_path = self.root / 'runtime/operations' / (fingerprint + '.json')
+        try:
+            operation = json.loads(operation_path.read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            operation = {}
+        if not isinstance(operation, dict):
+            raise ValueError('Invalid environment operation receipt')
+        return (operation.get('status') != 'ready'
+                and path.name in {operation.get('stage'), operation.get('recovery_stage')}
+                and ((path / 'ready.json').is_file() or (path / 'payload/ready.json').is_file()))
+
+    def collect(self, resources=None):
         """Remove unreferenced resources; partial deletion is retryable.
 
         Hold both the ledger write transaction and the provider lock across
         deletion. Preparation cannot publish a replacement while GC is running.
         Missing/partially removed directories remain safe to retry after a crash.
         """
+        if resources is not None and not resources:
+            return []
         results = []
         with self.connect() as db:
-            rows = [dict(row) for row in db.execute('SELECT * FROM resources')]
+            query = 'SELECT * FROM resources'
+            parameters = tuple(resources) if resources is not None else ()
+            if resources is not None:
+                query += ' WHERE id IN (' + ','.join('?' for _ in parameters) + ')'
+            rows = [dict(row) for row in db.execute(query, parameters)]
         for row in rows:
             try:
                 with self.connect(write=True) as db:
@@ -198,6 +233,10 @@ class ManagedResourceLedger:
                         continue
                     with installation_lock(self._preparation_lock(row), timeout=0):
                         path = self._path(row['id'], self.root / row['path'], row['kind'])
+                        # An inactive OS lock alone does not make verified,
+                        # resumable operation state disposable.
+                        if self._recoverable_stage(row):
+                            continue
                         if path.exists():
                             # rmtree never follows internal symlinks/junctions on
                             # supported Python versions. Only the real owned root
@@ -209,6 +248,35 @@ class ManagedResourceLedger:
                 results.append({'id': row['id'], 'state': 'deferred', 'reason': type(exc).__name__})
         return results
 
+    def require_idle(self, resource):
+        """The provider lock prevents new workers while a damaged payload moves."""
+        with self.connect(write=True) as db:
+            if any(claim['lease'] for claim in self._claims(db, resource)):
+                raise RuntimeError('A running process still uses this environment; stop it before repair')
+
+
+@contextmanager
+def managed_environment_stages(runtime_root, fingerprint):
+    """Journal exact provider-owned stages and collect after releasing the lock.
+
+    The operation receipt protects verified recovery work. Failed removal stays
+    in the existing ledger for the next resource collection.
+    """
+    ledger = ManagedResourceLedger(Path(runtime_root).parent)
+    resources = set()
+
+    def track_stage(stage):
+        if stage is None:
+            return
+        resource = f'stage:{fingerprint}:{stage.name}'
+        ledger.register(resource, stage, 'environment-stage')
+        resources.add(resource)
+
+    try:
+        yield track_stage
+    finally:
+        ledger.collect(resources)
+
 
 def environment_resources(spec, source_root):
     """Pure recipe identities; no package import, download or preparation."""
@@ -216,7 +284,7 @@ def environment_resources(spec, source_root):
     for name, declaration in spec.environments.items():
         if declaration.target != 'host-worker' or declaration.management != 'managed':
             continue
-        if declaration.lock:
+        if declaration.lock and declaration.provider != 'python':
             # Provider capability diagnostics belong to the plan. Unsupported
             # recipes have no prepared managed resource to release.
             continue

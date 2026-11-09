@@ -5,7 +5,7 @@ import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { SandboxWorkspace } from "./SandboxWorkspace";
 import { ArtifactCollection } from "./Artifacts";
-import { LifecycleStatus } from "./LifecycleStatus";
+import { LifecycleDisclosure } from "./LifecycleStatus";
 import { BarracksBody } from "./Barracks";
 import {
   Bot,
@@ -127,7 +127,7 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
         </div>
       </details>
       <main className="agent-activity-feed" aria-label={t("Runtime history")}>
-          <details className="agent-lifecycle-disclosure"><summary>{t("Execution and cleanup")}</summary><LifecycleStatus agentId={card.id} /></details>
+          <LifecycleDisclosure agentId={card.id} />
           {events.length > 0 ? events.slice(0, 40).map((event) => (
             <article key={event.id} className={`agent-activity-event is-${event.type}`}>
               <span><Clock3 size={12} /></span>
