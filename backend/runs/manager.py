@@ -248,7 +248,7 @@ class RunManager:
     async def shutdown(self) -> None:
         await self.stop_dispatcher()
         pending = set(self.store.pending_submissions())
-        records = [record for record in self.list_runs() if record.run_id not in pending and (
+        records = [record for record in self.store.current() if record.run_id not in pending and (
                    record.status not in TERMINAL_RUN_STATUSES or record.lifecycle.get('cleanup') in {'pending', 'failed'})]
         results = await asyncio.gather(*(self.cancel_run(record.run_id) for record in records), return_exceptions=True)
         for record, result in zip(records, results):
