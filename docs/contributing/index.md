@@ -38,6 +38,7 @@ change repository permissions. Release publication follows [the release procedur
 
 | Task | Guide |
 | --- | --- |
+| Develop shared POC Legions locally | [Team POC workflow](../../examples/poc/README.md) |
 | Build or debug desktop | [Desktop](../desktop.md) |
 | Release the application | [Releasing](../releasing.md) |
 | Publish a locked workspace | [Deployment](../deployment.md) |
