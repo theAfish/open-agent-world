@@ -255,7 +255,7 @@ def test_previous_pack_bind_is_readable_under_controller_umask(authority, monkey
     monkeypatch.setattr(remote, 'run_sandbox', build)
     previous_umask = os.umask(0o077)
     try:
-        remote.prepare_bundle(f.request, {'build_user': 'fixture'})
+        remote.prepare_bundle(f.request, {'build_user': 'fixture', 'environment': 'production'})
     finally:
         os.umask(previous_umask)
     assert checks == [True]
