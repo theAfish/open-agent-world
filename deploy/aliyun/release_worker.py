@@ -20,21 +20,21 @@ def prepare(source, previous, scratch, bundle, *, preview=False):
         return {'prepared_packs': [], 'composition': 'preview-core'}
     from backend.packs.adapters import (activate_source_adapter, prepare_source_adapter,
         _source_adapter_location, prepared_adapter_paths)
-    from backend.packs.planning import environment_status, prepare_declared
+    from backend.packs.planning import environment_provider, environment_status, prepare_declared
     from backend.packs.spec import read_source_pack
     from backend.cloud.aliyun.app import approved_plugins
     report = []
     for declaration in sorted((source / 'plugins').glob('*/oaw.pack.toml')):
         spec = read_source_pack(declaration.parent)
+        old_path = previous / declaration.parent.relative_to(source)
+        old = read_source_pack(old_path) if (old_path / 'oaw.pack.toml').is_file() else None
         try:
             # Materialize the candidate's own receipt/wheels even when this
             # build runtime already has a usable adapter in its read-only base.
             prepare_source_adapter(spec, bundle)
         except (ValueError, RuntimeError, ImportError):
             wheelhouse = None
-            old_path = previous / declaration.parent.relative_to(source)
-            if (old_path / 'oaw.pack.toml').is_file():
-                old = read_source_pack(old_path)
+            if old is not None:
                 location = _source_adapter_location(old, bundle)
                 if location and old.backend.python == spec.backend.python:
                     adapter, root = location
@@ -48,7 +48,15 @@ def prepare(source, previous, scratch, bundle, *, preview=False):
             if environment.target == 'host-worker' and environment.prepare == 'install':
                 state = environment_status(spec.owner, name, environment, spec.source_root, bundle)
                 if state['state'] != 'ready':
-                    prepare_declared(spec.owner, name, environment, spec.source_root, bundle)
+                    if environment.provider == 'python':
+                        manager, recipe = environment_provider(spec.owner, name, environment, spec.source_root, bundle)
+                        previous_recipe = None
+                        prior = old.environments.get(name) if old is not None else None
+                        if prior is not None and (prior.target, prior.provider, prior.management) == ('host-worker', 'python', 'managed'):
+                            _, previous_recipe = environment_provider(old.owner, name, prior, old.source_root, bundle)
+                        manager.prepare_python(recipe, previous_spec=previous_recipe)
+                    else:
+                        prepare_declared(spec.owner, name, environment, spec.source_root, bundle)
                     state = environment_status(spec.owner, name, environment, spec.source_root, bundle)
                 if state['state'] != 'ready':
                     raise ValueError(f'{spec.owner}/{name}: runtime is not ready')
