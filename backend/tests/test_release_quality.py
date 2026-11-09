@@ -227,8 +227,17 @@ def test_pr_checks_keep_credentials_and_deployment_out_of_untrusted_jobs(filenam
         if filename == "docs.yml" and name == "deploy":
             assert job["if"] == docs_publish_guard
             continue
-        assert job.get("permissions", workflow["permissions"]) == {"contents": "read"}
-        assert "environment" not in job
+        if filename == "ci.yml" and name in {"aliyun-gates", "aliyun-approval"}:
+            assert job["if"] == (
+                "github.event_name == 'push' && github.ref == 'refs/heads/feat/aliyun-agentcore-poc' && "
+                "vars.OAW_ALIYUN_GITHUB_DEPLOYMENT == 'enabled'"
+            )
+            assert job["permissions"] == ({"actions": "read"} if name == "aliyun-gates" else {})
+            assert all("uses" not in step for step in job["steps"])
+            assert job.get("environment") == ("aliyun-integration-approval" if name == "aliyun-approval" else None)
+        else:
+            assert job.get("permissions", workflow["permissions"]) == {"contents": "read"}
+            assert "environment" not in job
         runner = job["runs-on"]
         if runner == "${{ matrix.os }}":
             runners = job["strategy"]["matrix"]["os"]

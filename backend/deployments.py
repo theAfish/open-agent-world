@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.api.dependencies import get_services
@@ -198,11 +198,11 @@ async def builder_mode():
 
 
 @router.get("/api/deployments")
-async def list_releases(services=Depends(get_services)):
+async def list_releases(request: Request, services=Depends(get_services)):
     with services.database.locked() as db:
         releases = [json.loads(row[0]) for row in db.execute(
             "SELECT value_json FROM application_settings WHERE key LIKE ? ORDER BY key", (PREFIX + "%",))]
-    if services.settings.tenant_scope is not None:
+    if request.app.state.hosted:
         from backend.hosting.scenarios import catalog
         releases.extend(catalog())
     return releases

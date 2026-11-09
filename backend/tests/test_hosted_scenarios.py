@@ -12,6 +12,7 @@ from backend.hosting import scenarios
 from backend.hosting.template_updates import update_runtime
 from backend.hosting.templates import initialize_runtime
 from backend.hosting.worker import create_worker_app
+from backend.main import create_app
 from backend.plugins.builtin import create_builtin_registry
 from backend.services import create_services
 from backend.tests.test_hosted_worker import config, headers
@@ -36,6 +37,8 @@ def scene(tmp_path, monkeypatch):
 
 
 def test_git_catalog_uses_existing_authenticated_hosted_publication_and_compatible_updates(scene, tmp_path):
+    with TestClient(create_app(Settings.for_data_root(tmp_path / "personal"), services_factory=core_services)) as client:
+        assert client.get("/api/deployments").json() == []
     builder = config(tmp_path / "builder")
     with TestClient(create_worker_app(builder, services_factory=core_services)) as client:
         assert client.get("/api/deployments").status_code == 401
