@@ -41,6 +41,7 @@ def open_profile(name: str, *, initialize: bool = False):
         raise ValueError("POC commands require an editable development profile, not a deployment")
     with file_lock(root / ".oaw-storage.lock"):
         settings = replace(Settings.for_data_root(root), application_mode="development",
+            marketplace_url=Settings.from_environment().marketplace_url,
             plugin_directories=tuple(Path(p).expanduser().resolve() for p in
                 os.environ.get("OPEN_AGENT_WORLD_PLUGIN_DIRS", "").split(os.pathsep) if p))
         services = create_services(settings)
@@ -76,6 +77,21 @@ async def install_pack(name: str, path: Path):
                         and installed["digest"] == pack.digest and installed["selected"]):
                     return {"status": "reused", "id": installed["id"], "version": installed["version"]}
             return services.pack_installations.install(data)
+        finally:
+            await services.shutdown()
+
+
+async def prepare_dependencies(name, requirements, *, install=False, archives=()):
+    from backend.poc_dependencies import dependency_status, read_requirements, synchronize
+    required = read_requirements(requirements)
+    with open_profile(name, initialize=install) as services:
+        try:
+            status = (await synchronize(services, required, archives) if install else
+                      dependency_status(services, required))
+            ready = all(row["status"] == "ready" for row in status)
+            return {"status": "ready" if ready else "missing",
+                    "packs": status, "next_step": None if ready
+                    else f"python scripts/poc.py setup --profile {name}"}
         finally:
             await services.shutdown()
 
@@ -271,7 +287,7 @@ async def check_definition(path: Path, profile="poc"):
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init", "apply", "save", "list", "start", "preview", "check", "install-pack"):
+    for name in ("init", "apply", "save", "list", "start", "preview", "check", "install-pack", "deps"):
         command = commands.add_parser(name)
         command.add_argument("--profile", default="poc", help="Checkout-local development profile (default: poc)")
         if name in {"init", "apply"}:
@@ -286,6 +302,10 @@ def parser():
                                  help="Share this card/container's initial content, including owned cards; repeatable")
         elif name == "install-pack":
             command.add_argument("path", type=Path)
+        elif name == "deps":
+            command.add_argument("--requirements", type=Path, default=ROOT / "examples/poc/packs.toml")
+            command.add_argument("--install", action="store_true", help="Download/install missing pinned Packs")
+            command.add_argument("--pack", type=Path, action="append", default=[], help="Exact-version local archive override")
         elif name == "check":
             command.add_argument("--template", type=Path, default=ROOT / "examples/poc/legion.json")
         elif name in {"start", "preview"}:
@@ -317,6 +337,13 @@ async def edit(args):
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == "deps":
+            if args.pack and not args.install:
+                raise ValueError("--pack requires --install")
+            result = asyncio.run(prepare_dependencies(args.profile, args.requirements,
+                install=args.install, archives=args.pack))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["status"] == "ready" else 1
         if args.command == "install-pack":
             print(json.dumps(asyncio.run(install_pack(args.profile, args.path)), ensure_ascii=False, indent=2))
             return 0

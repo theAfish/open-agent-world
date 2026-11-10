@@ -1,0 +1,5 @@
+# Third-party distributions required by this POC, in dependency order.
+# Versions are explicit; setup never guesses from the Store's latest pointer.
+[[packs]]
+pack_id = "theafish.deepseek-harness"
+version = "0.2.3"

@@ -13,7 +13,7 @@ def main():
         parser = argparse.ArgumentParser(description="Prepare the shared three-workspace POC once")
         parser.add_argument("--profile", default="poc")
         parser.add_argument("--pack", action="append", type=Path, default=[],
-                            help="Install a trusted team .oawpack into this profile (repeatable)")
+                            help="Supply an exact-version POC .oawpack instead of downloading (repeatable)")
         args = parser.parse_args(sys.argv[2:])
         from setup import main as setup
         paths = ("knowledge_base", "xrd", "sqlite", "matcreator", "structure_viewer")
@@ -22,11 +22,11 @@ def main():
                         "--runtime", "adk", "--runtime", "litellm", "--skip-build"])
         if result:
             return result
-        for pack in args.pack:
-            result = subprocess.call([str(backend_python()), str(Path(__file__).resolve()),
-                                      "install-pack", str(pack.resolve()), "--profile", args.profile], cwd=ROOT)
-            if result:
-                return result
+        result = subprocess.call([str(backend_python()), str(Path(__file__).resolve()),
+            "deps", "--install", "--profile", args.profile,
+            *[arg for pack in args.pack for arg in ("--pack", str(pack.resolve()))]], cwd=ROOT)
+        if result:
+            return result
         return subprocess.call([str(backend_python()), str(Path(__file__).resolve()), "init", "--profile", args.profile,
                                "--template", str(ROOT / "examples/poc/legion.json")], cwd=ROOT)
     python = backend_python()
