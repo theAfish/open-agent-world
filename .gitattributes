@@ -5,3 +5,5 @@ plugins/xrd/src/oaw_xrd/OAW_XRDfit/** -text -whitespace
 plugins/xrd/engines/*.patch -whitespace
 
 frontend/pack-sdk/sdk-exports.mjs text eol=lf
+# POC save writes canonical LF JSON, including on Windows.
+examples/poc/*.json text eol=lf

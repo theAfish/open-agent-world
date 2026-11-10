@@ -36,7 +36,13 @@ def scene(tmp_path, monkeypatch):
     return path
 
 
-def test_git_catalog_uses_existing_authenticated_hosted_publication_and_compatible_updates(scene, tmp_path):
+@pytest.mark.parametrize("multiple", [False, True])
+def test_git_catalog_uses_existing_authenticated_hosted_publication_and_compatible_updates(scene, tmp_path, multiple):
+    if multiple:
+        with poc.open_profile("author") as services:
+            asyncio.run(poc.apply_definition(services, preset="coding"))
+            asyncio.run(poc.save_definition(services, None, scene))
+            asyncio.run(services.shutdown())
     with TestClient(create_app(Settings.for_data_root(tmp_path / "personal"), services_factory=core_services)) as client:
         assert client.get("/api/deployments").json() == []
     builder = config(tmp_path / "builder")
@@ -55,6 +61,7 @@ def test_git_catalog_uses_existing_authenticated_hosted_publication_and_compatib
     runtime = replace(builder, mode="runtime", profile_id=str(uuid4()), data_root=tmp_path / "runtime")
     asyncio.run(initialize_runtime(runtime, output, services_factory=core_services))
     manifest = json.loads((runtime.data_root / "deployment.json").read_text())
+    assert len(manifest["workspaces"]) == (2 if multiple else 1)
     user_file = runtime.data_root / "projects" / "keep.txt"
     user_file.write_text("Keep user work")
     definition = poc.read_template(scene)
@@ -65,6 +72,7 @@ def test_git_catalog_uses_existing_authenticated_hosted_publication_and_compatib
     asyncio.run(update_runtime(runtime, output, services_factory=core_services))
     current = json.loads((runtime.data_root / "deployment.json").read_text())
     assert current["legion_id"] == manifest["legion_id"]
+    assert [w["legion_id"] for w in current["workspaces"]] == [w["legion_id"] for w in manifest["workspaces"]]
     assert current["source_release_id"] == updated["source_release_id"] != template["source_release_id"]
     assert user_file.read_text() == "Keep user work"
     with TestClient(create_worker_app(runtime, services_factory=core_services)) as client:

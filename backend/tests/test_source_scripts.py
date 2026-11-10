@@ -28,6 +28,23 @@ def scripts(monkeypatch):
     return setup, load("source_check", "check-source-environment.py"), load("source_dev", "dev.py")
 
 
+def test_poc_setup_prepares_scene_dependencies_and_team_pack_before_init(scripts, monkeypatch, tmp_path):
+    setup, _, _ = scripts
+    calls = []
+    monkeypatch.setattr(setup, "main", lambda args: calls.append(args) or 0)
+    entry = load("poc_entry", "poc.py")
+    pack = tmp_path / "team.oawpack"
+    monkeypatch.setattr(sys, "argv", ["poc.py", "setup", "--profile", "team", "--pack", str(pack)])
+    monkeypatch.setattr(entry.subprocess, "call", lambda command, **kwargs: calls.append(command) or 0)
+    assert entry.main() == 0
+    assert calls[0] == ["--profile", "team", "--plugin-path", "plugins/knowledge_base",
+        "--plugin-path", "plugins/xrd", "--plugin-path", "plugins/sqlite",
+        "--plugin-path", "plugins/matcreator", "--plugin-path", "plugins/structure_viewer",
+        "--runtime", "adk", "--runtime", "litellm", "--skip-build"]
+    assert calls[1][2:] == ["install-pack", str(pack.resolve()), "--profile", "team"]
+    assert calls[2][2:] == ["init", "--profile", "team", "--template", str(entry.ROOT / "examples/poc/legion.json")]
+
+
 @pytest.mark.parametrize("profile,skip_build,ready", [(None, False, False), ("demo", True, True), ("demo", False, True)])
 @pytest.mark.parametrize("verbose", [False, True])
 def test_setup_routes_all_platforms_through_persistent_interpreter(scripts, monkeypatch, tmp_path, profile, skip_build, ready, verbose):

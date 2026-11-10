@@ -61,6 +61,25 @@ def read_template(path: Path) -> LegionBlueprintPreset:
     return LegionBlueprintPreset.model_validate_json(data)
 
 
+async def install_pack(name: str, path: Path):
+    """Explicit setup only; reuse the ordinary Pack installer and profile lock."""
+    from backend.packs.archive import MAX_ARCHIVE_BYTES, inspect_archive
+    with path.open("rb") as stream:
+        data = stream.read(MAX_ARCHIVE_BYTES + 1)
+    if len(data) > MAX_ARCHIVE_BYTES:
+        raise ValueError("Pack archive exceeds the installation limit")
+    with open_profile(name, initialize=True) as services:
+        try:
+            pack = inspect_archive(data)
+            for installed in services.pack_installations.status()["versions"]:
+                if (installed["id"] == pack.manifest.id and installed["version"] == pack.manifest.version
+                        and installed["digest"] == pack.digest and installed["selected"]):
+                    return {"status": "reused", "id": installed["id"], "version": installed["version"]}
+            return services.pack_installations.install(data)
+        finally:
+            await services.shutdown()
+
+
 async def apply_definition(services, *, preset: str | None = None, template: Path | None = None,
                            initialize: bool = False):
     # No separate POC instance registry: the existing world is the source of truth.
@@ -74,12 +93,14 @@ async def apply_definition(services, *, preset: str | None = None, template: Pat
     instance = await services.instantiate_legion(record.id,
         LegionInstantiate(position={"x": x, "y": 100}, as_group=True), record=record)
     from backend.application import write_setting
+    roots = [instance.node_ids[node.key] for node in record.blueprint.nodes
+             if node.type == "legion" and node.parent_key is None and node.owner_key is None]
     for node_id in instance.node_ids.values():
         card = services.world.get_card(node_id)
         if card.type == "legion" and card.parent_id is None:
             with services.database.transaction(immediate=True) as db:
                 write_setting(db, LINEAGE + node_id, {"id": record.id,
-                    "keys": {value: key for key, value in instance.node_ids.items()}})
+                    "keys": {value: key for key, value in instance.node_ids.items()}, "roots": roots})
     return {"status": "created", "name": record.name, "node_ids": instance.node_ids}
 
 
@@ -91,29 +112,86 @@ def select_group(services, selector: str):
     return matches[0]
 
 
-async def save_definition(services, selector: str, target: Path, *, include_state=(), identifier="local.poc.legion"):
+def select_groups(services, selectors=None):
+    if isinstance(selectors, str):
+        selectors = [selectors]
+    groups = ([select_group(services, selector) for selector in selectors] if selectors else
+              [card for card in services.world.list_legion_groups() if card.parent_id is None])
+    if not groups or len({group.id for group in groups}) != len(groups):
+        raise ValueError("Choose at least one distinct Legion")
+    if not selectors:
+        selected = {group.id: group for group in groups}
+        ordered = {}
+        with services.database.locked() as db:
+            for group in groups:
+                row = db.execute("SELECT value_json FROM application_settings WHERE key=?", (LINEAGE + group.id,)).fetchone()
+                for identifier in json.loads(row[0]).get("roots", []) if row else []:
+                    if identifier in selected:
+                        ordered[identifier] = selected[identifier]
+                ordered[group.id] = group
+        groups = list(ordered.values())
+    return groups
+
+
+async def save_definition(services, selector, target: Path, *, include_state=(), identifier="local.poc.legion"):
     previous = read_template(target) if target.exists() else None
-    group = select_group(services, selector)
-    nodes = [group, *services.world.owned_descendants(group.id)]
+    groups = select_groups(services, selector)
+    nodes = list({node.id: node for group in groups for node in
+                  [group, *services.world.owned_descendants(group.id)]}.values())
     ids = {node.id for node in nodes}
     if any((edge.source in ids) != (edge.target in ids) for edge in services.world.list_edges()):
-        raise ValueError("Move external connected cards inside the Legion before saving it")
+        raise ValueError("Include external connected cards in the selected Legions before saving")
+    lineage_keys = {}
     with services.database.locked() as db:
-        row = db.execute("SELECT value_json FROM application_settings WHERE key=?", (LINEAGE + group.id,)).fetchone()
-    lineage = json.loads(row[0]) if row else None
-    keys = ({node.id: lineage["keys"].get(node.id, "node-" + uuid4().hex) for node in nodes} if lineage else None)
+        for group in groups:
+            row = db.execute("SELECT value_json FROM application_settings WHERE key=?", (LINEAGE + group.id,)).fetchone()
+            if row:
+                lineage_keys.update(json.loads(row[0])["keys"])
+    keys = {}
+    used = set()
+    for node in nodes:
+        key = lineage_keys.get(node.id)
+        if not key or key in used:
+            key = "node-" + uuid4().hex
+        keys[node.id] = key
+        used.add(key)
+    name = previous.name if previous else " / ".join(group.name for group in groups)[:120]
     # Reuse card-owned capture/remapping and the public content export checks.
     async with services._portable_state_gate.capture(), services._node_mutation():
         blueprint, captured_keys = await services._capture_subgraph_locked(
-            LegionCapture(name=group.name, node_ids=[node.id for node in nodes]), node_keys=keys)
+            LegionCapture(name=name, node_ids=[node.id for node in nodes]), node_keys=keys)
+    captured = {node.key: node for node in blueprint.nodes}
+    for node in nodes:
+        if node.type == "sandbox":
+            # Like hosted template export, retain the authored execution policy,
+            # while the normal capture still removes paths and host bindings.
+            captured[captured_keys[node.id]].config.update({key: node.config[key] for key in (
+                "network_enabled", "memory_bytes", "active_process_limit", "command_timeout",
+            ) if key in node.config})
+    if previous:
+        # Newly instantiated cards/edges can share timestamps and get a different
+        # database order. Preserve the reviewed definition order and edge keys.
+        node_order = {node.key: index for index, node in enumerate(previous.blueprint.nodes)}
+        blueprint.nodes.sort(key=lambda node: (node_order.get(node.key, len(node_order)), node.key))
+        def edge_identity(edge):
+            return (edge.source, edge.target, edge.relationship, edge.plugin_id, edge.direction)
+        old_edges = {edge_identity(edge): edge.key for edge in previous.blueprint.edges}
+        edge_order = {edge.key: index for index, edge in enumerate(previous.blueprint.edges)}
+        for edge in blueprint.edges:
+            edge.key = old_edges.get(edge_identity(edge), "edge-" + uuid4().hex)
+        blueprint.edges.sort(key=lambda edge: (edge_order.get(edge.key, len(edge_order)), edge.key))
     selected = []
-    for name in include_state:
-        matches = [node.key for node in blueprint.nodes if node.key == name or node.name == name]
+    for selected_name in include_state:
+        matches = [node.key for node in blueprint.nodes if node.key == selected_name or node.name == selected_name]
         if len(matches) != 1:
-            raise ValueError(f"Initial content must identify one card by name or template key: {name}")
+            raise ValueError(f"Initial content must identify one card by name or template key: {selected_name}")
         selected.append(matches[0])
+        # A container's portable content includes its owned skill/document cards.
+        source = next(node for node in nodes if captured_keys[node.id] == matches[0])
+        selected.extend(captured_keys[node.id] for node in services.world.owned_descendants(source.id))
     now = datetime.now(UTC)
-    record = LegionRecord(id="poc", name=group.name, description=group.config.get("description", ""),
+    record = LegionRecord(id="poc", name=name,
+        description=previous.description if previous else groups[0].config.get("description", ""),
         blueprint=blueprint, revision=previous.revision if previous else 1, created_at=now, updated_at=now)
     report, files = prepare_export(record, CreatorRequest(legion_id=record.id,
         id="local.poc", name=record.name, include_state_nodes=selected), services.plugins)
@@ -136,14 +214,16 @@ async def save_definition(services, selector: str, target: Path, *, include_stat
         temporary.replace(target)
         from backend.application import write_setting
         with services.database.transaction(immediate=True) as db:
-            write_setting(db, LINEAGE + group.id, {"id": definition.id, "keys": captured_keys})
+            for group in groups:
+                write_setting(db, LINEAGE + group.id, {"id": definition.id, "keys": captured_keys,
+                                                       "roots": [group.id for group in groups]})
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     return {"status": "saved", "path": str(target), "revision": definition.revision, "issues": report["issues"]}
 
 
-async def prepare_preview(name: str, selector: str, *, allow_terminal=False, agent_runtime="google.adk"):
+async def prepare_preview(name: str, selector=None, *, allow_terminal=False, agent_runtime="google.adk"):
     """Publish through the real access contract, then snapshot only stopped local data."""
     from backend.deploy import create_deployment
     from backend.deployments import PublishRequest, publish
@@ -153,8 +233,8 @@ async def prepare_preview(name: str, selector: str, *, allow_terminal=False, age
             # must instead use the same runtime defaults as the source launcher.
             services.settings = replace(services.settings, agent_runtime=agent_runtime,
                 sandbox_runtime=os.environ.get("OPEN_AGENT_WORLD_SANDBOX_RUNTIME", "auto"))
-            group = select_group(services, selector)
-            release = await publish(PublishRequest(legion_id=group.id, name=group.name,
+            groups = select_groups(services, selector)
+            release = await publish(PublishRequest(legion_ids=[group.id for group in groups], name=" / ".join(group.name for group in groups)[:120],
                                                   allow_terminal=allow_terminal), services)
         finally:
             await services.shutdown()
@@ -177,9 +257,11 @@ async def check_definition(path: Path, profile="poc"):
         try:
             record = plugin_preset_record(definition, services.plugins)
             instance = await services.instantiate_legion(record.id, LegionInstantiate(), record=record)
-            release = release_spec(services, PublishRequest(legion_id=instance.node_ids[template["root_key"]], name=definition.name))
+            release = release_spec(services, PublishRequest(
+                legion_ids=[instance.node_ids[key] for key in template["root_keys"]], name=definition.name))
             return {"status": "ready", "id": definition.id, "release_id": template["source_release_id"],
-                    "panels": len(release["panels"]), "cards": len(instance.node_ids)}
+                    "panels": sum(len(w["panels"]) for w in release["workspaces"]),
+                    "workspaces": len(release["workspaces"]), "cards": len(instance.node_ids)}
         finally:
             await services.shutdown()
             services.close()
@@ -189,7 +271,7 @@ async def check_definition(path: Path, profile="poc"):
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init", "apply", "save", "list", "start", "preview", "check"):
+    for name in ("init", "apply", "save", "list", "start", "preview", "check", "install-pack"):
         command = commands.add_parser(name)
         command.add_argument("--profile", default="poc", help="Checkout-local development profile (default: poc)")
         if name in {"init", "apply"}:
@@ -198,10 +280,12 @@ def parser():
             source.add_argument("--template", type=Path, help="A saved LegionBlueprintPreset JSON file")
         elif name == "save":
             command.add_argument("target", type=Path)
-            command.add_argument("--legion", required=True, help="Live Legion name or ID (see list)")
+            command.add_argument("--legion", action="append", help="Live Legion name or ID; repeat, or omit for all top-level Legions")
             command.add_argument("--id", default="local.poc.legion", help="ID for a new definition; existing IDs are retained")
             command.add_argument("--include-state", action="append", default=[], metavar="CARD",
-                                 help="Explicitly share this card's initial content (name or template key); repeatable")
+                                 help="Share this card/container's initial content, including owned cards; repeatable")
+        elif name == "install-pack":
+            command.add_argument("path", type=Path)
         elif name == "check":
             command.add_argument("--template", type=Path, default=ROOT / "examples/poc/legion.json")
         elif name in {"start", "preview"}:
@@ -209,7 +293,7 @@ def parser():
             command.add_argument("--frontend-port", type=int, default=5173)
             command.add_argument("--agent-runtime", default="google.adk")
             if name == "preview":
-                command.add_argument("--legion", required=True)
+                command.add_argument("--legion", action="append", help="Repeat to select workspaces; omit for all top-level Legions")
                 command.add_argument("--allow-terminal", action="store_true")
                 command.add_argument("--prepare-only", action="store_true")
     return result
@@ -233,6 +317,9 @@ async def edit(args):
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == "install-pack":
+            print(json.dumps(asyncio.run(install_pack(args.profile, args.path)), ensure_ascii=False, indent=2))
+            return 0
         if args.command == "check":
             print(json.dumps(asyncio.run(check_definition(args.template, args.profile)), ensure_ascii=False, indent=2))
             return 0
