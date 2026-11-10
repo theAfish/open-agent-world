@@ -18,24 +18,38 @@ and test inputs. No ECS access is needed.
 ## First run
 
 Install the prerequisites in [source setup](../../docs/getting-started.md).
-Obtain `theafish.deepseek-harness-0.2.3.oawpack` from the maintainer: this is the
-cloud POC version. As checked on 2026-11-10, the public Store has only 0.1.5, so it
-cannot yet replace this team artifact. Keep the archive outside Git. DSH remains
+Third-party Packs and exact versions are declared in [packs.toml](packs.toml).
+`setup` detects what is missing and downloads it from the configured Store,
+using the normal Pack installer and integrity/compatibility checks. DSH remains
 an independent Pack, not vendored OAW code.
 
 ```sh
 git clone --branch feat/aliyun-agentcore-poc https://github.com/theAfish/open-agent-world.git
 cd open-agent-world
 git switch -c feat/my-poc
-python scripts/poc.py setup --pack ../theafish.deepseek-harness-0.2.3.oawpack
+python scripts/poc.py setup
 python scripts/poc.py start
 ```
 
 `setup` prepares Knowledge Base, XRD, SQLite, MatCreator, Structure Viewer and the
-ADK/LiteLLM SDKs through the existing source installer. `--pack` uses the ordinary
-Pack installer in this development profile. Initial scientific dependency setup
+ADK/LiteLLM SDKs through the existing source installer, then prepares the pinned
+third-party Packs in this development profile. Initial scientific dependency setup
 can take time; it is not repeated on start. The DSH CLI/executable uses its normal
 Library preparation when first needed.
+
+To inspect Pack versions without downloading, run `python scripts/poc.py deps`.
+Matching installed versions are reused without contacting the Store. After
+pulling changes to `packs.toml`, stop the launcher and rerun `setup` (or
+`python scripts/poc.py deps --install` if only third-party Packs changed).
+Setup will not downgrade a newer installed Pack; use a separate `--profile NAME`
+when comparing versions. It never substitutes an older Store release.
+
+For a private/unpublished Pack or offline third-party installation, supply the
+exact trusted archive with `setup --pack PATH` (repeatable). Its identity and
+version must match `packs.toml`. Keep downloaded archives outside Git. The normal
+`OPEN_AGENT_WORLD_MARKETPLACE_URL` override is respected; an empty value disables
+Store access. Missing/unavailable versions produce an actionable error before
+the workbench is imported.
 
 Open the printed URL, configure your model in **Settings**, then edit any of the
 three Legions or open its Workspace. DSH uses `oaw:default`; `host-default` uses

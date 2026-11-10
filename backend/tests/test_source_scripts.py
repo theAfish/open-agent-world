@@ -41,8 +41,20 @@ def test_poc_setup_prepares_scene_dependencies_and_team_pack_before_init(scripts
         "--plugin-path", "plugins/xrd", "--plugin-path", "plugins/sqlite",
         "--plugin-path", "plugins/matcreator", "--plugin-path", "plugins/structure_viewer",
         "--runtime", "adk", "--runtime", "litellm", "--skip-build"]
-    assert calls[1][2:] == ["install-pack", str(pack.resolve()), "--profile", "team"]
+    assert calls[1][2:] == ["deps", "--install", "--profile", "team", "--pack", str(pack.resolve())]
     assert calls[2][2:] == ["init", "--profile", "team", "--template", str(entry.ROOT / "examples/poc/legion.json")]
+
+
+def test_poc_setup_resolves_pinned_packs_without_manual_archives_and_stops_on_failure(scripts, monkeypatch):
+    setup, _, _ = scripts
+    monkeypatch.setattr(setup, "main", lambda args: 0)
+    entry = load("poc_entry", "poc.py")
+    monkeypatch.setattr(sys, "argv", ["poc.py", "setup"])
+    calls = []
+    monkeypatch.setattr(entry.subprocess, "call", lambda command, **kw: calls.append(command) or 1)
+    assert entry.main() == 1
+    assert len(calls) == 1
+    assert calls[0][2:] == ["deps", "--install", "--profile", "poc"]
 
 
 @pytest.mark.parametrize("profile,skip_build,ready", [(None, False, False), ("demo", True, True), ("demo", False, True)])
