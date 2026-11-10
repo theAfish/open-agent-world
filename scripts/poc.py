@@ -10,13 +10,23 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         # A documented recipe over existing setup; normal startup never installs.
         import argparse
-        parser = argparse.ArgumentParser(description="Prepare the shared Knowledge Base POC once")
+        parser = argparse.ArgumentParser(description="Prepare the shared three-workspace POC once")
         parser.add_argument("--profile", default="poc")
+        parser.add_argument("--pack", action="append", type=Path, default=[],
+                            help="Install a trusted team .oawpack into this profile (repeatable)")
         args = parser.parse_args(sys.argv[2:])
         from setup import main as setup
-        result = setup(["--profile", args.profile, "--plugin-path", "plugins/knowledge_base", "--runtime", "adk", "--skip-build"])
+        paths = ("knowledge_base", "xrd", "sqlite", "matcreator", "structure_viewer")
+        result = setup(["--profile", args.profile,
+                        *[arg for name in paths for arg in ("--plugin-path", "plugins/" + name)],
+                        "--runtime", "adk", "--runtime", "litellm", "--skip-build"])
         if result:
             return result
+        for pack in args.pack:
+            result = subprocess.call([str(backend_python()), str(Path(__file__).resolve()),
+                                      "install-pack", str(pack.resolve()), "--profile", args.profile], cwd=ROOT)
+            if result:
+                return result
         return subprocess.call([str(backend_python()), str(Path(__file__).resolve()), "init", "--profile", args.profile,
                                "--template", str(ROOT / "examples/poc/legion.json")], cwd=ROOT)
     python = backend_python()

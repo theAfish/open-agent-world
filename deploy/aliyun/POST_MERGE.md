@@ -174,7 +174,7 @@ After this PR passes required CI and its exact activation is approved:
 5. Bind `controlled` mode to the selected successful run/attempt and current
    installed commit/receipt, then run one controller transaction. This reuses
    nonroot preparation/migration/verification and the existing restore path.
-   Verify the resulting receipt, login and the admin's **Git: Lab Manager** entry.
+   Verify the resulting receipt, login and the admin's **Git: 实验工作台** entry.
    Do not assign/reset user workspaces, create Sandbox VMs or call a paid model.
 6. Only after successful controlled acceptance, retain its accepted revision and
    set mode `github`, then set the GitHub opt-in variable and enable the timer.

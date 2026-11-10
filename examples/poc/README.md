@@ -1,207 +1,132 @@
 # Team POC development
 
-This is a source-development workflow for a small team. The repository holds the
-Legion definition; each developer keeps an editable world, settings and data in
-their own development profile. Normal startup reuses that world.
+[legion.json](legion.json) contains the three workspaces from the deployed Alibaba
+**实验工作台**, replacing the single generic Knowledge Base starter:
 
-The starting [legion.json](legion.json) is the Knowledge Base **Lab Manager**
-formation: an Agent, Conversation, Knowledge Base and Sandbox, with a Workspace
-layout. It is an editable starting point, not a copy of the deployed Alibaba
-environment. It uses the ordinary local model and execution settings.
+| Workspace | Included configuration |
+| --- | --- |
+| Lab Manager | Knowledge Base, DSH administrator and Chat |
+| XRD 分析工作台 | Spectrum/structure canvases, matching, Jev, result reviewers and history |
+| MatCreator research | Native Agent, conversation, Sandbox, graph, jobs, artifacts and skills |
+
+Layouts and cross-workspace connections come from the published application.
+Initial MatCreator skills come from this repository's bundled standard library.
+Customer files, knowledge databases, results, conversations, accounts, credentials
+and Alibaba bindings are excluded. Each developer supplies local model settings
+and test inputs. No ECS access is needed.
 
 ## First run
 
-Run these commands from the repository root, on Windows PowerShell, Linux or
-macOS. Install the prerequisites in [source setup](../../docs/getting-started.md)
-first. Keep `--profile poc` consistent when preparing dependencies.
+Install the prerequisites in [source setup](../../docs/getting-started.md).
+Obtain `theafish.deepseek-harness-0.2.3.oawpack` from the maintainer: this is the
+cloud POC version. As checked on 2026-11-10, the public Store has only 0.1.5, so it
+cannot yet replace this team artifact. Keep the archive outside Git. DSH remains
+an independent Pack, not vendored OAW code.
 
 ```sh
 git clone --branch feat/aliyun-agentcore-poc https://github.com/theAfish/open-agent-world.git
 cd open-agent-world
 git switch -c feat/my-poc
-python scripts/poc.py setup
+python scripts/poc.py setup --pack ../theafish.deepseek-harness-0.2.3.oawpack
 python scripts/poc.py start
 ```
 
-`setup` runs the existing source setup recipe for Knowledge Base + ADK, followed
-by idempotent initialization from `examples/poc/legion.json`. Run it once per new
-checkout/profile and again when dependencies change. It needs no ECS account or
-Alibaba credentials. `python scripts/poc.py setup --profile NAME` prepares a
-separate profile; the existing setup commands remain supported.
+`setup` prepares Knowledge Base, XRD, SQLite, MatCreator, Structure Viewer and the
+ADK/LiteLLM SDKs through the existing source installer. `--pack` uses the ordinary
+Pack installer in this development profile. Initial scientific dependency setup
+can take time; it is not repeated on start. The DSH CLI/executable uses its normal
+Library preparation when first needed.
 
-Open the frontend URL printed by the development launcher. Configure your model
-once in **Settings**, then edit the canvas or open the Legion's Workspace. Those
-settings are shared by the Legions in this profile. For a small manual knowledge
-test, create a project and import [sample.md](sample.md); the data is synthetic.
-Model-based processing requires your own model connection.
+Open the printed URL, configure your model in **Settings**, then edit any of the
+three Legions or open its Workspace. DSH uses `oaw:default`; `host-default` uses
+local restrictions on your computer and the configured isolation policy on
+Alibaba. The ordinary Sandbox uses Shared workspace scope and has networking
+enabled, with no server directory or Volume binding.
 
-The shared starter uses the Sandbox's **Shared** workspace scope so its definition
-can run locally and on Alibaba. In the current Alibaba adapter, each user still
-has a dedicated VM and Volume; sessions within that user's workspace share files.
-Session/group write restrictions require a supporting local runtime and are rejected
-by the Alibaba adapter. Keep Shared selected when saving a scene for this deployment.
+State lives under `.open-agent-world/development/profiles/poc/`, ignored by Git.
+Personal/default data is separate. Use `--profile NAME` consistently for another
+profile. `start` never installs, resets, or deploys.
 
-All POC state lives under `.open-agent-world/development/profiles/poc/` in this
-checkout, already ignored by Git. Your personal/default profile is separate.
-Use `--profile another-name` on every command to keep a second independent POC.
-
-The initializer also accepts installed presets, for example:
-
-```sh
-python scripts/poc.py init --preset knowledge.base.research
-```
-
-`init` leaves an existing world with cards unchanged. `start` delegates to the
-existing development launcher with hot reload; it does not install dependencies,
-apply templates, reset data, or build a production release. Rerun setup only when
-dependencies change or when preparing a new profile. Stop the launcher with Ctrl+C.
-
-## Edit and share a Legion
-
-The short local loop is **start → edit → Ctrl+C → save → check → preview**.
-Code edits use the ordinary source developer workflow; frontend changes hot
-reload. Backend changes require restarting the local launcher.
-
-1. Edit cards, connections, instructions and the Workspace layout in OAW. Put all
-   connected dependencies inside the Legion, including nested groups/equipment.
-2. Finish active tasks and stop the development launcher with Ctrl+C.
-3. Save the current Legion as a readable definition:
-
-```sh
-python scripts/poc.py list
-python scripts/poc.py save examples/poc/legion.json --legion "Lab Manager"
-python scripts/poc.py check
-```
-
-Names work when unique; `list` also prints IDs if two instances have the same name.
-Saving retains the definition ID, increments its revision only when it changes,
-and writes atomically. Repeated saves without edits produce no Git diff. This uses
-the existing `LegionBlueprintPreset` contract, capture/remapping and content-export
-checks; there is no separate POC Pack format or installation step per edit.
-
-Imported cards keep their portable keys when teammates save them again. New cards
-receive new keys. This preserves hosted template lineage across different local
-profiles; do not rename keys or change the scenario ID by hand to force an update.
-`check` instantiates the saved JSON in temporary clean data and validates the real
-Workspace publication contract using this profile's installed Packs. It does not
-run a model or start a Sandbox. CI checks the committed Knowledge Base starter too.
-
-Save another Legion to another JSON file to maintain several related scenarios.
-Use `--id team.other-scenario` when first saving a new file. Files can live in a
-private team repository too; `--template` and `save` accept filesystem paths.
-
-Initial document/resource content is omitted by default. Explicitly include a
-card's portable content by its unique name or template key:
-
-```sh
-python scripts/poc.py save examples/poc/legion.json --legion "Lab Manager" --include-state "Task brief"
-```
-
-This only includes content the card already supports capturing. **Knowledge Base
-currently creates a fresh, empty database when instantiated. Its project files,
-Space definitions, records and results are not portable template content.** Keep
-small synthetic inputs alongside the definition and import them locally; this
-command does not copy a knowledge database or add a new card-specific export API.
-
-Application settings, credentials, conversations, run history, Sandbox files and
-cloud bindings are not part of the definition. Model selections and execution
-bindings follow the existing portable-export rules. Review the JSON and any
-warnings before committing: structured credential checks cannot detect every
-secret pasted into prose or documents.
-
-## Get a teammate's update
-
-Commit the JSON and any intentionally shared sample files on a feature branch;
-open a normal GitHub PR. Review the card/config/layout diff, merge, and pull it.
-After stopping your local development launcher:
+Already used the old Lab Manager example? Stop it, rerun setup for dependencies,
+then import the new workbench beside it:
 
 ```sh
 python scripts/poc.py apply --template examples/poc/legion.json
 python scripts/poc.py start
 ```
 
-`apply` creates a new instance beside your current cards. Existing instances,
-documents, sessions and settings stay intact. Compare the two in OAW and remove
-the old instance yourself when ready. Imported definitions go through the normal
-Legion compatibility and lifecycle checks; missing/incompatible Packs are errors,
-not silently substituted cards. `apply --preset PRESET_ID` can also add another
-installed formation to the same profile.
+`init`/`setup` preserve existing cards. `apply` creates new instances and retains
+existing data/settings. Remove the old generic Legion in the editor when ready;
+otherwise it is also included when previewing all top-level Legions.
 
-The offline commands acquire the launcher's storage lock. They refuse a running
-profile, non-development directories, deployed workspaces and unfinished runs.
-They do not resume queued jobs, run models, install dependencies, or open a cloud
-execution environment.
+## Edit, save and preview
 
-## Try the published user interface locally
-
-Stop the editor, then run:
+Edit the canvas, connections, instructions and Workspace layouts locally.
+Frontend code hot reloads; restart after backend changes. Stop with Ctrl+C before
+running offline commands:
 
 ```sh
-python scripts/poc.py preview --legion "Lab Manager"
+python scripts/poc.py list
+python scripts/poc.py save examples/poc/legion.json --include-state "Skills & knowledge"
+python scripts/poc.py check
+python scripts/poc.py preview
 ```
 
-Open the printed frontend URL and enter the generated local access password.
-This uses the real published Workspace UI and restricted runtime APIs, served by
-Vite: no production frontend build or ECS release is needed. Model settings and
-your test data are copied from your local profile. Authoring controls are absent;
-the source canvas, settings and data remain independent of preview writes.
-Use `--agent-runtime core.mock` to exercise the shell without a paid model.
+`save` and `preview` select all top-level Legions by default. To select a subset,
+repeat `--legion "NAME"` (IDs also work). Keep connected Legions together: the
+DSH administrator has cross-workspace links. External dependencies are rejected
+rather than dropped. Portable keys and definition identity survive sharing;
+repeated saves without edits produce no diff.
 
-Each invocation creates a new snapshot below
-`.open-agent-world/development/previews/poc/<release-id>/`. This is private local
-data (potentially including your own model credentials), **never a Git artifact**.
-Snapshots are not auto-deleted. `--prepare-only` prints the snapshot without
-starting servers. To resume one without copying again, use:
+`--include-state "Skills & knowledge"` includes the container and its owned skill
+cards, preserving the reusable MatCreator library. Other document contents are
+omitted by default. Review any changes to explicitly shared skills before
+committing. Knowledge Base projects, Space definitions and records are not
+portable template content; import synthetic files such as [sample.md](sample.md)
+locally. Do not put customer data or keys into shared instructions/documents.
+
+`check` instantiates clean temporary data and validates every Workspace's
+publication contract. `preview` opens the real published user UI with its
+workspace switcher and a generated local password. Its private local snapshot
+keeps preview writes independent from the editor. For UI-only testing:
+
+```sh
+python scripts/poc.py preview --agent-runtime core.mock
+```
+
+Snapshots under `.open-agent-world/development/previews/poc/` may contain your
+own settings/test data and are never Git artifacts. `--prepare-only` creates one
+without launching; resume it with:
 
 ```sh
 python scripts/dev.py --profile poc --deployment <printed-snapshot-path>
 ```
 
-The listener remains on `127.0.0.1`. The single local access password tests the
-published application boundary, not hosted multi-account login or Alibaba VM
-isolation. External filesystem workspaces are rejected by the snapshot command;
-use checkout-local test files. A local OS Sandbox still needs the normal platform
-prerequisites. Alibaba Sandbox/AgenticFS acceptance remains a separate cloud test.
+Local preview listens on `127.0.0.1`. Model calls need your own credentials;
+scientific calculations and shell execution need their normal local runtimes.
+Alibaba Sandbox/AgenticFS isolation remains a separate cloud acceptance test.
 
-## PR review and GitHub deployment
+## Share through GitHub
 
 ```sh
 git add examples/poc/legion.json
-git commit -m "Update the team research workspace"
+git commit -m "Update the team experimental workbench"
 git push -u origin feat/my-poc
 gh pr create --base feat/aliyun-agentcore-poc --fill
 ```
 
-Use the existing [Ali PR workflow](../../.github/ALI_PR_GUIDE.md). After review and
-merge, CI builds the merged commit. **Once the separately approved controller and
-GitHub environment are activated**, a maintainer selects **Review deployments →
-Approve and deploy** in that CI run. The trusted ECS controller independently
-verifies the approved run and deploys its fixed artifact. No contributor enters a
-SHA or runs a server command. The `Ali integration deployment` status, rather than
-the approval job's success, confirms actual installation and recovery.
+Follow the [Ali PR workflow](../../.github/ALI_PR_GUIDE.md): review and merge,
+required CI, then maintainer **Review deployments → Approve and deploy**.
+The trusted ECS controller installs the verified artifact. Developers do not
+enter SHAs or run server commands. **Ali integration deployment** confirms actual
+installation; the approval job alone does not.
 
-Committed `examples/poc/*.json` definitions appear as **Git: <name>** in the hosted
-administrator's existing application deployment selector after code deployment.
-They use the same nonroot initialization, Pack approval and compatible update
-mechanisms as applications authored online. Choose the target accounts there;
-merging a template never silently resets existing user workspaces. Existing
-workspaces from a different authoring source, structural changes or Pack-version
-changes require an explicit migration/new workspace, as before.
+The hosted admin selector offers **Git: 实验工作台** with all three regions.
+Admins select target accounts; merging never silently replaces existing user
+workspaces. Structural or Pack-version changes retain the existing explicit
+migration/new-workspace process.
 
-The automatic ECS PR Preview remains Core/mock; use local POC preview to review
-the real Knowledge Base scenario. Production activation and exact remaining
-operator steps are in [the delivery guide](../../deploy/aliyun/POST_MERGE.md).
-
-## Add DSH, XRD or another Pack
-
-Use the existing Pack installation process for each developer's profile, then
-edit the Legion in OAW and save it again. Document the required Pack versions and
-their installation sources with the scenario. External source Packs also need
-`OPEN_AGENT_WORLD_PLUGIN_DIRS` set consistently for setup/edit/start.
-
-DSH, XRD and Alibaba bindings are deliberately not prerequisites of this initial
-knowledge scenario. Local development tests the graph, tools and Workspace;
-Alibaba Sandbox/AgenticFS behavior still needs cloud integration acceptance.
-Git-managed scenarios use the hosted selector described above. Other ad hoc
-applications can still use **Publish application** or content Pack export. Local
-POC commands never deploy to ECS or enable automatic releases.
+Teammates pull, stop their launcher and use `apply` to compare a new instance
+with existing work. Missing/incompatible Packs are errors, never silently
+replaced with other agents. Single-Legion presets remain supported, e.g.
+`python scripts/poc.py apply --preset knowledge.base.research`.

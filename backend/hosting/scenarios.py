@@ -18,13 +18,14 @@ SCENARIOS = Path(__file__).resolve().parents[2] / "examples/poc"
 
 
 def template_from_definition(definition: LegionBlueprintPreset, *, packs=(), created_at=None):
-    roots = [node for node in definition.blueprint.nodes if node.type == "legion" and node.parent_key is None]
-    if len(roots) != 1:
-        raise ValueError("A shared POC must contain one root Legion with a saved Workspace layout")
+    roots = [node for node in definition.blueprint.nodes
+             if node.type == "legion" and node.parent_key is None and node.owner_key is None]
+    if not roots:
+        raise ValueError("A shared POC must contain root Legions with saved Workspace layouts")
     namespace = uuid5(NAMESPACE_URL, "https://open-agent-world.org/scenarios/" + definition.id)
     content = json.dumps(definition.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     value = {"version": 1, "name": definition.name, "source_release_id": str(uuid5(namespace, content)),
-             "root_key": roots[0].key, "root_keys": [roots[0].key],
+             "root_key": roots[0].key, "root_keys": [node.key for node in roots],
              "created_at": (created_at or datetime.now(UTC)).isoformat(),
              "blueprint": definition.blueprint.model_dump(mode="json"), "packs": list(packs),
              "source_identity": {"profile_id": str(namespace), "organization_id": None,
