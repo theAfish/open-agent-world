@@ -27,7 +27,7 @@ def settings():
 
 
 class DuplexSDK(FakeSDK):
-    def __init__(self,root):
+    def __init__(self,root, *, shared_workspace=False):
         super().__init__(root)
         self.handles={}
         self.file_uploads=[]
@@ -36,6 +36,7 @@ class DuplexSDK(FakeSDK):
         self.renewals=[]
         self.renewed=asyncio.Queue()
         self.fail_renew=False
+        self.shared_workspace=shared_workspace
 
     async def create(self,**kwargs):
         sandbox=await super().create(**kwargs)
@@ -83,7 +84,11 @@ class DuplexSDK(FakeSDK):
                             value=json.loads(line)
                             assert value['method']=='initialize'
                             for name in ('workspace','home'):
-                                value['params'][name]=str(sdk.root/'volume'/value['params'][name].removeprefix('/workspace/'))
+                                if name == 'workspace' and sdk.shared_workspace:
+                                    continue
+                                remote_path=value['params'][name]
+                                relative=remote_path.removeprefix('/workspace/') if remote_path.startswith('/workspace/') else name
+                                value['params'][name]=str(sdk.root/'volume'/relative)
                             await native.write(json.dumps(value).encode()+b'\n')
                             self.initialized=True
                             if rest:

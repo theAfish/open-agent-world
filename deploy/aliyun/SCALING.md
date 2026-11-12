@@ -6,6 +6,99 @@ and transferring files so each can scale with its own load. Start from the
 [ECS hosted deployment](ECS.md) and its existing
 [workspace isolation and storage](PERSISTENT_WORKSPACES.md).
 
+## Pack workers: opt-in shared filesystem executor
+
+The Alibaba host can now resolve `PackWorkerSpec` into a reviewed Sandbox
+template and command without a cloud-specific Pack. This is **not enabled on
+production by merging code**. Missing configuration rejects hosted Pack workers;
+there is no fallback to scientific computation on ECS. Personal execution keeps
+its existing environment and directories.
+
+The operator installs `aliyun-pack-workers.json` beside the profile's `data`
+directory, with the same ownership/protection as `aliyun-workspace.json`. It must
+contain exactly these fields (replace the example identities and recipes):
+
+```json
+{
+  "version": 1,
+  "profile_id": "PROFILE_UUID",
+  "volume": "oaw-PROFILE_UUID",
+  "mount_path": "/mnt/oaw-workspaces/PROFILE_UUID",
+  "verified": true,
+  "deployments": [{
+    "pack_id": "example.science",
+    "pack_version": "1.0.0",
+    "environment_id": "science",
+    "template": "REVIEWED_TEMPLATE_ID",
+    "commands": {"analyze": ["/opt/science/bin/python", "-I", "/opt/science/analyze.py"]},
+    "environment": {"OMP_NUM_THREADS": "2"}
+  }]
+}
+```
+
+Only set `verified` after an isolated cloud acceptance. The ECS mount and Sandbox
+mount must expose the same dedicated Volume root at the same absolute path.
+Pack files live under `packs/<pack ID>`. The executor rejects wrong versions,
+undeclared workers, another Pack's directory and absent mounts before allocating
+a VM. It verifies bidirectional file visibility before starting the command, then
+reuses renewable leases, private networking, non-root execution, logs and confirmed
+VM teardown. A lost response is not replayed. This is still an ECS-owned operation:
+it does not make an active job survive a profile worker restart.
+
+The template must already contain the exact reviewed Pack version, worker code,
+environment and executable. Arguments are appended as argv, never interpolated
+into a shell. Any absolute reference paths in job documents must exist in the VM.
+Changing Pack code requires a new version and a matching reviewed template; this
+adapter does not copy a developer checkout or install dependencies per job.
+For XRD, provide both `worker.py` and `multiphase_worker.py` launch recipes through
+the Pack's existing `worker_launcher.py`, its scientific environment and QualX.
+Keep COD/reference libraries read-only at the same path seen by the Pack. Do not
+invent a `readOnly` flag in dynamic AgenticFS metadata; enforce reference access
+through the supported storage policy or an immutable template copy.
+
+Keep OAW/profile SQLite, credentials and execution receipts on ECS. The worker
+directory holds files, including any Pack-managed file databases; do not assume
+SQLite WAL works on NFS. XRD's connected history-store database stays in its
+existing host storage. Existing Pack files are not migrated automatically.
+Shared tool variables are forwarded through the existing validation; fixed recipe
+variables take precedence. Host process secrets are not inherited.
+
+### Next installation and acceptance gate
+
+Before enabling a production profile:
+
+1. Verify the ECS and existing Access Point share a VPC, choose a single isolated
+   test profile, inspect its UID/GID and Volume quota, and approve client/mount
+   installation. Use the ALINAS client, NFSv3 over TLS, and an Access Point-scoped
+   credential. Confirm the installed client supports the ECS OS and temporary
+   credential refresh; do not grant storage access to all profiles for this test.
+2. Mount the profile Volume at `/mnt/oaw-workspaces/<profile UUID>`, with a
+   root-controlled parent and access restricted to the profile worker identity.
+   Test VM and ECS UID/GID compatibility before opening the Pack workspace. Do not
+   overlay live data directories or change production worker units during this test.
+3. Run the fixed candidate code in an isolated non-root diagnostic service, using
+   the existing base template and only a small stdlib fixture worker. Verify input,
+   output, logs, interactive control, stop and cleanup, then create a second VM to
+   verify persistence. Cloud VM count, time and spend need separate authorization.
+   The prepared runner is `python -m deploy.aliyun.pack_worker_probe --state
+   /var/lib/oaw-pack-probe`. Supply `OAW_ACCEPTANCE_SANDBOX_SETTINGS` and the API key
+   using the existing private acceptance environment. It creates at most two VMs,
+   each with a 900-second operation budget and 300-second renewable lease; it never
+   retries an uncertain operation. Receipts stay outside the mounted directory.
+4. Build and verify an immutable XRD template and read-only references. Confirm
+   native/remote scientific outputs, failure cleanup and concurrency quotas. Only
+   then install the production assignment and migrate a selected Pack file root.
+   Account, session and database migrations are separate work.
+
+Current checks use local subprocesses and an SDK fixture; they do not constitute
+live AgenticFS or scientific-template acceptance. Rollback before activation only
+removes the opt-in assignment; after migrating files, restore the previous code and
+its recorded data-root mapping together. Never point old code at an empty root.
+
+Official references: [ECS AgenticSpace mounts](https://www.alibabacloud.com/help/zh/nas/user-guide/manage-agenticspace),
+[Sandbox Volume mounts](https://help.aliyun.com/zh/agent-sandbox/mount-agenticfs-volume-1),
+[custom templates](https://help.aliyun.com/zh/agent-sandbox/build-and-manage-custom-templates-with-code).
+
 ## 1. Make direct Run submission safe to retry
 
 This change adds an optional `Idempotency-Key` to direct Agent Run submission.

@@ -330,6 +330,12 @@ class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
                 'lease_seconds':self.settings.lifetime_seconds,'renewable':True,
                 'default_permission':self.policy.default_permission}
 
+    async def _initialize_execution(self, execution, request, key):
+        base='/workspace/oaw-runtimes/'+key
+        await execution.initialize(base+'/project',base+'/home',environment={
+            'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':base+'/home','USER':'user','LANG':'C.UTF-8',
+            'TMPDIR':'/tmp'},variables=dict(request.variables))
+
     async def open(self,request):
         if not self.configuration(request.runtime_id)['configured']:
             raise RuntimeUnavailableError('CLI execution requires a verified dedicated persistent Volume')
@@ -357,11 +363,8 @@ class AliyunRuntimeExecutionProvider(RuntimeExecutionProvider):
             ownership_verified=True
             await transport.start(sandbox,request.operation_id)
             execution=AliyunRuntimeExecution(transport,sandbox)
-            base='/workspace/oaw-runtimes/'+key
             try:
-                await execution.initialize(base+'/project',base+'/home',environment={
-                    'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':base+'/home','USER':'user','LANG':'C.UTF-8',
-                    'TMPDIR':'/tmp'},variables=dict(request.variables))
+                await self._initialize_execution(execution,request,key)
                 execution.policy=self.policy
                 return execution
             except BaseException:
