@@ -878,6 +878,7 @@ class ApplicationServices:
         await drain(self._require_run_manager().shutdown())
         if self.runtime_execution is not None:
             await drain(self.runtime_execution.shutdown())
+        await drain(self.plugins.worker_host.shutdown())
         if self.node_execution.continuation_outputs:
             await asyncio.gather(*tuple(self.node_execution.continuation_outputs), return_exceptions=True)
         if failures:
@@ -3936,7 +3937,8 @@ class ApplicationServices:
         return self.runtime_execution.configuration(runtime_id)
 
     async def _cleanup_run_execution(self, run_id):
-        operations = [self.sandbox_operations.cancel_run(run_id)]
+        operations = [self.sandbox_operations.cancel_run(run_id),
+                      self.plugins.worker_host.close_operation(run_id)]
         if self.runtime_execution is not None:
             operations.append(self.runtime_execution.close_operation(run_id))
         results = await asyncio.gather(*operations, return_exceptions=True)
@@ -3957,6 +3959,7 @@ def create_services(
     plugins: PluginRegistry | None = None,
     sandbox_registry_factory=None,
     runtime_execution_provider: RuntimeExecutionProvider | None = None,
+    pack_worker_execution_provider: RuntimeExecutionProvider | None = None,
 ) -> ApplicationServices:
     settings.data_root.mkdir(parents=True, exist_ok=True)
     for directory in ("projects", "assets", "sandboxes", "database", "logs"):
@@ -4052,6 +4055,14 @@ def create_services(
     if execution_provider is None and settings.tenant_scope == LOCAL_TENANT:
         execution_provider = NativeRuntimeExecutionProvider()
     services.runtime_execution = RuntimeExecutionBroker(execution_provider, resolve_model=provider.resolve_model)
+    worker_provider = pack_worker_execution_provider
+    if worker_provider is None and settings.tenant_scope == LOCAL_TENANT:
+        from backend.packs.workers import NativePackWorkerExecutionProvider
+        worker_provider = NativePackWorkerExecutionProvider()
+    from backend.execution_config import runtime_environment_defaults
+    plugin_registry.worker_host.configure(worker_provider,
+        inherit_environment=settings.inherit_runtime_environment,
+        environment_variables=lambda: runtime_environment_defaults(services)[0])
     services.node_execution = NodeExecutionService(services)
     from backend.sandbox.operations import SandboxOperations
     services.sandbox_operations = SandboxOperations(services)

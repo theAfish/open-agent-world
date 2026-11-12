@@ -24,6 +24,13 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.52 adds `PluginContext.start_worker`, `PackWorkerSpec`,
+`PackWorkerExecutionRequest`, `PreparedPackWorker` and `PackWorker`, reusing the host runtime transport for
+fixed Pack workers. It centralizes process cleanup, logs and native environment
+leases. Hosted profiles require an explicit compatible executor; this initial
+contract requires a shared filesystem and does not automatically stage local
+files into a cloud VM. See [host-owned Pack workers](plugin-lifecycle.md#host-owned-pack-worker-execution).
+
 Plugin API 1.51 adds `CapabilityContext.node_run_action(capability, action, arguments)`
 for a capability whose target node declares trait `ui.direct-run.v1`. `start` accepts
 only `{"config": {...}}`, merges it through the normal node update, and starts a

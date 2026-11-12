@@ -41,6 +41,72 @@ supported platform. It does not install anything. Sandbox profiles and external
 environment configuration retain their existing mechanisms. Legacy entrypoints
 without a static Pack declaration can keep using the provider classes directly.
 
+## Host-owned Pack worker execution
+
+Plugin API **1.52** adds `PluginContext.start_worker()`. Use it for fixed Pack
+workers instead of owning `asyncio` subprocesses, OS process IDs and environment
+leases in each card. Both batch workers (stdout/stderr written to `console.log`)
+and interactive workers (byte stdin/stdout, stderr logged) return the existing
+`RuntimeProcess` interface. A native recipe can retain an existing environment
+override or prepared installation; it runs only after host admission.
+
+```python
+from open_agent_world.plugin_api import PackWorkerSpec, PreparedPackWorker
+
+def create_plugin(*, context):
+    environment = context.environment("client")
+
+    def prepare_native(child_environment):
+        handle = environment.read()  # No installation during discovery.
+        return PreparedPackWorker(
+            (handle.executable, "analyze", "input.dat"),
+            child_environment, environment.lease(handle),
+        )
+
+    async def analyze(run_id, workspace):
+        worker = await context.start_worker(
+            PackWorkerSpec("example.analysis", "client", "analyze", ("input.dat",), prepare_native),
+            operation_id=run_id, workspace=workspace,
+        )
+        try:
+            return await worker.wait()  # A nonzero exit remains a failed job.
+        finally:
+            await worker.close()
+
+    # Register analyze through the ordinary card/runtime interfaces.
+```
+
+The host validates the Pack owner and declared environment, binds the selected
+Pack version/source root, reads current administrator-approved shared variables,
+supplies the child environment policy, supervises cleanup and releases the lease only
+after child cleanup. Closing an OAW Run also closes workers with that operation
+ID; object-owned interactive workers can span turns and must close on their own
+stop/lifecycle action. Host shutdown closes remaining workers. Use distinct
+operation IDs for independent work; duplicate active IDs within a Pack are
+rejected. `wait()` alone does not release a lease; always call `close()`.
+
+Personal profiles use native execution. Hosted profiles have **no implicit
+native fallback**: the composition must explicitly supply
+`create_services(..., pack_worker_execution_provider=...)`. This reuses
+`RuntimeExecutionProvider`, `RuntimeExecutionBroker` and `RuntimeProcess`; it
+does not add a cloud SDK dependency to the Pack. The provider must advertise
+`configuration(pack_id)["pack_workers"] == "shared-filesystem"`, resolve the
+`PackWorkerExecutionRequest.worker` specification and return an execution with a launch `command`. Only the
+native provider invokes `request.worker.prepare_native`.
+
+This first contract requires the Pack adapter and worker to share the workspace
+and any referenced paths. It does **not** stage local paths into a remote VM,
+upload scientific environments or mount a reference database. An Alibaba CLI
+executor does not qualify just because it can run a command. A subsequent cloud
+adapter must supply the scientific environment and authorized filesystem layout,
+or introduce explicit artifact inputs/outputs before advertising support. Never
+transfer a native recipe's environment or paths to a remote shell as a fallback.
+Native execution is for trusted Pack code, not an OS security sandbox.
+
+For durable externally submitted jobs, retain `BackgroundJobProvider` and its
+existing observation, cancellation and uncertain-submission rules. This worker
+handle neither resumes jobs after a host restart nor retries scientific work.
+
 ## Lifecycle transactions
 
 A passive node omits `lifecycle`. A stateful node implements

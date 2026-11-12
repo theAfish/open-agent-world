@@ -42,6 +42,31 @@ async def test_duplex_process_and_explicit_child_environment(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_close_waits_for_an_inflight_spawn_before_releasing_ownership(tmp_path, monkeypatch):
+    host = await execution(tmp_path)
+    created, release = asyncio.Event(), asyncio.Event()
+    original = asyncio.create_subprocess_exec
+
+    async def delayed(*args, **kwargs):
+        process = await original(*args, **kwargs)
+        created.set()
+        await release.wait()
+        return process
+
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', delayed)
+    opening = asyncio.create_task(host.spawn([sys.executable, '-I', '-c', 'import sys; sys.stdin.read()'], env={}))
+    await asyncio.wait_for(created.wait(), 10)
+    closing = asyncio.create_task(host.close())
+    await asyncio.sleep(0)
+    assert not closing.done()
+    release.set()
+    process = await opening
+    await asyncio.wait_for(closing, 10)
+    assert await process.wait() == 0
+    assert process._closed
+
+
+@pytest.mark.asyncio
 async def test_bounded_files_use_the_existing_no_follow_contract(tmp_path):
     host = await execution(tmp_path)
     try:
