@@ -87,6 +87,12 @@ class AliyunPackWorkerExecutionProvider(RuntimeExecutionProvider):
         pack_root = self.workspace_root / spec.pack_id
         if not workspace.is_relative_to(pack_root) or not workspace.is_dir():
             raise RuntimeUnavailableError('Pack worker workspace is outside its assigned shared directory')
+        # Ordinary path access can succeed with execute-only ancestors while
+        # the host's no-follow file API needs readable directory descriptors.
+        # Discover that deployment error before allocating a paid VM.
+        from backend.sandbox.files import pinned
+        with pinned(workspace, directory=True):
+            pass
         command = tuple(item['commands'][spec.worker_id]) + spec.arguments
         command_arguments(command, item['environment'])
         settings = replace(self.settings, template=item['template'])

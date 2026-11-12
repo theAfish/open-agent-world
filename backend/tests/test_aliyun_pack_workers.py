@@ -127,6 +127,21 @@ async def test_missing_shared_files_kills_vm_before_worker_launch(mounted):
 
 
 @pytest.mark.asyncio
+async def test_host_file_permissions_are_checked_before_vm_allocation(mounted, monkeypatch):
+    from contextlib import contextmanager
+    from backend.sandbox import files
+    provider, sdk, workspace = mounted
+    @contextmanager
+    def denied(*args, **kwargs):
+        raise PermissionError('Ancestor cannot be opened by the diagnostic identity')
+        yield
+    monkeypatch.setattr(files, 'pinned', denied)
+    with pytest.raises(PermissionError, match='Ancestor'):
+        await provider.open(request(workspace))
+    assert not sdk.created
+
+
+@pytest.mark.asyncio
 async def test_failed_cleanup_retains_receipt_and_can_be_retried(mounted):
     provider, sdk, workspace = mounted
     execution = await provider.open(request(workspace))
