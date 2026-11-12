@@ -61,10 +61,18 @@ class AliyunSandboxSettings:
     workspace_store: str = "volume"
     python_requirements: tuple[str, ...] = ()
     storage_addresses: tuple[str, ...] = ()
+    volume_mount_path: str = '/workspace'
 
     def __post_init__(self):
         from backend.sandbox.python_runtime import validate_requirements
         validate_requirements(self.python_requirements)
+        mount = PurePosixPath(self.volume_mount_path)
+        if (str(mount) != self.volume_mount_path or mount.anchor != '/' or '..' in mount.parts
+                or len(mount.parts) < 2 or len(self.volume_mount_path) > 128
+                or mount == PurePosixPath('/mnt')
+                or mount.parts[1] not in {'workspace', 'mnt'}
+                or any(ord(c) < 32 for c in self.volume_mount_path)):
+            raise ValueError('Volume mount must be a canonical path under /workspace or /mnt')
         if not re.fullmatch(r"[a-z][a-z0-9-]{2,48}", self.region):
             raise ValueError("Invalid Alibaba Sandbox region")
         if self.workspace_store not in {"volume", "ecs"}:
@@ -154,6 +162,8 @@ class AliyunSandboxBackend(SandboxBackend):
             value["workspace_store"] = self.settings.workspace_store
         if self.settings.storage_addresses:
             value["storage_addresses"] = list(self.settings.storage_addresses)
+        if self.settings.volume_mount_path != '/workspace':
+            value['volume_mount_path'] = self.settings.volume_mount_path
         return value
 
     def _write(self, value):
@@ -278,7 +288,7 @@ class AliyunSandboxBackend(SandboxBackend):
         try:
             sandbox = await self.sdk.create(template=self.settings.template, timeout=self.settings.lifetime_seconds,
                 metadata={**self.settings.metadata, "oaw.profile": self.settings.profile_id, "oaw.request": value["request_key"]},
-                volume_mounts={"/workspace": self.settings.volume} if self.settings.workspace_store == "volume" else {},
+                volume_mounts={self.settings.volume_mount_path: self.settings.volume} if self.settings.workspace_store == "volume" else {},
                 secure=True, allow_internet_access=value.get("network_enabled", False),
                 network={"allow_public_traffic": False, "deny_out": list(PRIVATE_EGRESS),
                          **({"allow_out": allowed} if allowed else {})},

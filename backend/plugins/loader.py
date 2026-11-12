@@ -16,14 +16,14 @@ from backend.world.models import SandboxConfig
 ENTRY_POINT_GROUP = "open_agent_world.plugins"
 
 
-def create_plugin(factory, *, data_root=None, source_root=None, pack_spec=None):
+def create_plugin(factory, *, data_root=None, source_root=None, pack_spec=None, worker_host=None):
     """Existing zero-argument factories remain valid; context is opt-in."""
     import inspect
     from backend.config import _default_data_root
     from open_agent_world.plugin_api.context import PluginContext
     parameter = inspect.signature(factory).parameters.get('context')
     if parameter and parameter.kind in {parameter.KEYWORD_ONLY, parameter.POSITIONAL_OR_KEYWORD}:
-        return factory(context=PluginContext(Path(data_root or _default_data_root()).resolve(), source_root, pack_spec))
+        return factory(context=PluginContext(Path(data_root or _default_data_root()).resolve(), source_root, pack_spec, worker_host))
     return factory()
 
 
@@ -185,7 +185,8 @@ def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directo
                 if not callable(factory):
                     raise TypeError("entry point must expose a plugin factory")
                 plugin = create_plugin(factory, data_root=data_root,
-                    source_root=origin.parent if isinstance(origin, Path) else None, pack_spec=spec)
+                    source_root=origin.parent if isinstance(origin, Path) else None, pack_spec=spec,
+                    worker_host=registry.worker_host)
             if not isinstance(getattr(plugin, "descriptor", None), PluginDescriptor):
                 raise TypeError("plugin descriptor must be a PluginDescriptor")
             descriptor = plugin.descriptor
@@ -337,7 +338,7 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path, *, strict: b
                     sys.dont_write_bytecode = True
                     plugin = create_plugin(EntryPoint(name=manifest.id, value=entrypoint, group=ENTRY_POINT_GROUP).load(),
                         data_root=data_root, source_root=manager.version_path(manifest.id, manifest.version),
-                        pack_spec=manifest_spec(manifest))
+                        pack_spec=manifest_spec(manifest), worker_host=registry.worker_host)
                 finally:
                     sys.dont_write_bytecode = previous_bytecode
                 descriptor = plugin.descriptor

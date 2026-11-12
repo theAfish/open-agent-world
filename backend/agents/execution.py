@@ -307,6 +307,7 @@ class NativeRuntimeExecution(RuntimeExecution):
         apply_invocation_environment(self.environment, request.variables, windows=os.name == 'nt')
         self.processes = []
         self.closed = False
+        self._process_lock = asyncio.Lock()
 
     def _root(self, root):
         if self.closed:
@@ -331,6 +332,10 @@ class NativeRuntimeExecution(RuntimeExecution):
             raise ResourceValidationError(str(error)) from error
 
     async def spawn(self, argv, *, env):
+        async with self._process_lock:
+            return await self._spawn(argv, env=env)
+
+    async def _spawn(self, argv, *, env):
         self._root("workspace")
         command_arguments(argv, env)
         options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
@@ -414,15 +419,16 @@ class NativeRuntimeExecution(RuntimeExecution):
         return url
 
     async def close(self):
-        self.closed = True
-        failures = []
-        for process in reversed(self.processes):
-            try:
-                await process.close()
-            except BaseException as error:
-                failures.append(error)
-        if failures:
-            raise BaseExceptionGroup("Runtime process cleanup failed", failures)
+        async with self._process_lock:
+            self.closed = True
+            failures = []
+            for process in reversed(self.processes):
+                try:
+                    await process.close()
+                except BaseException as error:
+                    failures.append(error)
+            if failures:
+                raise BaseExceptionGroup("Runtime process cleanup failed", failures)
 
 
 class NativeRuntimeExecutionProvider(RuntimeExecutionProvider):

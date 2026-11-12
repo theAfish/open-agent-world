@@ -34,6 +34,7 @@ from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import ExecutionPolicy, NodeExecutionDefinition, WorkItem, WorkOutcome
 from backend.plugins.execution import DelegationRequest, DelegationWait, DelegationStop
 from backend.plugins.background_jobs import BackgroundJobProvider, BackgroundJobContext, JobObservation, SubmissionUncertainError
+from backend.packs.workers import PackWorker, PackWorkerSpec, PackWorkerExecutionRequest, PreparedPackWorker
 
 from backend.agents import (
     AgentCapabilityProvider,
@@ -118,6 +119,7 @@ __all__ = [
     "PythonEnvironmentSpec",
     "EnvironmentHandle",
     "BackgroundJobProvider", "BackgroundJobContext", "JobObservation", "SubmissionUncertainError",
+    "PackWorker", "PackWorkerSpec", "PackWorkerExecutionRequest", "PreparedPackWorker",
     "DataQuery", "NodeDataConsumer", "NodeDataSource",
     "ExecutionEdge", "ExecutionNode", "ExecutionSnapshot", "NodeExecutionSource",
     "TutorialDefinition", "TutorialStep",

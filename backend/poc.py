@@ -268,6 +268,10 @@ async def check_definition(path: Path, profile="poc"):
     template = template_from_definition(definition)
     # No author world, model secrets, sessions or cloud bindings enter this check.
     with open_profile(profile) as author, tempfile.TemporaryDirectory(prefix="oaw-poc-check-") as temporary:
+        # Reuse selected Pack declarations only after releasing the author host.
+        # A registry's worker service cannot belong to two live applications.
+        await author.shutdown()
+        author.close()
         settings = replace(Settings.for_data_root(Path(temporary)), agent_runtime=None, sandbox_runtime=None)
         services = create_services(settings, plugins=author.plugins)
         try:
@@ -281,7 +285,6 @@ async def check_definition(path: Path, profile="poc"):
         finally:
             await services.shutdown()
             services.close()
-            await author.shutdown()
 
 
 def parser():

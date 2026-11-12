@@ -57,15 +57,27 @@ def test_real_xrd_worker_uses_private_local_fixture_wheel(tmp_path, monkeypatch)
     assert PackEnvironmentManager(data_root).status(spec)['status'] == 'ready'
 
 
-def test_actual_multiphase_protocol_in_stdlib_managed_worker(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_actual_multiphase_protocol_in_stdlib_managed_worker(tmp_path, monkeypatch):
+    from backend.packs.workers import PackWorkerHost, NativePackWorkerExecutionProvider
+    from open_agent_world.plugin_api import PluginContext
     monkeypatch.delenv('OAW_XRD_PYTHON', raising=False)
     spec = PythonEnvironmentSpec('research.xrd', 'fixture', verify_imports=('json',))
     monkeypatch.setattr(runtime_environment, 'environment_spec', lambda: spec)
     (tmp_path / 'multiphase-input.json').write_text('{}', encoding='utf-8')
-    argv, environment, lease = runtime_environment.worker_command('multiphase_worker.py', (tmp_path,), data_root=tmp_path / 'profile')
-    with lease:
-        completed = subprocess.run(argv, input='{"command":"unsupported"}\n', text=True, encoding='utf-8', capture_output=True, env=environment, timeout=30, check=True)
-    assert json.loads(completed.stdout) == {'ok': False, 'error': 'ValueError: Unknown worker command'}
+    host = PackWorkerHost()
+    host.configure(NativePackWorkerExecutionProvider(), inherit_environment=False)
+    source = Path(__file__).resolve().parents[2] / 'plugins/xrd'
+    context = PluginContext(tmp_path / 'profile', source, read_source_pack(source), host)
+    worker = await runtime_environment.start_worker('multiphase_worker.py', (tmp_path,),
+        operation_id='science', workspace=tmp_path, context=context, data_root=context.data_root, interactive=True)
+    try:
+        await worker.write(b'{"command":"unsupported"}\n')
+        reply = await asyncio.wait_for(worker.readline(), 30)
+        assert json.loads(reply) == {'ok': False, 'error': 'ValueError: Unknown worker command'}
+    finally:
+        await worker.close()
+    assert not host.broker.active
 
 
 def test_profile_binding_is_concurrent_and_survives_async_threads(tmp_path, monkeypatch):

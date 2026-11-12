@@ -16,6 +16,7 @@ from .identity import require_env
 from .execution import DEFAULT_RUNTIME_LEASE, DEFAULT_RUNTIME_LIFETIME, AliyunRuntimeExecutionProvider
 from .sandbox import AliyunSandboxSettings, registry_factory
 from .workspace import load_assignment
+from .pack_workers import load_worker_provider
 
 
 def create_hosted_services(settings):
@@ -54,9 +55,14 @@ def create_hosted_services(settings):
     settings = replace(settings, sandbox_runtime="aliyun.agent-sandbox",
                        plugin_directories=(), storage_config_path=None, inherit_runtime_environment=False,
                        run_execution_deadline_seconds=execution.lifetime_seconds)
+    workers = load_worker_provider(settings.data_root, remote,
+        lifetime_seconds=execution.lifetime_seconds, lease_seconds=execution.settings.lifetime_seconds,
+        default_permission=execution.policy.default_permission)
     services = create_services(settings, plugins=approved_plugins(settings.data_root, pack_settings=settings),
                                sandbox_registry_factory=registry_factory(remote),
-                               runtime_execution_provider=execution)
+                               runtime_execution_provider=execution,
+                               pack_worker_execution_provider=workers,
+                               pack_worker_workspace_root=workers.workspace_root if workers else None)
     if any(unsafe_host_configuration({"type": card.type, "config": card.config})
            for card in services.world.list_cards()):
         services.close()
