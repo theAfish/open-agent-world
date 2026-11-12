@@ -2,9 +2,6 @@ import asyncio
 import base64
 import io
 import json
-import os
-import signal
-import subprocess
 import time
 import zipfile
 from dataclasses import replace
@@ -16,8 +13,9 @@ class XRDRuntime(RuntimeProvider):
     # it does not launch model-selected shell commands or user-supplied code.
     supports_managed_execution = True
 
-    def __init__(self, capability_provider):
+    def __init__(self, capability_provider, *, worker_context=None):
         self.capability_provider = capability_provider
+        self.worker_context = worker_context
         self.records = {}
         self.processes = {}
         from .profile import roots, current_data_root
@@ -116,16 +114,8 @@ class XRDRuntime(RuntimeProvider):
 
     async def stop(self, run_id):
         process = self.processes.get(run_id)
-        if process and process.returncode is None:
-            if os.name == "nt":
-                killer = await asyncio.create_subprocess_exec("taskkill.exe", "/PID", str(process.pid), "/T", "/F", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-                await killer.wait()
-            else:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-            await process.wait()
+        if process is not None:
+            await process.close()
 
     async def execute(self, config, context, runtime_input):
         from . import XRDConfig
@@ -182,7 +172,6 @@ class XRDRuntime(RuntimeProvider):
         def event(kind, payload, status=None):
             return AgentEvent(config.agent_id,context.run_id,kind,payload,run_status=status)
         yield event(AgentEventType.MESSAGE,{"text":f"XRD {options.mode} started. Results: {run}"})
-        lease = None
         try:
             from .sql_history import capture
             await asyncio.to_thread(capture, run)
@@ -195,25 +184,23 @@ class XRDRuntime(RuntimeProvider):
                 (run / 'pipeline-input.json').write_text(json.dumps(pipeline_input, ensure_ascii=False, indent=2), encoding='utf-8')
                 options = options.model_copy(update={'wavelength': pipeline_input['wavelength']})
                 (run / 'input.json').write_text(options.model_dump_json(), encoding='utf-8')
-            with (run / "console.log").open("wb") as log:
-                from .runtime_environment import worker_command
-                require_qualx = (options.mode == 'match' and not pipeline_stage and options.library_engine == 'qualx'
-                                and any(item['value'].get('kind') == 'library' for item in inputs))
-                command, environment, lease = await asyncio.to_thread(worker_command, 'worker.py', (self.root, run),
-                    data_root=self.data_root, require_qualx=require_qualx)
-                lease.__enter__()
-                process_options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}
-                process = await asyncio.create_subprocess_exec(*command, env=environment, stdout=log,stderr=log, **process_options)
-                self.processes[context.run_id] = process
-                while process.returncode is None:
-                    try:
-                        await asyncio.wait_for(process.wait(),timeout=10)
-                    except asyncio.TimeoutError:
-                        await asyncio.to_thread(capture, run)
-                        yield event(AgentEventType.MESSAGE,{"text":f"XRD {options.mode} running…"})
-            if process.returncode != 0:
+            from .runtime_environment import start_worker
+            require_qualx = (options.mode == 'match' and not pipeline_stage and options.library_engine == 'qualx'
+                            and any(item['value'].get('kind') == 'library' for item in inputs))
+            process = await start_worker('worker.py', (self.root, run), operation_id=context.run_id,
+                workspace=run, context=self.worker_context, data_root=self.data_root, require_qualx=require_qualx)
+            self.processes[context.run_id] = process
+            while True:
+                try:
+                    returncode = await asyncio.wait_for(process.wait(), timeout=10)
+                    break
+                except asyncio.TimeoutError:
+                    await asyncio.to_thread(capture, run)
+                    yield event(AgentEventType.MESSAGE,{"text":f"XRD {options.mode} running…"})
+            await process.close()
+            if returncode != 0:
                 tail=(run / "console.log").read_text(encoding="utf-8",errors="replace")[-5000:]
-                raise RuntimeError(f"XRD {options.mode} exited {process.returncode}: {tail}")
+                raise RuntimeError(f"XRD {options.mode} exited {returncode}: {tail}")
             result=json.loads((run / "result.json").read_text(encoding="utf-8"))
             if options.mode == 'match' and not pipeline_stage:
                 from .frames import search_frames
@@ -244,8 +231,6 @@ class XRDRuntime(RuntimeProvider):
             raise
         finally:
             await self.stop(context.run_id)
-            if lease is not None:
-                lease.__exit__(None, None, None)
             self.processes.pop(context.run_id,None)
             ACTIVE_RUNS.discard(context.run_id)
             manifest["finished_at_ns"] = time.time_ns()

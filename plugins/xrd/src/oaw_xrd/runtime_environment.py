@@ -57,12 +57,13 @@ def prepare_qualx(data_root=None):
         return manager.external(spec, verify=True)
 
 
-def worker_command(worker, arguments, *, data_root=None, require_qualx=False):
+def worker_command(worker, arguments, *, data_root=None, require_qualx=False, environment=None):
     """Prepare once before launch; workers never install into either interpreter."""
     from .profile import roots
     root, run_root = roots(data_root)
-    override = os.environ.get('OAW_XRD_PYTHON')
-    env = {key: value for key, value in os.environ.items()
+    source = os.environ if environment is None else environment
+    override = source.get('OAW_XRD_PYTHON')
+    env = {key: value for key, value in source.items()
            if not key.upper().startswith('PYTHON') and key.upper() not in {'VIRTUAL_ENV', 'CONDA_PREFIX'}}
     env.update(OAW_XRD_ROOT=str(root), OAW_XRD_RUN_ROOT=str(run_root))
     if require_qualx:
@@ -87,3 +88,26 @@ def worker_command(worker, arguments, *, data_root=None, require_qualx=False):
     env['OAW_XRD_ENVIRONMENT'] = str(handle.root)
     command = [handle.python, '-I', '-S', '-X', 'utf8', '-u', str(PACKAGE / 'worker_launcher.py'), str(handle.root), worker, *map(str, arguments)]
     return command, env, current.lease(handle)
+
+
+async def start_worker(worker, arguments, *, operation_id, workspace, context=None,
+                       data_root=None, require_qualx=False, interactive=False):
+    """One host boundary for both the pipeline and interactive scientific worker."""
+    from open_agent_world.plugin_api import PackWorkerSpec, PreparedPackWorker, RuntimeUnavailableError
+    from .profile import current_worker_context, current_data_root
+    if worker not in {'worker.py', 'multiphase_worker.py'}:
+        raise ValueError('Unknown XRD worker')
+    context = context if context is not None else current_worker_context()
+    if context is None:
+        raise RuntimeUnavailableError('XRD workers require a configured OAW host executor')
+    data_root = data_root if data_root is not None else current_data_root()
+    arguments = tuple(map(str, arguments))
+
+    def prepare(environment):
+        command, environment, lease = worker_command(worker, arguments, data_root=data_root,
+            require_qualx=require_qualx, environment=environment)
+        return PreparedPackWorker(tuple(command), environment, lease)
+
+    spec = PackWorkerSpec('research.xrd', 'scientific', worker, arguments, prepare)
+    return await context.start_worker(spec, operation_id=operation_id, workspace=workspace,
+                                      interactive=interactive)

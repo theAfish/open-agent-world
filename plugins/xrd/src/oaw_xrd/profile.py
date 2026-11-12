@@ -7,6 +7,11 @@ import os
 from pathlib import Path
 
 _data_root = ContextVar('oaw_xrd_data_root', default=None)
+_worker_context = ContextVar('oaw_xrd_worker_context', default=None)
+
+
+def current_worker_context():
+    return _worker_context.get()
 
 
 def current_data_root():
@@ -23,55 +28,61 @@ def roots(data_root=None):
     return root, Path(os.environ.get('OAW_XRD_RUN_ROOT', str(root / 'runs')))
 
 
-def bind(callback, data_root):
+def bind(callback, data_root, worker_context=None):
     if callback is None:
         return None
     if inspect.iscoroutinefunction(callback):
         @wraps(callback)
         async def asynchronous(*args, **kwargs):
             token = _data_root.set(data_root)
+            worker_token = _worker_context.set(worker_context)
             try:
                 return await callback(*args, **kwargs)
             finally:
                 _data_root.reset(token)
+                _worker_context.reset(worker_token)
         return asynchronous
     @wraps(callback)
     def synchronous(*args, **kwargs):
         token = _data_root.set(data_root)
+        worker_token = _worker_context.set(worker_context)
         try:
             return callback(*args, **kwargs)
         finally:
             _data_root.reset(token)
+            _worker_context.reset(worker_token)
     return synchronous
 
 
 class BoundObject:
-    def __init__(self, target, data_root):
+    def __init__(self, target, data_root, worker_context=None):
         self.target, self.data_root = target, data_root
+        self.worker_context = worker_context
 
     def __getattr__(self, name):
         value = getattr(self.target, name)
-        return bind(value, self.data_root) if callable(value) else value
+        return bind(value, self.data_root, self.worker_context) if callable(value) else value
 
 
 class ProfileRegistration:
-    def __init__(self, registration, data_root):
+    def __init__(self, registration, data_root, worker_context=None):
         self.registration, self.data_root = registration, data_root
+        self.worker_context = worker_context
 
     def __getattr__(self, name):
         return getattr(self.registration, name)
 
     def register_capability(self, definition, handler):
-        return self.registration.register_capability(definition, bind(handler, self.data_root))
+        return self.registration.register_capability(definition, bind(handler, self.data_root, self.worker_context))
 
     def register_node_type(self, node):
-        wrap = lambda callback: bind(callback, self.data_root)
+        wrap = lambda callback: bind(callback, self.data_root, self.worker_context)
         updates = {'resource_actions': {name: replace(action, handler=wrap(action.handler))
                    for name, action in node.resource_actions.items()}}
         for name in ('lifecycle', 'template_handler'):
             value = getattr(node, name)
             if value is not None:
-                updates[name] = BoundObject(value, self.data_root)
+                updates[name] = BoundObject(value, self.data_root, self.worker_context)
         if node.document:
             document = node.document
             actions = {name: replace(action, handler=wrap(action.handler), prepare=wrap(action.prepare))

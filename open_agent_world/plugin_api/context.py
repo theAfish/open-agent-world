@@ -1,7 +1,7 @@
 """Profile-scoped context supplied to opt-in Pack factories."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING
@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from backend.packs.spec import PackSpec
     from backend.packs.environments import PackEnvironmentManager, PythonEnvironmentSpec, EnvironmentHandle
     from backend.packs.executables import ExecutableEnvironmentManager, ExecutableEnvironmentSpec, ExecutableHandle
+    from backend.packs.workers import PackWorkerSpec, PackWorker, PackWorkerHost
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,30 @@ class PluginContext:
     data_root: Path
     source_root: Path | None = None
     _pack_spec: PackSpec | None = field(default=None, repr=False)
+    _worker_host: PackWorkerHost | None = field(default=None, repr=False, compare=False)
+
+    async def start_worker(self, spec: PackWorkerSpec, *, operation_id: str, workspace: Path,
+                           log_name: str = 'console.log', interactive: bool = False) -> PackWorker:
+        """Start this Pack's fixed worker through the configured host executor.
+
+        Plugin API 1.52. Local paths currently require a shared-filesystem
+        executor. No environment preparation or native fallback is performed
+        when the host has not explicitly enabled that execution contract.
+        Keep the returned handle until close() confirms process cleanup.
+        """
+        from backend.errors import RuntimeUnavailableError
+        from backend.packs.workers import PackWorkerSpec
+        if (not isinstance(spec, PackWorkerSpec) or self._pack_spec is None
+                or spec.pack_id != self._pack_spec.owner):
+            raise ValueError('Worker must belong to this host-loaded Pack')
+        declaration = self._pack_spec.environments.get(spec.environment_id)
+        if declaration is None or declaration.target != 'host-worker':
+            raise ValueError('Worker must reference a declared host-worker environment')
+        if self._worker_host is None:
+            raise RuntimeUnavailableError('This Pack has no host worker service; local fallback is disabled')
+        bound = replace(spec, pack_version=self._pack_spec.version, source_root=self.source_root)
+        return await self._worker_host.start(bound, operation_id=operation_id, workspace=workspace,
+                                             log_name=log_name, interactive=interactive)
 
     def environment(self, name: str) -> PluginEnvironment:
         """Resolve this Pack's authoritative declaration by name (Plugin API 1.42).
