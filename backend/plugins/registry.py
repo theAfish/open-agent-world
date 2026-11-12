@@ -33,7 +33,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.51"
+PLUGIN_API_VERSION = "1.52"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -565,6 +565,8 @@ class PluginRegistry:
     """Authoritative registry of installed plugins and their owned contributions."""
 
     def __init__(self) -> None:
+        from backend.packs.workers import PackWorkerHost
+        self.worker_host = PackWorkerHost()
         # Startup diagnostics carry no executable contributions or permissions.
         self.load_failures: list[dict[str, Any]] = []
         self.runtime_requirements: dict[str, tuple[str, ...]] = {}

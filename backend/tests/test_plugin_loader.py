@@ -71,6 +71,7 @@ verify_imports = ["json"]
     profile = tmp_path / 'profile'
     registry = loader.load_plugin_registry(root, data_root=profile, load_unenrolled_sources=True, strict=True)
     context = sys.modules[entry.name].CONTEXT
+    assert context._worker_host is registry.worker_host
     environment = context.environment('worker')
     assert isinstance(environment.manager, PackEnvironmentManager)
     assert environment.spec == PythonEnvironmentSpec.from_declaration(

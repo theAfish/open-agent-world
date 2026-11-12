@@ -271,8 +271,9 @@ def test_runtime_dispatches_pipeline_and_keeps_results_when_all_candidates_fail(
              'match_run_id': 'search1', 'candidates': [{'candidate_id': 'ref1', 'label': 'first',
              'status': worker_status, 'error': 'candidate failure' if worker_status == 'failed' else None}],
              'interpretation': 'candidate hypotheses'})
-        return SimpleNamespace(returncode=0)
-    monkeypatch.setattr('oaw_xrd.runtime.asyncio.create_subprocess_exec', worker)
+        from unittest.mock import AsyncMock
+        return SimpleNamespace(wait=AsyncMock(return_value=0), close=AsyncMock())
+    monkeypatch.setattr('oaw_xrd.runtime_environment.start_worker', worker)
     async def run():
         return [event async for event in runtime.execute(config, SimpleNamespace(run_id='stage1'), None)]
     if worker_status == 'failed':
