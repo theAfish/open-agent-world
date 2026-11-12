@@ -1,0 +1,14 @@
+**
+!plugins/
+!plugins/xrd/
+!plugins/xrd/**
+!deploy/
+!deploy/aliyun/
+!deploy/aliyun/xrd_template/
+!deploy/aliyun/xrd_template/**
+**/__pycache__/
+**/node_modules/
+**/.venv/
+**/.tmp/
+**/.env
+**/.env.*

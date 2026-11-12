@@ -90,10 +90,66 @@ Before enabling a production profile:
    then install the production assignment and migrate a selected Pack file root.
    Account, session and database migrations are separate work.
 
-Current checks use local subprocesses and an SDK fixture; they do not constitute
-live AgenticFS or scientific-template acceptance. Rollback before activation only
+The isolated stdlib worker has passed real AgenticFS bidirectional I/O, interactive
+control, teardown and persistence after VM recreation. That does not establish
+scientific-template acceptance. Rollback before activation only
 removes the opt-in assignment; after migrating files, restore the previous code and
 its recorded data-root mapping together. Never point old code at an empty root.
+
+### Preparing the XRD scientific template
+
+`deploy/aliyun/xrd_template` reuses the Pack's workers, current scientific
+dependencies, bundled M3GNet weights and existing QualX patch. Python 3.11 and
+transitive Python dependencies are pinned separately from the host interpreter.
+The template contains no profiles, credentials, documents or COD database. Build
+the image before deployment: the complete scientific installation and QualX
+compilation must not run under the template's five-minute initialization limit.
+
+Build from committed files in a reviewed checkout, keeping private/untracked data
+out of the Docker context:
+
+```sh
+git archive HEAD plugins/xrd deploy/aliyun/xrd_template | docker build \
+  --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" \
+  -f deploy/aliyun/xrd_template/Dockerfile -t oaw-xrd:reviewed -
+```
+
+The official base image and Python dependencies are fixed. Debian packages still
+come from that image's configured repositories; this is not a byte-reproducible
+Debian build. Validate the resulting image, then push it to an approved ACR
+Enterprise repository with a unique tag. Deploy its digest, never a mutable tag.
+Creation/purchase of ACR or network bindings requires separate resource approval.
+
+Generate a reviewable request without contacting Alibaba Cloud:
+
+```sh
+python -m scripts.aliyun_science_template plan --config PRIVATE_CONFIG.json \
+  --name oaw-xrd-UNIQUE-VERSION --xrd-revision "$(git rev-parse HEAD)" \
+  --xrd-image INSTANCE-registry-vpc.cn-hangzhou.cr.aliyuncs.com/oaw/xrd@sha256:DIGEST
+```
+
+Use the reviewed source commit recorded by the built image. `plan` does not create
+resources or reserve a build. After resource approval, use `build` with the same
+arguments and a new private `--receipt FILE`; `status` reads that receipt. An
+uncertain creation must be reconciled, never repeated with a different receipt.
+The recipe requests 4 vCPU, 8 GiB memory and 15 GiB disk. It uses the ACR VPC
+address in the same region and the platform's existing registry pull mechanism;
+no registry password is included. Template startup only checks the image's source
+revision and readiness. The build publishes readiness after scientific imports,
+bundled M3GNet checkpoint loading/inference, reference simulation and the patched QualX CLI
+checks succeed. A ready image still requires scientific and storage acceptance.
+
+The offline `acceptance.py` entrypoint runs batch matching, interactive CIF
+calculation and one demo fitting iteration through the real worker launchers as a
+non-root identity. It writes only into a fresh explicitly selected
+directory. Compare its numeric outputs on native and cloud execution. It does not
+allocate a VM, call models, test full-library search or prove full refinement.
+`recipe.deployment(version, template_id)` emits only the Pack launch recipe;
+it cannot verify or activate a profile assignment.
+
+Full-library search additionally needs the original four COD database files,
+read-only and available at the same absolute paths on host and VM. Full fit and
+preoptimization acceptance, quotas and production migration remain required.
 
 Official references: [ECS AgenticSpace mounts](https://www.alibabacloud.com/help/zh/nas/user-guide/manage-agenticspace),
 [Sandbox Volume mounts](https://help.aliyun.com/zh/agent-sandbox/mount-agenticfs-volume-1),

@@ -1,4 +1,4 @@
-"""Build an immutable, preinstalled scientific Sandbox template without ACR.
+"""Prepare scientific Sandbox templates; XRD uses a prebuilt ACR image.
 
 Only public dependencies enter the template. Credentials and user files are
 supplied at runtime, never included in its build command or snapshot.
@@ -81,18 +81,33 @@ def call(cloud, action, path, *, body=None, query=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['build', 'status'])
+    parser.add_argument('action', choices=['plan', 'build', 'status'])
     parser.add_argument('--config', required=True, type=Path)
-    parser.add_argument('--receipt', required=True, type=Path)
+    parser.add_argument('--receipt', type=Path)
     parser.add_argument('--name')
+    parser.add_argument('--xrd-revision', help='Expected reviewed source commit recorded in the XRD image')
+    parser.add_argument('--xrd-image', help='Prebuilt XRD ACR Enterprise VPC image, pinned by digest')
     args = parser.parse_args()
+    if args.action != 'plan' and args.receipt is None:
+        parser.error('--receipt is required for build/status')
+    if bool(args.xrd_revision) != bool(args.xrd_image):
+        parser.error('--xrd-image and --xrd-revision must be supplied together')
     config = json.loads(args.config.read_text(encoding='utf-8-sig'))
-    cloud = Cloud(config)
-    if args.action == 'build':
-        if args.receipt.exists():
+    if args.action in {'plan', 'build'}:
+        if args.action == 'build' and args.receipt.exists():
             raise ValueError('Template creation is reserved; inspect its receipt instead of repeating it')
         body = template_body(config, args.name or '')
+        if args.xrd_revision:
+            from deploy.aliyun.xrd_template.recipe import configure
+            configure(body, args.xrd_image, args.xrd_revision)
+        if args.action == 'plan':
+            print(json.dumps(body))
+            return
+        cloud = Cloud(config)
         state = {'phase': 'reserved', 'name': body['name'], 'requirements': REQUIREMENTS}
+        if args.xrd_revision:
+            state.update(recipe='research.xrd', revision=args.xrd_revision, image=args.xrd_image)
+            state.pop('requirements')
         write(args.receipt, state)
         try:
             result = call(cloud, 'CreateTemplate', '/pop/2026-08-20/templates', body=body)
@@ -101,6 +116,7 @@ def main():
             state.update(phase='needs_reconciliation', error_type=type(error).__name__, code=getattr(error, 'code', None))
         write(args.receipt, state)
     else:
+        cloud = Cloud(config)
         state = json.loads(args.receipt.read_text())
         result = call(cloud, 'GetTemplate', '/pop/2026-08-20/templates/' + state['template_id'], query={'teamID': config['team']})
         state['status'] = result.get('status')
