@@ -21,7 +21,7 @@ class XRDRuntime(RuntimeProvider):
         from .profile import roots, current_data_root
         get_root = getattr(capability_provider, 'managed_environment_root', None)
         self.data_root = Path(get_root()) if get_root else current_data_root()
-        self.root, self.run_root = roots(self.data_root)
+        self.root, self.run_root = roots(self.data_root, worker_context)
 
     async def create_agent(self, config):
         from .workflow import started_at_ms

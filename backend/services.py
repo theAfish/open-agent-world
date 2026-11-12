@@ -3988,6 +3988,7 @@ def create_services(
     sandbox_registry_factory=None,
     runtime_execution_provider: RuntimeExecutionProvider | None = None,
     pack_worker_execution_provider: RuntimeExecutionProvider | None = None,
+    pack_worker_workspace_root: Path | None = None,
 ) -> ApplicationServices:
     settings.data_root.mkdir(parents=True, exist_ok=True)
     for directory in ("projects", "assets", "sandboxes", "database", "logs"):
@@ -4090,6 +4091,7 @@ def create_services(
     from backend.execution_config import runtime_environment_defaults
     try:
         plugin_registry.worker_host.configure(worker_provider,
+            workspace_root=pack_worker_workspace_root,
             inherit_environment=settings.inherit_runtime_environment,
             environment_variables=lambda: runtime_environment_defaults(services)[0], owner=services)
     except BaseException:

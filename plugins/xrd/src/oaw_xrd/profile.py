@@ -22,9 +22,11 @@ def current_data_root():
     return root
 
 
-def roots(data_root=None):
+def roots(data_root=None, worker_context=None):
     data_root = Path(data_root) if data_root is not None else current_data_root()
-    root = Path(os.environ.get('OAW_XRD_ROOT', str(data_root / 'packs-data' / 'research.xrd')))
+    context = worker_context if worker_context is not None else current_worker_context()
+    default = context.worker_workspace_root if context is not None else data_root / 'packs-data' / 'research.xrd'
+    root = Path(os.environ.get('OAW_XRD_ROOT', str(default)))
     return root, Path(os.environ.get('OAW_XRD_RUN_ROOT', str(root / 'runs')))
 
 

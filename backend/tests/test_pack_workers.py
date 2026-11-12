@@ -209,6 +209,29 @@ async def test_context_uses_declared_owner_and_environment(tmp_path):
         await context.start_worker(replace(spec, pack_id='research.xrd'), operation_id='run', workspace=tmp_path)
 
 
+def test_host_selects_worker_files_without_relocating_profile_database(tmp_path, monkeypatch):
+    from backend.packs.spec import read_source_pack
+    from open_agent_world.plugin_api import PluginContext
+    from oaw_xrd import profile
+    from oaw_xrd.runtime import XRDRuntime
+    from types import SimpleNamespace
+    monkeypatch.delenv('OAW_XRD_ROOT', raising=False)
+    monkeypatch.delenv('OAW_XRD_RUN_ROOT', raising=False)
+    source = Path(__file__).resolve().parents[2] / 'plugins/xrd'
+    host = PackWorkerHost()
+    context = PluginContext(tmp_path / 'control', source, read_source_pack(source), host)
+    assert context.worker_workspace_root == context.data_root / 'packs-data/research.xrd'
+    shared = tmp_path / 'shared'
+    host.configure(None, inherit_environment=False, workspace_root=shared)
+    assert context.worker_workspace_root == shared / 'research.xrd'
+    assert context.data_root == tmp_path / 'control'
+    assert profile.bind(profile.roots, context.data_root, context)()[0] == shared / 'research.xrd'
+    runtime = XRDRuntime(SimpleNamespace(managed_environment_root=lambda: context.data_root), worker_context=context)
+    assert runtime.run_root == shared / 'research.xrd/runs'
+    assert runtime.data_root == context.data_root
+    assert not shared.exists()  # Discovery never creates a substitute for a mount.
+
+
 @pytest.mark.asyncio
 async def test_alternative_executor_receives_logical_worker_without_native_preparation(tmp_path):
     from backend.agents.execution import NativeRuntimeExecution

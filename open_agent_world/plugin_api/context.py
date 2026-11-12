@@ -56,6 +56,18 @@ class PluginContext:
     _pack_spec: PackSpec | None = field(default=None, repr=False)
     _worker_host: PackWorkerHost | None = field(default=None, repr=False, compare=False)
 
+    @property
+    def worker_workspace_root(self) -> Path:
+        """Pack files shared with its worker (1.53); control DBs stay in data_root.
+
+        The host may select a mounted profile directory. Personal installations
+        retain packs-data/<pack ID>. Resolving this path never creates or mounts it.
+        """
+        if self._pack_spec is None:
+            raise ValueError('Worker workspace requires a host-loaded Pack')
+        root = self._worker_host.workspace_root if self._worker_host is not None else None
+        return (root if root is not None else self.data_root / 'packs-data') / self._pack_spec.owner
+
     async def start_worker(self, spec: PackWorkerSpec, *, operation_id: str, workspace: Path,
                            log_name: str = 'console.log', interactive: bool = False) -> PackWorker:
         """Start this Pack's fixed worker through the configured host executor.

@@ -24,6 +24,11 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.53 adds `PluginContext.worker_workspace_root`, a host-selected
+directory for files used by Pack workers. Personal profiles retain
+`data_root/packs-data/<pack ID>`; control databases and credentials remain in
+`data_root`. The host must provision shared storage before selecting it.
+
 Plugin API 1.52 adds `PluginContext.start_worker`, `PackWorkerSpec`,
 `PackWorkerExecutionRequest`, `PreparedPackWorker` and `PackWorker`, reusing the host runtime transport for
 fixed Pack workers. It centralizes process cleanup, logs and native environment

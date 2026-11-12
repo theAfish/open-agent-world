@@ -106,6 +106,15 @@ or introduce explicit artifact inputs/outputs before advertising support. Never
 transfer a native recipe's environment or paths to a remote shell as a fallback.
 Native execution is for trusted Pack code, not an OS security sandbox.
 
+Plugin API **1.53** adds `context.worker_workspace_root` for the files exchanged
+with a worker. Its personal default is `data_root/packs-data/<pack ID>`. A host can
+set `create_services(..., pack_worker_workspace_root=profile_mount / "packs")`;
+the context appends the authoritative Pack ID. This lookup neither creates nor
+mounts directories. Keep host control databases, credentials and environment
+management state in `data_root`; do not relocate a whole profile to an NFS mount.
+The host executor must reject a missing mount and verify shared input/output
+visibility before launching a worker. Selecting a directory alone is insufficient.
+
 For durable externally submitted jobs, retain `BackgroundJobProvider` and its
 existing observation, cancellation and uncertain-submission rules. This worker
 handle neither resumes jobs after a host restart nor retries scientific work.

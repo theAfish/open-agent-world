@@ -127,7 +127,7 @@ runtime-resources = [
 ]
 
 [compatibility]
-plugin_api = "1.52"
+plugin_api = "1.53"
 oaw = ">=0.1.0"
 
 [distribution]
