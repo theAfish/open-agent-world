@@ -155,6 +155,60 @@ Official references: [ECS AgenticSpace mounts](https://www.alibabacloud.com/help
 [Sandbox Volume mounts](https://help.aliyun.com/zh/agent-sandbox/mount-agenticfs-volume-1),
 [custom templates](https://help.aliyun.com/zh/agent-sandbox/build-and-manage-custom-templates-with-code).
 
+### Preparing an ACS scientific trial
+
+ACS Jobs can run the existing reviewed scientific image and worker acceptance.
+Render a request locally before approving cloud installation. Use the source
+commit recorded in the image, an actual registry manifest digest, a dedicated
+namespace and a unique Job name:
+
+```sh
+python -m scripts.aliyun_acs_science_trial \
+  --image REGISTRY/NAMESPACE/xrd@sha256:DIGEST \
+  --revision IMAGE_SOURCE_COMMIT --namespace oaw-science-trial \
+  --name xrd-trial-001 > acs-xrd-job.json
+```
+
+Private repositories can use `--image-pull-secret EXISTING_SECRET_NAME`. Create
+that Secret separately in the trial namespace using the approved credential
+procedure. The rendered request contains its name only. ACS supports ACR personal,
+enterprise and reachable third-party registries. Check the actual private-network
+pull path before choosing a registry. The ACR Enterprise requirement above is
+specific to the current Sandbox template deployment path.
+
+ACR personal edition currently requires an eligible personal-identity account,
+is limited to development/testing, and has no public management OpenAPI. Ask the
+account owner to check availability in the console. Its shared bandwidth and pull
+limits also need review before a concurrent-load trial. ACS cluster creation
+includes a billed private CLB for its API server. Review that cost together with
+the Pod budget, existing VPC/subnet and registry access before installation.
+
+After approval of the cluster, namespace, image access and bounded trial, submit
+the fixed request with `kubectl create -f acs-xrd-job.json`. Inspect its Pod logs
+and Job status, record the provider Job UID and actual allocated specifications,
+then delete that exact Job with `kubectl delete -f acs-xrd-job.json --wait=true`.
+Verify its dependent Pods are gone. An uncertain creation is reconciled under
+the original namespace and name. Do not generate a new name to repeat it.
+
+The Job runs one non-root 4-vCPU/8-GiB worker for at most 900 seconds, with no
+automatic restart/retry, a read-only image filesystem, temporary scratch storage
+and no mounted ServiceAccount credential. It checks the image source before
+running the same batch, interactive CIF and bounded demo-fit fixture used locally.
+Finished Job objects expire after one hour; collect logs before then. Pending
+image-pull time can also be billed. The local renderer creates no cloud resources.
+
+This fixture uses synthetic inputs. User-specific AgenticFS mounts, host/ACS
+result transport, cancellation and recovery through OAW's normal task API, GPU
+execution and load acceptance still require integration. AgentCore code-package
+hosting is another deployment path with its own runtime and archive-size limits.
+
+Official references: [ACS Jobs](https://help.aliyun.com/zh/cs/user-guide/create-a-task-workload-job),
+[ACS image sources](https://help.aliyun.com/zh/cs/user-guide/container-mirror),
+[ACS billing](https://help.aliyun.com/zh/cs/product-overview/product-billing-rules),
+[ACS cluster creation](https://help.aliyun.com/zh/cs/user-guide/create-an-acs-cluster),
+[ACR personal edition](https://help.aliyun.com/zh/acr/user-guide/create-a-container-registry-personal-edition-instance),
+[AgentCore code packages](https://help.aliyun.com/zh/agentcore/high-code-agent-deployment-guide).
+
 ## 1. Make direct Run submission safe to retry
 
 This change adds an optional `Idempotency-Key` to direct Agent Run submission.
