@@ -183,13 +183,20 @@ class PackWorkerHost:
         self.inherit_environment = False
         self.environment_variables = lambda: {}
         self.workers = set()
+        self.owner = None
 
-    def configure(self, provider, *, inherit_environment, environment_variables=None):
-        if self.broker.active or self.broker.closing:
+    def configure(self, provider, *, inherit_environment, environment_variables=None, owner=None):
+        if self.broker.active or self.workers or self.owner is not None and not self.broker.closing:
             raise RuntimeUnavailableError('Cannot reconfigure active Pack workers')
-        self.broker.provider = provider
+        self.broker = RuntimeExecutionBroker(provider)
+        self.owner = owner
         self.inherit_environment = inherit_environment
         self.environment_variables = environment_variables or (lambda: {})
+
+    def release(self, owner):
+        if self.owner is owner and not self.broker.active and not self.workers:
+            self.broker.closing = True
+            self.owner = None
 
     async def start(self, spec, *, operation_id, workspace, log_name='console.log', interactive=False):
         configuration = self.broker.configuration(spec.pack_id)

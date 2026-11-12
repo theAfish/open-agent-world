@@ -84,6 +84,9 @@ ID; object-owned interactive workers can span turns and must close on their own
 stop/lifecycle action. Host shutdown closes remaining workers. Use distinct
 operation IDs for independent work; duplicate active IDs within a Pack are
 rejected. `wait()` alone does not release a lease; always call `close()`.
+The registry binds to one live application. Use separate registries for
+concurrent profiles; sequential reuse after shutdown/close is supported, and an
+old application's repeated teardown cannot stop its successor's workers.
 
 Personal profiles use native execution. Hosted profiles have **no implicit
 native fallback**: the composition must explicitly supply

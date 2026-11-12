@@ -295,3 +295,30 @@ async def test_hosted_explicit_executor_reads_live_shared_variables_without_proc
     finally:
         await services.shutdown()
         services.close()
+
+
+@pytest.mark.asyncio
+async def test_registry_reuse_requires_release_and_old_service_cannot_close_new_workers(tmp_path):
+    from backend.config import Settings
+    from backend.plugins.builtin import create_builtin_registry
+    from backend.services import create_services
+
+    registry = create_builtin_registry()
+    settings = Settings.for_data_root(tmp_path)
+    first = create_services(settings, plugins=registry)
+    with pytest.raises(RuntimeUnavailableError, match='reconfigure'):
+        create_services(settings, plugins=registry)
+    await first.shutdown()
+    first.close()
+    second = create_services(settings, plugins=registry)
+    try:
+        worker = await registry.worker_host.start(recipe('import sys; sys.stdin.read()', []),
+                                                 operation_id='run', workspace=tmp_path)
+        # Repeated teardown from an old application must not affect its successor.
+        first.close()
+        assert not worker.closed and registry.worker_host.owner is second
+        await second._cleanup_run_execution('run')
+        assert worker.closed
+    finally:
+        await second.shutdown()
+        second.close()

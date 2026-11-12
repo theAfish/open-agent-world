@@ -878,7 +878,8 @@ class ApplicationServices:
         await drain(self._require_run_manager().shutdown())
         if self.runtime_execution is not None:
             await drain(self.runtime_execution.shutdown())
-        await drain(self.plugins.worker_host.shutdown())
+        if self.plugins.worker_host.owner is self:
+            await drain(self.plugins.worker_host.shutdown())
         if self.node_execution.continuation_outputs:
             await asyncio.gather(*tuple(self.node_execution.continuation_outputs), return_exceptions=True)
         if failures:
@@ -3937,8 +3938,9 @@ class ApplicationServices:
         return self.runtime_execution.configuration(runtime_id)
 
     async def _cleanup_run_execution(self, run_id):
-        operations = [self.sandbox_operations.cancel_run(run_id),
-                      self.plugins.worker_host.close_operation(run_id)]
+        operations = [self.sandbox_operations.cancel_run(run_id)]
+        if self.plugins.worker_host.owner is self:
+            operations.append(self.plugins.worker_host.close_operation(run_id))
         if self.runtime_execution is not None:
             operations.append(self.runtime_execution.close_operation(run_id))
         results = await asyncio.gather(*operations, return_exceptions=True)
@@ -3947,6 +3949,7 @@ class ApplicationServices:
             raise BaseExceptionGroup("Run execution cleanup failed", failures)
 
     def close(self) -> None:
+        self.plugins.worker_host.release(self)
         self.database.close()
 
 
@@ -4060,9 +4063,13 @@ def create_services(
         from backend.packs.workers import NativePackWorkerExecutionProvider
         worker_provider = NativePackWorkerExecutionProvider()
     from backend.execution_config import runtime_environment_defaults
-    plugin_registry.worker_host.configure(worker_provider,
-        inherit_environment=settings.inherit_runtime_environment,
-        environment_variables=lambda: runtime_environment_defaults(services)[0])
+    try:
+        plugin_registry.worker_host.configure(worker_provider,
+            inherit_environment=settings.inherit_runtime_environment,
+            environment_variables=lambda: runtime_environment_defaults(services)[0], owner=services)
+    except BaseException:
+        database.close()
+        raise
     services.node_execution = NodeExecutionService(services)
     from backend.sandbox.operations import SandboxOperations
     services.sandbox_operations = SandboxOperations(services)
