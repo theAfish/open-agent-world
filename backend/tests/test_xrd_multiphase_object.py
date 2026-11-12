@@ -52,7 +52,8 @@ def state_fixture(tmp_path, monkeypatch):
              'search_space_size': 7, 'pool': [{'candidate_id': x, 'label': x} for x in ('a', 'b', 'c')],
              'trials': [], 'baseline': {'status': 'pending', 'trials': []}, 'progress': {'completed': 0}}
     (directory / 'multiphase-state.json').write_text(json.dumps(state))
-    monkeypatch.setitem(harness._processes, 'test', (SimpleNamespace(returncode=0), None))
+    from unittest.mock import AsyncMock
+    monkeypatch.setitem(harness._processes, 'test', SimpleNamespace(close=AsyncMock()))
     return {'options': state['options'], 'run_id': 'test', 'state': state}, directory
 
 
@@ -155,9 +156,7 @@ def test_native_agent_capabilities_are_object_scoped_and_revocable(client):
 
 @pytest.mark.parametrize('outcome', ['completed', 'failed', 'cancelled'])
 def test_manual_review_reuses_cancelled_search_without_rerunning_it(tmp_path, monkeypatch, outcome):
-    from contextlib import nullcontext
     from oaw_xrd import runtime_environment
-    monkeypatch.setattr(runtime_environment, 'worker_command', lambda *args, **kwargs: (['fixture-python'], {}, nullcontext()))
     value, directory = state_fixture(tmp_path, monkeypatch)
     state = value['state']
     incumbent = {'candidate_ids': ['a', 'b'], 'score': 62.5, 'status': 'completed'}
@@ -168,7 +167,8 @@ def test_manual_review_reuses_cancelled_search_without_rerunning_it(tmp_path, mo
     calls = []
     rpc_started = asyncio.Event()
     async def spawn(*args, **kwargs):
-        return SimpleNamespace(returncode=0)
+        from unittest.mock import AsyncMock
+        return SimpleNamespace(close=AsyncMock())
     async def rpc(run_id, command, **arguments):
         calls.append(command)
         rpc_started.set()
@@ -178,10 +178,10 @@ def test_manual_review_reuses_cancelled_search_without_rerunning_it(tmp_path, mo
         assert arguments['drop_one'] is False
         return {'status': outcome, 'reviews': [{'full': {'candidate_ids': ['a', 'b'], 'status': outcome}, 'removals': []}]}
     async def kill(run_id):
-        record = harness._processes.pop(run_id, None)
-        if record and record[1]:
-            record[1].close()
-    monkeypatch.setattr(harness.asyncio, 'create_subprocess_exec', spawn)
+        process = harness._processes.pop(run_id, None)
+        if process:
+            await process.close()
+    monkeypatch.setattr(runtime_environment, 'start_worker', spawn)
     monkeypatch.setattr(harness, '_rpc', rpc)
     monkeypatch.setattr(harness, '_kill', kill)
     async def scenario():
@@ -216,9 +216,7 @@ def test_review_rejects_unmeasured_or_duplicate_selections(tmp_path, monkeypatch
 
 
 def test_review_preserves_completed_combination_when_later_fit_times_out(tmp_path, monkeypatch):
-    from contextlib import nullcontext
     from oaw_xrd import runtime_environment
-    monkeypatch.setattr(runtime_environment, 'worker_command', lambda *args, **kwargs: (['fixture-python'], {}, nullcontext()))
     value, directory = state_fixture(tmp_path, monkeypatch)
     trials = [{'candidate_ids': [x], 'status': 'completed', 'score': 80} for x in ['a','b']]
     value['state'].update(status='completed', incumbent=trials[0], trials=trials)
@@ -226,16 +224,18 @@ def test_review_preserves_completed_combination_when_later_fit_times_out(tmp_pat
     (directory / 'multiphase-input.json').write_text('{}')
     calls = []
     async def spawn(*a, **k):
-        return SimpleNamespace(returncode=0)
+        from unittest.mock import AsyncMock
+        return SimpleNamespace(close=AsyncMock())
     async def rpc(run_id, command, **args):
         calls.append(args['combinations'])
         if len(calls) == 2:
             raise asyncio.TimeoutError()
         return {'status':'completed', 'reviews':[{'full':trials[0], 'removals':[]}]}
     async def kill(run_id):
-        record = harness._processes.pop(run_id, None)
-        if record: record[1].close()
-    monkeypatch.setattr(harness.asyncio, 'create_subprocess_exec', spawn)
+        process = harness._processes.pop(run_id, None)
+        if process:
+            await process.close()
+    monkeypatch.setattr(runtime_environment, 'start_worker', spawn)
     monkeypatch.setattr(harness, '_rpc', rpc)
     monkeypatch.setattr(harness, '_kill', kill)
     async def run():

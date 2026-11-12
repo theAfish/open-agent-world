@@ -7,10 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-import os
 from pathlib import Path
-import signal
-import subprocess
 import time
 import uuid
 
@@ -46,7 +43,6 @@ class HarnessConfig(BaseModel):
 
 _review_tasks = {}
 _processes = {}
-_environment_leases = {}
 _locks = {}
 _source_runs = {}
 _initializing = set()
@@ -104,32 +100,17 @@ def configure(value, arguments):
 
 
 async def _kill(run_id):
-    record = _processes.pop(run_id, None)
-    if record:
-        process, log = record
-        if process.returncode is None:
-            if os.name == 'nt':
-                killer = await asyncio.create_subprocess_exec('taskkill.exe', '/PID', str(process.pid), '/T', '/F',
-                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
-                await killer.wait()
-            else:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-            await process.wait()
-        log.close()
-    lease = _environment_leases.pop(run_id, None)
-    if lease is not None:
-        lease.__exit__(None, None, None)
+    process = _processes.get(run_id)
+    if process is not None:
+        await process.close()
+        _processes.pop(run_id, None)
 
 
 async def _rpc(run_id, command, **arguments):
-    process, _ = _processes[run_id]
-    process.stdin.write((json.dumps({'command': command, **arguments}, ensure_ascii=False) + '\n').encode())
-    await process.stdin.drain()
+    process = _processes[run_id]
+    await process.write((json.dumps({'command': command, **arguments}, ensure_ascii=False) + '\n').encode())
     try:
-        line = await asyncio.wait_for(process.stdout.readline(), 7200 if command == 'pywpem_review' else 900)
+        line = await asyncio.wait_for(process.readline(), 7200 if command == 'pywpem_review' else 900)
     except asyncio.TimeoutError:
         raise RuntimeError('单个组合联合复核超过 2 小时，已停止；已完成结果已保留。' if command == 'pywpem_review' else '科学计算超过 15 分钟限制。') from None
     if not line:
@@ -254,20 +235,9 @@ async def prepare_start(value, args):
         state['source_files_sha256'] = payload['source_files_sha256']
         state['search_space_size'] = sum(math.comb(len(state['pool']), n) for n in range(1, min(options.max_phases, len(state['pool']))+1))
         state['cloud_request_limit'] = min(options.budget, state['search_space_size'])*min(options.max_phases, len(state['pool']))
-        from .runtime_environment import worker_command
-        command, environment, lease = await asyncio.to_thread(worker_command, 'multiphase_worker.py', (run,))
-        lease.__enter__()
-        _environment_leases[run_id] = lease
-        log = (run / 'console.log').open('wb')
-        process_options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}
-        try:
-            process = await asyncio.create_subprocess_exec(*command,
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=log, limit=4*1024*1024,
-                env=environment, **process_options)
-        except BaseException:
-            log.close()
-            raise
-        _processes[run_id] = (process, log)
+        from .runtime_environment import start_worker
+        _processes[run_id] = await start_worker('multiphase_worker.py', (run,), operation_id=run_id,
+                                               workspace=run, interactive=True)
         _source_runs[source_key] = run_id
         state['common_initial_combinations'] = []
         state['progress']['stage'] = '计算完整候选参考峰，尚未拟合组合'
@@ -469,20 +439,9 @@ async def prepare_review(value, args):
 
     async def execute():
         try:
-            from .runtime_environment import worker_command
-            command, environment, lease = await asyncio.to_thread(worker_command, 'multiphase_worker.py', (run,))
-            lease.__enter__()
-            _environment_leases[run_id] = lease
-            log = (run / 'console.log').open('ab')
-            try:
-                process = await asyncio.create_subprocess_exec(*command,
-                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=log, limit=4*1024*1024,
-                    env=environment,
-                    **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}))
-            except BaseException:
-                log.close()
-                raise
-            _processes[run_id] = (process, log)
+            from .runtime_environment import start_worker
+            _processes[run_id] = await start_worker('multiphase_worker.py', (run,), operation_id=run_id,
+                                                   workspace=run, interactive=True)
             for index, combo in enumerate(combinations):
                 state['progress']['stage'] = f'PyWPEM 联合复核 {index + 1} / {len(combinations)}'
                 (run / 'pywpem-review').mkdir(exist_ok=True)

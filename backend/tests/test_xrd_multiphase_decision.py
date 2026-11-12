@@ -112,7 +112,8 @@ def prepared(tmp_path, monkeypatch):
     (run / 'multiphase-input.json').write_text(json.dumps(payload), encoding='utf-8')
     (run / 'decision-evidence.json').write_text(json.dumps(payload['_test_evidence']), encoding='utf-8')
     harness._persist(run, state)
-    monkeypatch.setitem(harness._processes, 'test', (SimpleNamespace(returncode=0), None))
+    from unittest.mock import AsyncMock
+    monkeypatch.setitem(harness._processes, 'test', SimpleNamespace(close=AsyncMock()))
     return {'run_id': 'test', 'options': state['options'], 'state': state}, run
 
 
@@ -181,23 +182,22 @@ def test_reachability_mask_equals_exhaustive_unmeasured_space():
 
 
 def test_start_prepares_evidence_without_spending_any_fit_budget(tmp_path, monkeypatch):
-    from contextlib import nullcontext
     from oaw_xrd import runtime_environment
-    monkeypatch.setattr(runtime_environment, 'worker_command', lambda *args, **kwargs: (['fixture-python'], {}, nullcontext()))
     monkeypatch.setenv('OAW_XRD_RUN_ROOT', str(tmp_path))
     _, payload = fixture(2)
     payload.update(excluded_candidates=[], source_files_sha256={})
     async def build(root, options, progress):
         return payload
     async def create(*args, **kwargs):
-        return SimpleNamespace(returncode=0)
+        from unittest.mock import AsyncMock
+        return SimpleNamespace(close=AsyncMock())
     commands = []
     async def rpc(run_id, command, **args):
         commands.append(command)
         assert command == 'decision_evidence'
         return payload['_test_evidence']
     monkeypatch.setattr(harness, 'build_multiphase_payload', build)
-    monkeypatch.setattr(harness.asyncio, 'create_subprocess_exec', create)
+    monkeypatch.setattr(runtime_environment, 'start_worker', create)
     monkeypatch.setattr(harness, '_rpc', rpc)
     value = {'options': {'owner_node_id': 'test-owner', 'source_match_run_id': 'source', 'candidate_ids': ['candidate-0', 'candidate-1'],
                          'budget': 6, 'max_phases': 3, 'optimizer_label': 'Jev'}, 'state': {'status': 'idle'}, 'run_id': ''}
