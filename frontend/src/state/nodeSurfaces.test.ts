@@ -146,37 +146,37 @@ describe("node surface state", () => {
     expect(useNodeSurfaceStore.getState().surfaceLevels.second).toBe("inspector");
   });
 
-  it.each(["conversation", "sandbox"])("initializes %s as a window and skips the inspector in both directions", type => {
+  it.each(["legion", "conversation", "sandbox"])("keeps %s in its workspace through collapse and deep-link actions", type => {
     const actions = useNodeSurfaceStore.getState();
     actions.syncCards([{ id: "window", type }], TEST_CATALOG);
     expect(useNodeSurfaceStore.getState().surfaceLevels.window).toBe("workspace");
     actions.closeWorkspace("window");
-    expect(useNodeSurfaceStore.getState().surfaceLevels.window).toBe("preview");
+    expect(useNodeSurfaceStore.getState().surfaceLevels.window).toBe("workspace");
     actions.hidePreview("window");
     actions.openPrimary("window");
     expect(useNodeSurfaceStore.getState().surfaceLevels.window).toBe("workspace");
     actions.closeWorkspace("window");
-    expect(useNodeSurfaceStore.getState().surfaceLevels.window).toBe("node");
+    expect(useNodeSurfaceStore.getState().surfaceLevels.window).toBe("workspace");
     actions.openInspector("window"); // Existing settings/deep-link callers also obey the policy.
     expect(useNodeSurfaceStore.getState().surfaceLevels.window).toBe("workspace");
   });
 
-  it("initializes once, preserves restored compact choices, and repairs removed surfaces", () => {
+  it("repairs saved compact states for workspace-only cards", () => {
     const actions = useNodeSurfaceStore.getState();
     const cards = [{ id: "room", type: "conversation" }];
     useNodeSurfaceStore.setState({ surfaceLevels: { room: "node" } });
     actions.syncCards(cards, TEST_CATALOG);
-    expect(useNodeSurfaceStore.getState().surfaceLevels.room).toBe("node");
+    expect(useNodeSurfaceStore.getState().surfaceLevels.room).toBe("workspace");
     actions.showPreview("room");
     actions.syncCards([], TEST_CATALOG);
     actions.syncCards(cards, TEST_CATALOG);
-    expect(useNodeSurfaceStore.getState().surfaceLevels.room).toBe("preview");
+    expect(useNodeSurfaceStore.getState().surfaceLevels.room).toBe("workspace");
     useNodeSurfaceStore.setState({ surfaceLevels: { room: "inspector" } });
     actions.syncCards(cards, TEST_CATALOG);
     expect(useNodeSurfaceStore.getState().surfaceLevels.room).toBe("workspace");
     actions.dismiss("room");
     actions.syncCards(cards, TEST_CATALOG);
-    expect(useNodeSurfaceStore.getState().surfaceLevels.room).toBe("preview");
+    expect(useNodeSurfaceStore.getState().surfaceLevels.room).toBe("workspace");
   });
 
   it("waits for the catalog before initializing and persists only instance choices", () => {
@@ -191,7 +191,7 @@ describe("node surface state", () => {
   });
 
   it("adapts legacy plugins that skip preview or inspector", () => {
-    const catalog = { ...TEST_CATALOG, node_types: [{ ...TEST_CATALOG.node_types[0], id: "legacy",
+    const catalog = { ...TEST_CATALOG, node_types: [{ ...TEST_CATALOG.node_types[0], id: "legacy", presentation: undefined,
       surfaces: { preview: false, inspector: false, workspace: true } }] };
     expect(nodePresentation("legacy", catalog)).toEqual({ states: ["node", "workspace"], initial: "node", open: "workspace" });
   });

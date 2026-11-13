@@ -1,7 +1,7 @@
 import { ConnectionDropSurface } from "./ConnectionDropSurface";
 import { t, useLocale } from "../i18n";
 import { Handle, Position } from "@xyflow/react";
-import { Plus, Trash2, Ungroup } from "lucide-react";
+import { GripHorizontal, MoreHorizontal, Plus, Trash2, Ungroup } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { ConnectionHoverHint, clearConnectionHoverHint, updateConnectionHoverHint } from "./ConnectionHoverHint";
 import { acceptsMember, containerDefinition } from "../state/containers";
@@ -14,13 +14,20 @@ import { useNodeGeneration } from "../effects/generation";
 import { CardFinishLayer } from "./CardFinishLayer";
 import { normalizeCardFinish } from "./cardFinish";
 import { CardMoveGrip } from './CardMoveGrip';
+import { Popover } from '../components/Floating';
+import { IconButton } from '../components/IconButton';
+import { CatalogIcon } from '../components/CatalogIcon';
+import { CardName } from './CardName';
+import './containerFrame.css';
 
-/** Shared spatial shell. Plugin presentations provide their header and controls. */
-export function ContainerFrame({ card, selected, className, label, header, children }: {
-  card: WorldCard; selected?: boolean; className: string; label: string; header: ReactNode; children?: ReactNode;
+/** Shared spatial shell, identity and menus; callers provide their domain actions. */
+export function ContainerFrame({ card, selected, className, label, nameEditor, details, menuActions, primaryActions, children }: {
+  card: WorldCard; selected?: boolean; className: string; label: string;
+  nameEditor?: ReactNode; details?: ReactNode; menuActions: ReactNode; primaryActions?: ReactNode; children?: ReactNode;
 }) {
   useLocale();
   const catalog = useWorldStore((state) => state.catalog);
+  const definition = catalog.node_types.find(type => type.id === card.type);
   const spec = containerDefinition(card, catalog)!;
   const activity = useNodeActivity(card, true);
   const generation = useNodeGeneration(card.id);
@@ -42,7 +49,24 @@ export function ContainerFrame({ card, selected, className, label, header, child
     {spec.connectable && ([[Position.Top, "top"], [Position.Right, "right"], [Position.Bottom, "bottom"], [Position.Left, "left"]] as const).map(([position, side]) =>
       <Handle key={side} type="source" id={`boundary-${side}`} position={position} className={`semantic-handle semantic-handle--${side}`} data-connection-side={side} aria-label={t("Connect {v0} {v1}", { v0: String(card.name), v1: String(side) })} />)}
     {spec.connectable && <ConnectionHoverHint />}
-    <header className="container-drag-region container-header card-finish-surface">{header}{spec.connectable && <ConnectionDropSurface nodeId={card.id} />}<CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" /></header>
+    <header className="container-drag-region container-header card-finish-surface" title={card.name}>
+      <span className="container-drag-hint" aria-hidden="true"><GripHorizontal size={16} /></span>
+      <div className="container-corner-actions">
+        {primaryActions}
+        <Popover label={t('Card controls')} className="container-controls-menu" trigger={
+          <IconButton icon={MoreHorizontal} label={t('Card controls')} quiet />
+        }>
+          <div className="container-menu-identity">
+            <CatalogIcon definition={definition} size={22} />
+            <div>{nameEditor ?? <CardName card={card} workspace label={definition?.label ?? card.type} />}
+              {details && <small>{details}</small>}
+            </div>
+          </div>
+          <div className="container-menu-actions">{menuActions}</div>
+        </Popover>
+      </div>
+      {spec.connectable && <ConnectionDropSurface nodeId={card.id} />}<CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />
+    </header>
     {(spec.virtual || activity.phase !== "idle") && <span className="container-activity" role="status" data-phase={activity.phase}><i />{activityLabel}</span>}
     {children}
   </section>;
@@ -54,7 +78,7 @@ export function ContainerActions({ card, busy = false, deleteLabel = t("Delete {
   const dissolve = useWorldStore((state) => state.dissolveContainer);
   return <>
     <button className="secondary-button nodrag nopan" disabled={busy} aria-pressed={releaseMode?.active} title={releaseMode?t("切换移出模式：开启后拖到阴影边缘移出成员"):t("Remove the container; keep members and their connections")} onClick={e=>{e.stopPropagation();if(releaseMode)releaseMode.toggle();else void dissolve(card.id);}}><Ungroup size={14} /> {releaseMode?(releaseMode.active?t("完成移出"):t("移出成员")):t("Dissolve")}</button>
-    <button className="secondary-button nodrag nopan" disabled={busy} aria-label={deleteLabel} title={t("Delete the container and its members. Ctrl+Z to undo.")} onClick={() => void remove([card.id])}><Trash2 size={14} /></button>
+    <button className="secondary-button container-delete nodrag nopan" disabled={busy} aria-label={deleteLabel} title={t("Delete the container and its members. Ctrl+Z to undo.")} onClick={() => void remove([card.id])}><Trash2 size={14} />{t('Delete')}</button>
   </>;
 }
 

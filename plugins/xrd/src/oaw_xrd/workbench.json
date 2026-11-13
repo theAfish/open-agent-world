@@ -7,7 +7,6 @@
       "parent_key": null,
       "x": 0.0,
       "y": 0.0,
-      "presentation": "preview",
       "config": {
         "mode": "group",
         "workspace_layout": {
@@ -142,7 +141,6 @@
       "parent_key": "group",
       "x": 2171.580731282248,
       "y": 867.0494760231168,
-      "presentation": "preview",
       "config": {
         "description": "与结果分析员讨论当前实验谱的单相及多相拟合。",
         "status": "available"

@@ -158,11 +158,15 @@ def test_plugin_preset_uses_current_default_unless_explicitly_authored():
     registry = load_plugin_registry()
     preset = LegionPresetDefinition(id="test.defaults", name="Defaults", nodes=(
         PresetNode(key="conversation", type="conversation", name="Chat", parent_key=None),
-        PresetNode(key="sandbox", type="sandbox", name="Compact sandbox", parent_key=None, presentation="node"),
+        PresetNode(key="text", type="text", name="Compact text", parent_key=None, presentation="node", payload={"content": ""}),
     ))
     record = plugin_preset_record(preset, registry)
-    conversation, sandbox = record.blueprint.nodes
+    conversation, text = record.blueprint.nodes
     assert conversation.presentation.level == "workspace"
     assert conversation.expanded
-    assert sandbox.presentation.level == "node"
-    assert not sandbox.expanded
+    assert text.presentation.level == "node"
+    assert not text.expanded
+    for kind in ("legion", "conversation", "sandbox", "matcreator.kdg"):
+        presentation = registry.node_type(kind).resolved_presentation()
+        assert presentation.states == ("workspace",)
+        assert presentation.initial == presentation.open == "workspace"

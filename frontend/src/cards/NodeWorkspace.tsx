@@ -55,7 +55,6 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
     <header className="workspace-titlebar node-drag-region card-finish-surface" data-finish={normalizeCardFinish(card.finish)}>
       <div className="workspace-app-mark"><CatalogIcon definition={catalog.node_types.find((d) => d.id === card.type)} size={16} /></div>
       <div>
-        <span>{card.type === "xrd.match" ? "XRD 谱解析" : (catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type)} {t("workspace")}</span>
         <CardName card={card} workspace label={catalog.node_types.find(item => item.id === card.type)?.label ?? card.type} />
       </div>
       <div className="workspace-window-actions">

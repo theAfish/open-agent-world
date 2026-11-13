@@ -63,7 +63,7 @@ def definition():
               pane("conversation", "conversation")))}
     nodes = (
         PresetNode(key="group", type="legion", name="Lab Manager", parent_key=None,
-                   presentation="preview", config={"mode": "group", "workspace_layout": layout,
+                   config={"mode": "group", "workspace_layout": layout,
                        "description": "Process project materials, query connected data and build structured results with Spaces."}),
         PresetNode(key="agent", type="agent", name="Knowledge assistant", x=180, y=220,
                    config={"system_instruction": INSTRUCTION}),

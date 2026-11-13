@@ -1056,6 +1056,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         config_model=LegionConfig, traits=frozenset({"core.legion", "ui.legion.v1"}),
         template_remap_config=remap_workspace_config,
         container=LegionContainerDefinition(),
+        presentation=NodePresentation(states=("workspace",), initial="workspace", open="workspace"),
         user_creatable=False, templateable=True,
     ))
     registry.register_node_type(NodeTypeDefinition(
@@ -1066,7 +1067,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         statuses=frozenset({"available"}), config_model=ConversationConfig,
         tutorials=CONVERSATION_TUTORIALS,
         traits=frozenset({"core.field", "core.conversation", "core.file-source"}),
-        presentation=NodePresentation(states=("node", "preview", "workspace"), initial="workspace", open="workspace",
+        presentation=NodePresentation(states=("workspace",), initial="workspace", open="workspace",
             workspace_layout=WorkspaceLayoutMetadata(min_width=280, min_height=240, ideal_width=760, ideal_height=560)),
         lifecycle=ConversationNodeBehavior(),
         template_handler=ConversationNodeTemplateHandler(), templateable=True,
@@ -1100,7 +1101,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         config_model=SandboxConfig, traits=frozenset({"core.sandbox", "core.file-source"}),
         tutorials=SANDBOX_TUTORIALS,
         document=NodeDocumentDefinition(model=EnvironmentProfile),
-        presentation=NodePresentation(states=("node", "preview", "workspace"), initial="workspace", open="workspace",
+        presentation=NodePresentation(states=("workspace",), initial="workspace", open="workspace",
             workspace_layout=WorkspaceLayoutMetadata(min_width=280, min_height=240, ideal_width=720, ideal_height=480)),
         lifecycle=SandboxNodeBehavior(),
         templateable=True, template_status="stopped",

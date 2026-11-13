@@ -1,6 +1,7 @@
 import { t, useLocale } from "../i18n";
 import { type NodeProps } from "@xyflow/react";
-import { Bot, X } from "lucide-react";
+import { Bot, ExternalLink, X } from "lucide-react";
+import { IconButton } from '../components/IconButton';
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiErrorMessage, worldApi } from "../api/client";
@@ -44,9 +45,8 @@ export function BarracksContainerNode({ data, selected }: NodeProps<CanvasNode>)
   const card = data.card;
   const [editing, setEditing] = useState(false);
   useHydrationLease(card.id, 'barracks-dialog', editing);
-  return <ContainerFrame card={card} selected={selected} className="skill-container barracks-container" label={t("{v0} barracks", { v0: String(card.name) })} header={<>
-    <Bot size={24} /><div><span>{t("AGENT BARRACKS · OPEN SPACE")}</span><strong>{card.name}</strong></div>
-    <button className="secondary-button nodrag nopan" onClick={() => setEditing(true)}>{t("Open barracks")}</button>
+  return <ContainerFrame card={card} selected={selected} className="skill-container barracks-container" label={t("{v0} barracks", { v0: String(card.name) })}
+    primaryActions={<IconButton icon={ExternalLink} quiet label={t('Open barracks')} onClick={() => setEditing(true)} />} menuActions={<>
     <AddSelectedMembers card={card} /><ContainerActions card={card} />
   </>}>
     <p className="skill-container-hint">{t("Drag Agents into or out of this space. Each Agent keeps its equipment and shared connections. Connect an Agent's equipped Summoning skill to this space to call its Agents.")}</p>

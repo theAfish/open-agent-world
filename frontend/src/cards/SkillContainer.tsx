@@ -1,6 +1,7 @@
 import { t, useLocale } from "../i18n";
 import { type NodeProps } from "@xyflow/react";
-import { Boxes, ExternalLink, X } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
+import { IconButton } from '../components/IconButton';
 import { useState } from "react";
 import { useHydrationLease } from '../canvas/useCardRendering';
 import { createPortal } from "react-dom";
@@ -16,9 +17,9 @@ export function SkillContainerNode({ data, selected }: NodeProps<CanvasNode>) {
   const [editing, setEditing] = useState(false);
   useHydrationLease(card.id, 'toolbox-dialog', editing);
   const members = cards.filter((member) => member.parent_id === card.id);
-  return <ContainerFrame card={card} selected={selected} className="skill-container" label={t("{v0} skill space", { v0: String(card.name) })} header={<>
-    <Boxes size={24} /><div><span>{t("SKILL TOOLBOX · OPEN SPACE")}</span><strong>{card.name}</strong></div>
-      <span>{members.length} {t("skills")}</span><button className="secondary-button nodrag nopan" onClick={() => setEditing(!editing)}><ExternalLink size={14} /> {t("Edit toolbox")}</button>
+  return <ContainerFrame card={card} selected={selected} className="skill-container" label={t("{v0} skill space", { v0: String(card.name) })}
+    primaryActions={<IconButton icon={ExternalLink} quiet label={t('Edit toolbox')} onClick={() => setEditing(!editing)} />}
+    details={<>{members.length} {t("skills")}</>} menuActions={<>
       <AddSelectedMembers card={card} /><ContainerActions card={card} deleteLabel={t("Delete {v0} and skills", { v0: String(card.name) })} />
     </>}>
     <p className="skill-container-hint">{t("Drag skills into this space. Connect its border to use the whole toolbox, or connect a skill to use only that skill.")}</p>

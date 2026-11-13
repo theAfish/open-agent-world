@@ -1,7 +1,8 @@
 import { t, useLocale } from "../i18n";
 import { ModelSelect } from "./ModelSelect";
 import { NodeToolbar, Position, useReactFlow, type NodeProps } from "@xyflow/react";
-import { Layers3, PanelsTopLeft, Pause, Play, RefreshCw, Save, Settings2, X } from "lucide-react";
+import { PanelsTopLeft, Pause, Play, RefreshCw, Save, Settings2, X } from "lucide-react";
+import { IconButton } from '../components/IconButton';
 import { useLegionWorkspace } from '../state/legionWorkspace';
 import { useEffect, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
@@ -111,14 +112,13 @@ export function LegionCardNode({ data, selected }: NodeProps<CanvasNode>) {
     } catch (e) { setError(apiErrorMessage(e)); }
     finally { setBusy(false); }
   };
-  return <ContainerFrame card={card} selected={selected} className="legion-container" label={t("{v0} team space", { v0: String(card.name) })} header={<>
-      <Layers3 size={24} />
-      <div><span>{team ? t("LEGION · TEAM SPACE") : t("LEGION · GROUP")}</span><input className="nodrag nopan" aria-label={t("Legion name")} value={name} onChange={(e) => setName(e.target.value)}
-        onBlur={(e) => { const name = e.target.value.trim(); if (name && name !== card.name) void updateCard(card.id, { name }); }} /></div>
-      <span className="legion-count">{members.length} {t("members")}{team && card.config.paused ? ` · ${t("Paused")}` : ''}</span>
+  return <ContainerFrame card={card} selected={selected} className="legion-container" label={t("{v0} team space", { v0: String(card.name) })} primaryActions={<>
+      <IconButton icon={PanelsTopLeft} quiet data-tutorial="legion-open" label={t('Workspace mode')} onClick={() => useLegionWorkspace.getState().open(card.id)} />
+      <IconButton icon={Settings2} quiet ref={settingsButtonRef} onFocus={event => event.stopPropagation()} label={t('Legion settings')} aria-expanded={settingsOpen} aria-controls={`legion-settings-${card.id}`} onClick={() => setSettingsOpen(open => !open)} />
+    </>} nameEditor={<input className="nodrag nopan" aria-label={t("Legion name")} value={name} onChange={(e) => setName(e.target.value)}
+      onBlur={(e) => { const name = e.target.value.trim(); if (name && name !== card.name) void updateCard(card.id, { name }); }} />}
+    details={<>{members.length} {t("members")}{team && card.config.paused ? ` · ${t("Paused")}` : ''}</>} menuActions={<>
       <AddSelectedMembers card={card} />
-      <button data-tutorial="legion-open" className="secondary-button nodrag nopan" onClick={() => useLegionWorkspace.getState().open(card.id)}><PanelsTopLeft size={14} /> {t('Workspace mode')}</button>
-      <button ref={settingsButtonRef} onFocus={event => event.stopPropagation()} className="secondary-button nodrag nopan" aria-expanded={settingsOpen} aria-controls={`legion-settings-${card.id}`} onClick={() => setSettingsOpen(open => !open)}><Settings2 size={14} /> {t("Legion settings")}</button>
       <button className="primary-button nodrag nopan" disabled={members.length === 0 || busy || positionBusy || dragging}
         onClick={() => void saveTemplate()} title={t("Save nodes, connections, positions and display states (1–4).") }><Save size={14} /> {t("Save to library")}</button>
       <ContainerActions card={card} busy={busy} deleteLabel="Delete Legion and members" />

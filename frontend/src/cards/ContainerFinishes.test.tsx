@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import type { ComponentProps } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -9,9 +9,47 @@ import type { WorldCard } from '../types/world';
 import { ContainerFrame } from './ContainerFrame';
 import { EquipmentCardNode } from './Equipment';
 import { ShadowCollectionNode } from './ShadowCollection';
+import { useLocale } from '../i18n';
 
 vi.mock('../effects/ShadowGasBoundary', () => ({ ShadowGasBoundary: () => null }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it('reserves the header for dragging and reveals management controls without unmounting content', () => {
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', { configurable: true, value: vi.fn() });
+  useLocale.setState({ locale: 'en' });
+  const card: WorldCard = { id: 'compact-container', type: 'legion', name: 'Research', status: 'idle',
+    config: {}, position: { x: 0, y: 0 }, size: { width: 800, height: 550 }, expanded: true };
+  useWorldStore.setState({ cards: [card], catalog: { ...TEST_CATALOG, node_types: TEST_CATALOG.node_types.map(type =>
+    type.id === card.type ? { ...type, icon_url: '/assets/custom-container.svg' } : type) }, edges: [], events: [] });
+  const manage = vi.fn();
+  const openWorkspace = vi.fn();
+  const { container } = render(<ReactFlowProvider><ContainerFrame card={card} className="legion-container" label="Research"
+    primaryActions={<button onClick={openWorkspace}>Workspace mode</button>}
+    menuActions={<button onClick={manage}>Manage</button>}>
+    <input aria-label="Working content" defaultValue="Draft" />
+  </ContainerFrame></ReactFlowProvider>);
+  try {
+    const content = screen.getByRole('textbox');
+    expect(screen.queryByText('Research')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace mode' }));
+    expect(openWorkspace).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(container.querySelector('.container-header')?.classList.contains('container-drag-region')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Card controls' }));
+    expect(container.querySelector('.container-menu-identity .catalog-asset-icon')).not.toBeNull();
+    expect(screen.getByText('Research')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
+    expect(manage).toHaveBeenCalledOnce();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: 'Manage' })).toBeNull();
+    expect(screen.getByRole('textbox')).toBe(content);
+    expect((content as HTMLInputElement).value).toBe('Draft');
+  } finally {
+    cleanup();
+    delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover;
+  }
+});
 
 it('keeps container and collection chrome matte while preserving equipped card finishes', () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
@@ -19,7 +57,7 @@ it('keeps container and collection chrome matte while preserving equipped card f
     config: {}, position: { x: 0, y: 0 }, size: { width: 360, height: 240 }, expanded: false, finish: 'rainbow' };
   useWorldStore.setState({ cards: [base], catalog: TEST_CATALOG, edges: [], events: [] });
   const { container, rerender } = render(<ReactFlowProvider>
-    <ContainerFrame card={base} className="test-container" label="Printed container" header={<strong>Container title</strong>}>
+    <ContainerFrame card={base} className="test-container" label="Printed container" menuActions={null}>
       <input aria-label="Working content" />
     </ContainerFrame>
   </ReactFlowProvider>);

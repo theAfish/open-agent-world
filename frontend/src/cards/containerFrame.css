@@ -1,0 +1,92 @@
+.container-frame > .container-header {
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  cursor: grab;
+}
+.container-frame > .container-header:active { cursor: grabbing; }
+.container-drag-hint {
+  display: grid;
+  place-items: center;
+  opacity: .45;
+  pointer-events: none;
+}
+.container-frame:hover .container-drag-hint,
+.container-frame.is-selected .container-drag-hint { opacity: .85; }
+.container-corner-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  height: 46px;
+  padding: 6px 8px 10px 38px;
+  box-sizing: border-box;
+  color: var(--ink-soft);
+  isolation: isolate;
+  border-top-right-radius: inherit;
+}
+.container-corner-actions::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-top-right-radius: inherit;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--chrome-raised) 94%, transparent), color-mix(in srgb, var(--surface-raised) 88%, transparent));
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 46' preserveAspectRatio='none'%3E%3Cpath fill='white' d='M0 0H180V46H64C26 46 48 0 0 0Z'/%3E%3C/svg%3E") 0 0 / 100% 100% no-repeat;
+}
+.container-corner-actions > .icon-button {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+}
+.container-corner-actions > .icon-button:hover:not(:disabled),
+.container-corner-actions > .icon-button[aria-expanded="true"],
+.container-corner-actions > .icon-button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: transparent;
+  color: var(--ink);
+  transform: none;
+}
+.container-corner-actions > .icon-button:focus-visible { outline-offset: -3px; }
+.container-controls-menu.ui-popover {
+  width: min(300px, calc(100vw - 32px));
+  padding: 12px;
+  border-radius: 14px;
+  cursor: default;
+  pointer-events: auto;
+}
+.container-menu-identity { display: flex; align-items: flex-start; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.container-menu-identity > :first-child { flex-shrink: 0; margin-top: 6px; color: var(--ink-soft); }
+.container-menu-identity > div { flex: 1; min-width: 0; }
+.container-menu-identity small { display: block; margin-top: 4px; color: var(--ink-soft); font-size: .6875rem; }
+.container-menu-identity .card-name { min-height: 30px; }
+.container-menu-actions { display: grid; gap: 4px; padding-top: 8px; }
+.container-controls-menu input { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid transparent; border-radius: 6px; padding: 5px 7px; color: var(--ink); background: transparent; font: inherit; font-weight: 600; }
+.container-controls-menu input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--surface-raised); }
+.container-menu-actions > button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+}
+.container-menu-actions > button:hover:not(:disabled) { background: var(--surface-soft); box-shadow: none; }
+.container-menu-actions > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.container-menu-actions > .container-delete { color: var(--danger); }
+.container-menu-actions > .container-delete:hover:not(:disabled) { background: var(--danger-soft); }
+.container-menu-actions > button > svg { flex: 0 0 16px; width: 16px; height: 16px; }

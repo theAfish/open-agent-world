@@ -40,7 +40,7 @@ def native_definition():
             split("vertical", .43, pane("conversation", "sessions"), pane("sandbox", "files"))))}
     nodes = (
         PresetNode(key="group", type="legion", name="MatCreator research", parent_key=None,
-            presentation="preview", config={"mode": "group", "description": "Native MatCreator planner and subagents with OAW research tools.", "workspace_layout": layout}),
+            config={"mode": "group", "description": "Native MatCreator planner and subagents with OAW research tools.", "workspace_layout": layout}),
         # Positions anchor the 96px node; preview/workspace surfaces expand
         # around it. Conversation and Sandbox open as 1020x700 workspaces,
         # flanking the 224x300 central cards. The knowledge container uses its

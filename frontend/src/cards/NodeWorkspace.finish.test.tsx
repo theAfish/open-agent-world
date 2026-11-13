@@ -15,8 +15,16 @@ it('preserves finish metadata while keeping the entire workspace matte', () => {
   const card: WorldCard = { id: 'printed-workspace', type: 'custom.workspace', name: 'Research',
     status: 'idle', config: {}, position: { x: 0, y: 0 }, size: { width: 600, height: 420 },
     expanded: true, finish: 'laser' };
-  useWorldStore.setState({ cards: [card], catalog: TEST_CATALOG });
+  useWorldStore.setState({ cards: [card], catalog: { ...TEST_CATALOG, node_types: [...TEST_CATALOG.node_types,
+    { ...TEST_CATALOG.node_types[0], id: card.type, label: 'Custom workspace', container: null,
+      presentation: { states: ['workspace'], initial: 'workspace', open: 'workspace' } },
+  ] } });
   const { container, rerender } = render(<WorkspaceSurface card={card} />);
+  const titlebar = container.querySelector('.workspace-titlebar')!;
+  expect(titlebar.querySelector('strong')?.textContent).toBe('Research');
+  expect(titlebar.textContent).not.toContain('Custom workspace');
+  expect(titlebar.querySelector('.card-name-edit')).not.toBeNull();
+  expect(titlebar.querySelector('.workspace-window-actions')?.children).toHaveLength(1);
   expect(container.querySelector('.card-finish-layer')).toBeNull();
   rerender(<WorkspaceSurface card={{ ...card }} />);
   expect(container.querySelector('.workspace-titlebar')?.getAttribute('data-finish')).toBe('laser');

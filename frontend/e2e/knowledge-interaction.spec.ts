@@ -134,7 +134,7 @@ test('container members reflow during resize and persist through reload and undo
   try {
     await page.goto('/');
     const frame = page.locator(`[data-card-id="${parent.id}"]`);
-    await frame.locator('.container-header strong').click();
+    await frame.locator('.container-header').click({ position: { x: 80, y: 16 } });
     const grip = page.locator(`[data-resize-node="${parent.id}"][data-resize-corner="bottom-right"]`);
     await expect(grip).toBeVisible();
     const start = (await grip.boundingBox())!;
@@ -165,7 +165,7 @@ test('container members reflow during resize and persist through reload and undo
     await expect(frame).toBeVisible();
     await inside();
     // History is session-local: resize again to verify a single undo restores frame and members.
-    await frame.locator('.container-header strong').click();
+    await frame.locator('.container-header').click({ position: { x: 80, y: 16 } });
     const next = (await grip.boundingBox())!;
     const previousPositions = await Promise.all(members.map(async m => (await (await request.get(`/api/nodes/${m.id}`)).json()).position));
     await page.mouse.move(next.x + 10, next.y + 10);
@@ -266,7 +266,7 @@ test('large graph keeps resource cards out of the canvas and pages knowledge on 
     await container.getByRole('button', { name: 'Search', exact: true }).click();
     await clickMapNode(page, container, 'entry-129');
     await expect(container.locator('.kdg-inspector h3')).toHaveText('Entry 129');
-    await container.locator('.container-header strong').click();
+    await container.locator('.container-header').click({ position: { x: 80, y: 16 } });
     const grip = page.locator(`[data-resize-node="${graph.id}"][data-resize-corner="bottom-right"]`);
     const bounds = (await grip.boundingBox())!;
     await page.mouse.move(bounds.x + 10, bounds.y + 10);

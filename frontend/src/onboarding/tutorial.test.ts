@@ -80,7 +80,7 @@ describe('tutorial progression', () => {
     expect(useTutorialStore.getState().session?.step).toBe('finish');
   });
 
-  it('requires a visible workspace and explicit Continue for window introductions', async () => {
+  it('keeps workspace-only introductions visible and waits for explicit Continue', async () => {
     useWorldStore.setState({ cards: [card('room', 'conversation')] });
     useTutorialStore.setState({ status: 'started', view: 'active', session: {
       id: 'window-intro', step: 'conversation-open', initialIds: [], demos: [], refs: { conversation: 'room' },
@@ -89,10 +89,9 @@ describe('tutorial progression', () => {
     expect(useTutorialStore.getState().ready).toBe(true);
     expect(useTutorialStore.getState().session?.step).toBe('conversation-open');
     useNodeSurfaceStore.getState().closeWorkspace('room');
-    expect(useTutorialStore.getState().ready).toBe(false);
-    await tutorial.continue();
+    expect(useNodeSurfaceStore.getState().surfaceLevels.room).toBe('workspace');
+    expect(useTutorialStore.getState().ready).toBe(true);
     expect(useTutorialStore.getState().session?.step).toBe('conversation-open');
-    useNodeSurfaceStore.getState().openPrimary('room');
     await tutorial.continue();
     expect(useTutorialStore.getState().session?.step).toBe('message');
   });

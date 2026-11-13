@@ -1,7 +1,7 @@
 from importlib.resources import files
 import json
 from open_agent_world.plugin_api import (
-    PackDefinition, PluginDescriptor, NodeTypeDefinition, NodeDocumentDefinition, NodeDocumentAction,
+    PackDefinition, PluginDescriptor, NodePresentation, NodeTypeDefinition, NodeDocumentDefinition, NodeDocumentAction,
     NodeDocumentTransformation, NodeDocumentDownload, NodeDeploymentDefinition, CapabilityDefinition,
     CapabilityGrantDefinition, RelationshipDefinition,
 )
@@ -65,7 +65,8 @@ class MatCreatorPlugin:
         registration.register_node_type(NodeTypeDefinition(id="matcreator.kdg", label="Know-Do Graph", description="Evolving scientific knowledge, resources and reviewed experience.",
             icon="network", color="#879a9d", deck_id="tools", deck_label="Tools", deck_icon="boxes", default_name="Know-Do Graph",
             default_size=(1000, 650), default_status="available", statuses=frozenset({"available"}), config_model=ToolboxConfig,
-            traits=frozenset({"knowledge.graph"}), surfaces={"preview": True, "inspector": True, "workspace": True}, templateable=True,
+            traits=frozenset({"knowledge.graph"}), templateable=True,
+            presentation=NodePresentation(states=("workspace",), initial="workspace", open="workspace"),
             frontend={"workspace": "workspace"},
             deployment=NodeDeploymentDefinition.from_document(),
             container=SkillContainerDefinition(member_type="matcreator.kdg.skill", max_members=1000, member_display="workspace"),

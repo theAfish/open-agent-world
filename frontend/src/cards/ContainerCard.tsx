@@ -2,7 +2,7 @@ import { t, useLocale } from "../i18n";
 import { BarracksContainerNode } from "./Barracks";
 import { ShadowCollectionNode } from "./ShadowCollection";
 import type { NodeProps } from "@xyflow/react";
-import { Boxes } from "lucide-react";
+import { PanelsTopLeft } from "lucide-react";
 import { useWorldStore } from "../state/worldStore";
 import { ContainerActions, ContainerFrame, AddSelectedMembers } from "./ContainerFrame";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
@@ -12,6 +12,7 @@ import { SkillContainerNode } from "./SkillContainer";
 import type { CanvasNode } from "./types";
 import { containerShowsWorkspace } from "../state/containers";
 import { WorldCardNode } from "./CardFrame";
+import { IconButton } from '../components/IconButton';
 
 export function ContainerCardNode(props: NodeProps<CanvasNode>) {
   useLocale();
@@ -29,7 +30,10 @@ export function ContainerCardNode(props: NodeProps<CanvasNode>) {
   if (definition.traits.includes("ui.agent-barracks.v1")) return <BarracksContainerNode {...props} />;
   if (definition.traits.includes("ui.legion.v1")) return <LegionCardNode {...props} />;
   if (definition.traits.includes("ui.skill-package.v1")) return <SkillContainerNode {...props} />;
-  return <ContainerFrame card={card} selected={props.selected} className="skill-container" label={t("{v0} container", { v0: String(card.name) })} header={<><Boxes size={24} /><div><span>{t(definition.label)}</span><strong>{card.name}</strong></div>{definition.frontend?.workspace && !workspaceOnly && <button className="secondary-button nodrag nopan" aria-pressed={workspace} onClick={() => setWorkspace(!workspace)}>{workspace ? t("Show member cards") : t("Open workspace")}</button>}{!workspaceOnly && <AddSelectedMembers card={card} />}<ContainerActions card={card} /></>}>
+  return <ContainerFrame card={card} selected={props.selected} className="skill-container" label={t("{v0} container", { v0: String(card.name) })}
+    primaryActions={definition.frontend?.workspace && !workspaceOnly && <IconButton icon={PanelsTopLeft} quiet
+      label={workspace ? t("Show member cards") : t("Open workspace")} aria-pressed={workspace} onClick={() => setWorkspace(!workspace)} />}
+    menuActions={<>{!workspaceOnly && <AddSelectedMembers card={card} />}<ContainerActions card={card} /></>}>
     {!workspace && <PluginSurface card={card} slot="body" level="inspector"><p className="skill-container-hint">{t("Drag cards into or out of this space. Each member keeps its own connections.")}</p></PluginSurface>}
     {workspace && <div className="container-plugin-workspace nodrag nopan nowheel" role="region" aria-label={t("{v0} workspace", { v0: String(card.name) })}><PluginSurface card={card} slot="workspace" level="workspace" /></div>}
   </ContainerFrame>;

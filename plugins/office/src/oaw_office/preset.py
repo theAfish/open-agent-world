@@ -31,7 +31,7 @@ def definition():
         description="An Agent with Office Skills, a Conversation and a Sandbox for file work.",
         nodes=(
             PresetNode(key="group", type="legion", name="Office Workbench", parent_key=None,
-                presentation="preview", config={"mode": "group", "workspace_layout": layout}),
+                config={"mode": "group", "workspace_layout": layout}),
             PresetNode(key="agent", type="agent", name="Office assistant", x=100, y=180,
                 config={"system_instruction": INSTRUCTION}),
             PresetNode(key="conversation", type="conversation", name="Office files", x=510, y=100),

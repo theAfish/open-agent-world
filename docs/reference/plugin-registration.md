@@ -273,8 +273,9 @@ restores the previously chosen compact form. A single-surface card has no
 collapse action. Explicit settings/workspace requests fall back to `open` if
 their requested surface is unsupported.
 
-Conversation and Sandbox use the example above: new instances open as windows,
-can collapse to small cards or nodes, and reopen directly as windows. Plugins
+Legion, Conversation and Sandbox declare only `states=("workspace",)`, with
+`initial="workspace"` and `open="workspace"`. They remain expanded; saved compact
+states resolve to the workspace. Plugins
 can keep all four surfaces while setting `open="workspace"`, or start directly
 in `inspector`. Changing a declaration preserves supported saved states and
 redirects removed states to `open`. Display state does not start a runtime.

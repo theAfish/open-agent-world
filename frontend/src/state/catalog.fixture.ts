@@ -61,18 +61,18 @@ export const TEST_CATALOG: PluginCatalog = {
     },
   ],
   node_types: [
-    node("legion", ["core.legion", "ui.legion.v1"], { user_creatable: false, container: { member_traits: [], parentable: false, connectable: false, min_size: [800, 550], content_inset: [320, 100, 24, 24], max_members: 100, document_field: null } }),
+    node("legion", ["core.legion", "ui.legion.v1"], { user_creatable: false, presentation: { states: ["workspace"], initial: "workspace", open: "workspace" }, surfaces: { preview: false, inspector: false, workspace: true }, container: { member_traits: [], parentable: false, connectable: false, min_size: [800, 550], content_inset: [320, 100, 24, 24], max_members: 100, document_field: null } }),
     node("agent", ["core.agent"], { default_status: "idle", surfaces: { preview: true, inspector: true, workspace: true } }),
     node("conversation", ["core.field", "core.conversation"], {
       default_status: "available",
-      surfaces: { preview: true, inspector: false, workspace: true },
-      presentation: { states: ["node", "preview", "workspace"], initial: "workspace", open: "workspace" },
+      surfaces: { preview: false, inspector: false, workspace: true },
+      presentation: { states: ["workspace"], initial: "workspace", open: "workspace" },
       templateable: true,
     }),
     node("text", ["core.resource", "core.text"]),
     node("image", ["core.resource", "core.image"]),
-    node("sandbox", ["core.sandbox"], { default_status: "stopped", surfaces: { preview: true, inspector: false, workspace: true },
-      presentation: { states: ["node", "preview", "workspace"], initial: "workspace", open: "workspace" } }),
+    node("sandbox", ["core.sandbox"], { default_status: "stopped", surfaces: { preview: false, inspector: false, workspace: true },
+      presentation: { states: ["workspace"], initial: "workspace", open: "workspace" } }),
   ],
   relationships: [
     relationship("communicate", ["core.agent"], ["core.agent"], {
