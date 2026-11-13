@@ -37,6 +37,39 @@ class DatasetConfig(BaseModel):
     query_language: str = "sql"
 
 
+def test_catalog_reuses_schema_generation_and_keeps_response_edits_isolated(monkeypatch):
+    from dataclasses import replace
+
+    class NestedConfig(BaseModel):
+        language: str = "sql"
+
+    class Config(BaseModel):
+        options: NestedConfig = NestedConfig()
+
+    generate = Config.model_json_schema
+    calls = []
+
+    def counted_schema(cls):
+        calls.append(cls)
+        return generate()
+
+    monkeypatch.setattr(Config, "model_json_schema", classmethod(counted_schema))
+    node = replace(create_builtin_registry().node_type("text"), config_model=Config)
+    first = node.catalog_item("example")
+    first.config_schema["$defs"]["NestedConfig"]["properties"]["language"]["default"] = "changed"
+    second = node.catalog_item("example")
+    assert calls == [Config]
+    assert second.config_schema["$defs"]["NestedConfig"]["properties"]["language"]["default"] == "sql"
+
+    # A replacement plugin model must get its own schema, even with the same name.
+    class Config(BaseModel):
+        replacement: int = 42
+
+    replacement = replace(node, config_model=Config).catalog_item("example")
+    assert replacement.config_schema["properties"]["replacement"]["default"] == 42
+    assert "options" not in replacement.config_schema["properties"]
+
+
 def test_public_plugin_api_exports_canonical_contracts() -> None:
     from open_agent_world.plugin_api import (
         NodeLifecycleTransaction as PublicLifecycleTransaction,

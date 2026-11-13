@@ -539,7 +539,7 @@ test("a detail card uses the same boundary-following connection hint", async ({ 
     await page.waitForTimeout(450);
     const inspectorBox = await surface.boundingBox();
     if (!inspectorBox) throw new Error("Detail card geometry is unavailable");
-    await page.mouse.move(inspectorBox.x + inspectorBox.width - 3, inspectorBox.y + inspectorBox.height / 2);
+    await page.mouse.move(inspectorBox.x + inspectorBox.width + 6, inspectorBox.y + inspectorBox.height / 2);
     await expect(surface).toHaveAttribute("data-connection-hot", "true");
     const hintBox = await hoverHint.boundingBox();
     if (!hintBox) throw new Error("Detail connection hint geometry is unavailable");

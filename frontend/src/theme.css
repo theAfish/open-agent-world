@@ -506,10 +506,17 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .card-footer .icon-button { width: 27px; height: 27px; border-radius: 8px; }
 .card-expand-button { height: 27px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-soft); background: var(--surface-soft); font-size: 0.5rem; font-weight: 670; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; }
 
+/* Keep connection hit areas behind card content, but above the surface background.
+   Native pointer gestures retain ownership after press; only idle hit testing changes. */
+:is(.world-card, .container-frame) {
+  isolation: isolate;
+  --connection-outset: calc(12px * var(--canvas-ui-scale, 1));
+  --connection-width: calc(16px * var(--canvas-ui-scale, 1));
+}
 .semantic-handle {
   -webkit-user-select: none;
   user-select: none;
-  z-index: 12;
+  z-index: -1;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -518,24 +525,13 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   cursor: crosshair;
 }
 .semantic-handle--top,
-.semantic-handle--bottom { left: 10px !important; width: calc(100% - 20px) !important; height: 18px !important; }
-.semantic-handle--top { top: 0 !important; }
-.semantic-handle--bottom { top: auto !important; bottom: 0 !important; }
+.semantic-handle--bottom { left: 10px !important; width: calc(100% - 20px) !important; height: var(--connection-width) !important; }
+.semantic-handle--top { top: calc(-1 * var(--connection-outset)) !important; }
+.semantic-handle--bottom { top: auto !important; bottom: calc(-1 * var(--connection-outset)) !important; }
 .semantic-handle--left,
-.semantic-handle--right { top: 10px !important; width: 18px !important; height: calc(100% - 20px) !important; }
-.semantic-handle--left { left: 0 !important; }
-.semantic-handle--right { left: auto !important; right: 0 !important; }
-.world-card.is-inspector .semantic-handle--left,
-.world-card.is-inspector .semantic-handle--right { width: 10px !important; }
-.world-card.is-inspector .semantic-handle--top,
-.world-card.is-inspector .semantic-handle--bottom { height: 10px !important; }
-
-/* Expanded surfaces reserve their interior for reading and editing. */
-.world-card[data-card-expanded="true"] { --connection-boundary-width: 6px; }
-.world-card[data-card-expanded="true"] > .semantic-handle--top,
-.world-card[data-card-expanded="true"] > .semantic-handle--bottom { height: var(--connection-boundary-width) !important; }
-.world-card[data-card-expanded="true"] > .semantic-handle--left,
-.world-card[data-card-expanded="true"] > .semantic-handle--right { width: var(--connection-boundary-width) !important; }
+.semantic-handle--right { top: 10px !important; width: var(--connection-width) !important; height: calc(100% - 20px) !important; }
+.semantic-handle--left { left: calc(-1 * var(--connection-outset)) !important; }
+.semantic-handle--right { left: auto !important; right: calc(-1 * var(--connection-outset)) !important; }
 
 .connection-hover-hint {
   position: absolute;

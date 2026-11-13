@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 import keyword
 from collections.abc import Awaitable, Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator, TypeAdapter
@@ -32,6 +34,13 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
+
+
+@lru_cache(maxsize=256)
+def _catalog_config_schema(model: type[BaseModel]) -> dict[str, Any]:
+    # Registered configuration classes are fixed. Rebuilding their JSON schemas
+    # on every Library read/placement blocks the server's event loop.
+    return model.model_json_schema()
 
 PLUGIN_API_VERSION = "1.52"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
@@ -410,7 +419,7 @@ class NodeTypeDefinition:
             },
             presentation=presentation,
             default_config=default_config,
-            config_schema=self.config_model.model_json_schema(),
+            config_schema=deepcopy(_catalog_config_schema(self.config_model)),
             state=self.state or LEGACY_STATE,
             has_scoped_state=self.state is not None and self.state.mode == "scoped",
             has_document=self.document is not None,

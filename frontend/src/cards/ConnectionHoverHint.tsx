@@ -11,7 +11,8 @@ export function updateConnectionHoverHint(event: ReactPointerEvent<HTMLElement>,
   // While dragging, the affordance is irrelevant and geometry reads would
   // force layout immediately after React Flow moves the node wrapper.
   if (event.buttons) { clearConnectionHoverHint(element); return; }
-  if ((event.target as Element).closest("button, input, textarea, select, a")) {
+  const handle = (event.target as Element).closest(".semantic-handle");
+  if (!handle || handle.closest(".world-card, .container-frame") !== element) {
     clearConnectionHoverHint(element);
     return;
   }
@@ -24,18 +25,12 @@ export function updateConnectionHoverHint(event: ReactPointerEvent<HTMLElement>,
   };
   const style = window.getComputedStyle(element);
   const cornerRadius = Number.parseFloat(style.borderTopLeftRadius) || 0;
-  const boundaryWidth = Number.parseFloat(style.getPropertyValue("--connection-boundary-width"));
   const anchor = roundedRectAnchor(
     { x: 0, y: 0, width: element.offsetWidth, height: element.offsetHeight,
       shape: element.dataset.cardShape === 'ellipse' ? 'ellipse' : undefined },
     pointer,
     cornerRadius,
   );
-  const threshold = Number.isFinite(boundaryWidth) ? boundaryWidth : 20 * Math.max(scaleX, scaleY);
-  if (Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y) > threshold) {
-    clearConnectionHoverHint(element);
-    return;
-  }
   element.style.setProperty("--connection-hint-x", `${anchor.x}px`);
   element.style.setProperty("--connection-hint-y", `${anchor.y}px`);
   element.dataset.connectionHot = "true";
