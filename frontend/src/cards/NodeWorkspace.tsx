@@ -46,6 +46,7 @@ interface WorkspaceSurfaceProps {
 function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
   useLocale();
   const catalog = useWorldStore((state) => state.catalog);
+  const definition = catalog.node_types.find(item => item.id === card.type);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
   const base = useNodeSurfaceStore((state) => state.baseLevels[card.id]);
   const deleteCard = useWorldStore((state) => state.deleteCard);
@@ -53,9 +54,9 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
 
   return (
     <header className="workspace-titlebar node-drag-region card-finish-surface" data-finish={normalizeCardFinish(card.finish)}>
-      <div className="workspace-app-mark"><CatalogIcon definition={catalog.node_types.find((d) => d.id === card.type)} size={16} /></div>
+      <div className="workspace-app-mark"><CatalogIcon definition={definition} size={16} /></div>
       <div>
-        <CardName card={card} workspace label={catalog.node_types.find(item => item.id === card.type)?.label ?? card.type} />
+        <CardName card={card} workspace label={definition?.label ?? card.type} />
       </div>
       <div className="workspace-window-actions">
         {!card.ephemeral && <IconButton icon={Trash2} size="sm" quiet danger onClick={() => { void deleteCard(card.id); }}
@@ -166,6 +167,7 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
 export function WorkspaceContent({ card }: WorkspaceSurfaceProps) {
   useLocale();
   const catalog = useWorldStore((state) => state.catalog);
+  const definition = catalog.node_types.find(item => item.id === card.type);
   const { deployed } = useWorkspaceAccess();
   const [agentTab, setAgentTab] = useSurfaceDraft(surfaceDraftKey(card.id, 'agent-tab'), 'activity');
   const ministerTab = useMinisterRole(s => s.settingsCardId === card.id) && Boolean(card.minister);
@@ -173,7 +175,7 @@ export function WorkspaceContent({ card }: WorkspaceSurfaceProps) {
   return (
       <div className="workspace-content">
       <PluginSurface card={card} slot="workspace" level="workspace">
-      {card.type === "xrd.match" ? <div className="agent-window-body"><div className="agent-settings-window nodrag nopan nowheel"><AgentCardBody card={card} level="workspace" /></div></div> : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? deployed ? <div className="workspace-welcome"><Bot size={22} /><strong>{card.name}</strong><p>{t(card.status)}</p></div> : <>
+      {card.type === "xrd.match" ? <div className="agent-window-body"><div className="agent-settings-window nodrag nopan nowheel"><AgentCardBody card={card} level="workspace" /></div></div> : definition?.traits.includes("core.agent") ? deployed ? <div className="workspace-welcome"><Bot size={22} /><strong>{card.name}</strong><p>{t(card.status)}</p></div> : <>
         <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label={t("Agent window")}>
           <button role="tab" aria-selected={!ministerTab && agentTab === "activity"} onClick={() => { useMinisterRole.setState({ settingsCardId: undefined }); setAgentTab("activity"); }}>{t("Activity")}</button>
           <button role="tab" aria-selected={!ministerTab && agentTab === "settings"} onClick={() => { useMinisterRole.setState({ settingsCardId: undefined }); setAgentTab("settings"); }}>{t("Settings")}</button>
@@ -183,16 +185,16 @@ export function WorkspaceContent({ card }: WorkspaceSurfaceProps) {
           ? <div className="agent-settings-window nodrag nopan nowheel"><AgentCardBody card={card} level="workspace" /></div>
           : <AgentWorkspace card={card} />}</div>
         </>
-        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.agent-barracks.v1") ? <BarracksBody card={card} workspace />
+        : definition?.traits.includes("ui.agent-barracks.v1") ? <BarracksBody card={card} workspace />
         : card.type === "core.execution-graph" ? <ExecutionGraphCard card={card} />
         : card.type === 'core.jobs' ? <JobsCard card={card} />
         : card.type === "sandbox" ? <SandboxWorkspace card={card} />
         : card.type === "core.artifact-collection" ? <ArtifactCollection card={card} />
         : card.type === "conversation" ? <ConversationWorkspace card={card} />
-        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1") ? <SkillToolboxBody card={card} workspace />
-        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1") ? <SkillNodeBody card={card} workspace />
-        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1") ? <TaskBoardBody card={card} workspace />
-        : catalog.node_types.find((definition) => definition.id === card.type)?.has_execution ? <WorkSourceWorkspace nodeId={card.id} /> : (
+        : definition?.traits.includes("ui.skill-package.v1") ? <SkillToolboxBody card={card} workspace />
+        : definition?.traits.includes("ui.skill.v1") ? <SkillNodeBody card={card} workspace />
+        : definition?.traits.includes("ui.task-board.v1") ? <TaskBoardBody card={card} workspace />
+        : definition?.has_execution ? <WorkSourceWorkspace nodeId={card.id} /> : (
           <WorkspaceEmptyState title={card.name}
             description={t("This plugin node exposes a workspace surface. Its frontend module can replace this generic view.")} />
         )}

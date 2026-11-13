@@ -4,14 +4,28 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DEFAULT_BACKGROUND_ID, DEFAULT_PALETTE_ID, registerSkinMod } from '../appearance/registry';
 import { useAppearance } from '../state/appearance';
 import { useWorldStore } from '../state/worldStore';
+import { useLocale } from '../i18n';
 import { useApplicationAppearance } from './useAppearance';
 
 function Application() { useApplicationAppearance(); return <div data-testid="canvas" />; }
 beforeEach(() => {
   useAppearance.setState({ textSize: 100, wheelShortcut: true, paletteId: DEFAULT_PALETTE_ID, backgroundId: DEFAULT_BACKGROUND_ID, skinMods: [] });
   useWorldStore.setState({ theme: 'light' });
+  useLocale.setState({ locale: 'en' });
 });
 afterEach(() => { cleanup(); localStorage.clear(); });
+
+it('keeps document language and theme in sync for either application entry point', () => {
+  render(<Application />);
+  expect(document.documentElement.lang).toBe('en');
+  expect(document.documentElement.dataset.theme).toBe('light');
+  act(() => {
+    useLocale.setState({ locale: 'zh-CN' });
+    useWorldStore.setState({ theme: 'dark' });
+  });
+  expect(document.documentElement.lang).toBe('zh-CN');
+  expect(document.documentElement.dataset.theme).toBe('dark');
+});
 
 it('updates text scale and intercepts Ctrl + wheel before canvas and browser zoom', () => {
   const { getByTestId } = render(<Application />);

@@ -8,10 +8,6 @@ export type PaletteDragPayload =
   | { version: 1; kind: "legion"; id: string; revision: number }
   | { version: 1; kind: "legion_instance"; id: string };
 
-export function serializePaletteDrag(payload: PaletteDragPayload): string {
-  return JSON.stringify(payload);
-}
-
 export function parsePaletteDrag(value: string): PaletteDragPayload | undefined {
   if (!value) return undefined;
   try {
@@ -38,14 +34,6 @@ export function parsePaletteDrag(value: string): PaletteDragPayload | undefined 
     // Invalid external drag data is ignored at this trust boundary.
   }
   return undefined;
-}
-
-export function writePaletteDrag(dataTransfer: DataTransfer, payload: PaletteDragPayload): void {
-  dataTransfer.setData(PALETTE_DRAG_MIME, serializePaletteDrag(payload));
-  if (payload.kind === "node") {
-    dataTransfer.setData(LEGACY_NODE_DRAG_MIME, payload.type);
-  }
-  dataTransfer.effectAllowed = payload.kind === 'legion_instance' ? 'move' : "copyMove";
 }
 
 export function readPaletteDrag(dataTransfer: DataTransfer): PaletteDragPayload | undefined {

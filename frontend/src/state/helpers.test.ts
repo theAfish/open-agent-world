@@ -20,6 +20,15 @@ describe("card state helpers", () => {
     expect(buildCardDraft("agent", { x: 0, y: 0 }).config.model).toBe("oaw:default");
   });
 
+  it("uses catalog defaults without injecting historical built-in configuration", () => {
+    const definition = { ...TEST_CATALOG.node_types.find(node => node.id === "agent")!,
+      default_config: { model: "oaw:model:configured", system_instruction: "Catalog instruction" } };
+    const draft = buildCardDraft("agent", { x: 0, y: 0 }, definition);
+    expect(draft.config).toEqual(definition.default_config);
+    expect(draft.config).not.toBe(definition.default_config);
+    expect(buildCardDraft("agent", { x: 0, y: 0 }, { ...definition, default_config: {} }).config).toEqual({});
+  });
+
   it("generates a deterministic virtualized stress world", () => {
     const first = makeStressCards(1_500, 4);
     const second = makeStressCards(1_500, 4);

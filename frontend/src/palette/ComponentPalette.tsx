@@ -14,9 +14,6 @@ import { startPalettePointerDrag, usePaletteDropTarget, type PalettePointerItem 
 import { useInteractionEnvironment } from '../interaction/environment';
 import './touchPalette.css';
 
-// Compatibility helpers have no role in ongoing deck population.
-export { defaultDecks, normalizeDecks } from "./legacyDecks";
-
 export function ComponentPalette() {
   useLocale();
   const library = useCardLibrary();

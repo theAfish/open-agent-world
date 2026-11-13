@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react';
-import { FieldInput } from './PrintedCardView';
+import { FaceFieldInput } from './FaceFunctionElements';
 import type { FunctionDesign, InputField } from './types';
 
 /** The same bounded function editor is used by projects and legacy Factory cards. */
@@ -17,7 +17,7 @@ export function FunctionControls({ value, onChange, fieldsOnly = false }: {
       <div className="factory-row"><label>Field type<select value={field.type} onChange={event => updateField(index, {
         type: event.target.value as InputField['type'], default: event.target.value === 'number' ? 0 : event.target.value === 'boolean' ? false : '',
       })}><option value="text">Text</option><option value="number">Number</option><option value="boolean">Boolean</option></select></label>
-        <FieldInput field={{ ...field, label: 'Default value', required: false }} value={field.default} onChange={next => updateField(index, { default: next })} /></div>
+        <FaceFieldInput field={{ ...field, label: 'Default value', required: false }} value={field.default} onChange={next => updateField(index, { default: next })} /></div>
       <label className="factory-check"><input type="checkbox" checked={field.required} onChange={event => updateField(index, { required: event.target.checked })} />Required</label>
     </div>)}
     <button type="button" disabled={value.fields.length >= 20} onClick={() => {

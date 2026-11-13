@@ -3,12 +3,12 @@ import { CardFace, CardStock } from '../components/CardFace';
 import { CatalogIcon } from '../components/CatalogIcon';
 import { apiErrorMessage, worldApi } from '../api/client';
 import type { PluginViewProps } from '../plugins/sdk';
-import type { FaceDesign, FunctionDesign, InputField, PrintedDesign, Scalar } from './types';
+import type { FaceDesign, FunctionDesign, PrintedDesign, Scalar } from './types';
 import { collapsedSurface, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { useWorldStore } from '../state/worldStore';
 import type { NodeSurfaceLevel, WorldCard } from '../types/world';
 import { FaceArtwork } from './FaceArtwork';
-import { FaceFunctionElement } from './FaceFunctionElements';
+import { FaceFieldInput, FaceFunctionElement } from './FaceFunctionElements';
 import { buttonAction } from './faceButtons';
 import './factory.css';
 
@@ -17,21 +17,13 @@ export function FacePreview({ face }: { face: FaceDesign }) {
     const surface = face.studio.modes[face.studio.initial]!;
     const scale = Math.min(240 / surface.width, 260 / surface.height);
     return <div className="factory-face-preview"><div style={{ width: surface.width * scale, height: surface.height * scale }}>
-      <div style={{ width: surface.width, height: surface.height, transform: `scale(${scale})`, transformOrigin: 'top left' }}><FaceArtwork face={face} surface={surface} sample /></div>
+      <div style={{ width: surface.width, height: surface.height, transform: `scale(${scale})`, transformOrigin: 'top left' }}><FaceArtwork face={face} surface={surface} /></div>
     </div></div>;
   }
   return <div className="factory-face-preview"><CardStock finish={face.finish} size="standard">
     <CardFace label={face.title} description={face.description} variant={face.variant} tone={face.tone}
       icon={<CatalogIcon definition={{ icon: face.icon }} size={42} />} />
   </CardStock></div>;
-}
-
-export function FieldInput({ field, value, onChange }: { field: InputField; value: Scalar; onChange: (value: Scalar) => void }) {
-  return <label className={field.type === 'boolean' ? 'factory-check' : ''}>{field.label}{field.required && ' *'}
-    {field.type === 'boolean' ? <input type="checkbox" checked={Boolean(value)} onChange={event => onChange(event.target.checked)} />
-      : <input type={field.type === 'number' ? 'number' : 'text'} step="any" maxLength={10000} required={field.required}
-        value={String(value)} onChange={event => onChange(field.type === 'number' && event.target.value !== '' ? Number(event.target.value) : event.target.value)} />}
-  </label>;
 }
 
 export function FunctionForm({ design, face, run }: {
@@ -47,7 +39,7 @@ export function FunctionForm({ design, face, run }: {
     void run(values).then(setResult).catch(cause => setError(apiErrorMessage(cause))).finally(() => setBusy(false));
   }}>
     {face?.help_text && <p>{face.help_text}</p>}
-    <div className="factory-fields">{design.fields.map(field => <FieldInput key={field.key} field={field}
+    <div className="factory-fields">{design.fields.map(field => <FaceFieldInput key={field.key} field={field}
       value={values[field.key] ?? field.default} onChange={value => setValues(current => ({ ...current, [field.key]: value }))} />)}</div>
     <button disabled={busy} type="submit">{busy ? '运行中…' : face?.button_label ?? '试运行'}</button>
     {error && <p role="alert" className="factory-error">{error}</p>}

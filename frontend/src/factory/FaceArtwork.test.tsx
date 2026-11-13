@@ -22,7 +22,7 @@ const geometry = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('
 describe('one authored card rendering', () => {
   it('uses the same geometry, field labels, values, and control classes in designer proofs and live cards', () => {
     const design = { ...face, studio: faceStudio(face) }, surface = design.studio.modes.workspace!;
-    const preview = render(<div className="factory"><FaceArtwork face={design} surface={surface} functionDesign={operation} sample /></div>);
+    const preview = render(<div className="factory"><FaceArtwork face={design} surface={surface} functionDesign={operation} /></div>);
     const live = render(<DesignedCard card={{ id: 'proof', config: { face: design, function: operation } } as unknown as WorldCard} level="workspace" />);
     expect(geometry(preview.container)).toEqual(geometry(live.container));
     for (const label of ['项目名称 *', '数量']) {

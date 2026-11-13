@@ -2,6 +2,7 @@ import { ChevronDown } from 'lucide-react';
 import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { t } from '../i18n';
+import { observeConversationPopup } from './conversationPopup';
 
 /** A group switcher that moves with its pane, outside the session scroll area. */
 export function ConversationGroupMenu({ host, title, open, onOpenChange, children }: {
@@ -23,37 +24,12 @@ export function ConversationGroupMenu({ host, title, open, onOpenChange, childre
 
   useLayoutEffect(() => {
     if (!open || !host || !popup || !trigger.current) return;
-    const anchor = trigger.current;
-    const position = () => {
-      const origin = host.getBoundingClientRect();
-      const rect = anchor.getBoundingClientRect();
-      const scale = host.offsetWidth ? origin.width / host.offsetWidth || 1 : 1;
-      const top = (rect.bottom - origin.top) / scale + 4;
-      popup.style.maxWidth = `${Math.max(0, host.clientWidth - 8)}px`;
-      popup.style.maxHeight = `${Math.max(0, host.clientHeight - top - 4)}px`;
-      popup.style.left = `${Math.max(4, (rect.right - origin.left) / scale - popup.offsetWidth)}px`;
-      popup.style.top = `${top}px`;
-    };
-    const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !anchor.contains(event.target) && !popup.contains(event.target)) onOpenChange(false);
-    };
-    position();
+    const stop = observeConversationPopup(host, trigger.current, popup, () => onOpenChange(false), 'below');
     // A restored form owns its focus; otherwise start at the current group.
     if (!popup.contains(document.activeElement)) {
       (popup.querySelector<HTMLButtonElement>('[aria-current="true"]') ?? popup.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus();
     }
-    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(position);
-    observer?.observe(host);
-    observer?.observe(popup);
-    window.addEventListener('resize', position);
-    window.addEventListener('scroll', position, true);
-    document.addEventListener('pointerdown', outside);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener('resize', position);
-      window.removeEventListener('scroll', position, true);
-      document.removeEventListener('pointerdown', outside);
-    };
+    return stop;
   }, [open, host, popup, onOpenChange]);
 
   return <div className="conversation-group-switcher" onKeyDown={event => {

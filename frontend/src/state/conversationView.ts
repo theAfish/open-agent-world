@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { profileStorage } from './profileStorage';
 import type { WorldCard } from '../types/world';
 import { useOpenFiles } from './openFiles';
+import { cardIndex } from './cardIndex';
 
 /** Local viewing state; session contents and workspace geometry remain in the world. */
 export const useConversationView = create<{
@@ -36,7 +37,7 @@ export const useConversationView = create<{
 
 /** Hide the entire ownership tree, including equipment and nested containers. */
 export function sessionVisibleCards(cards: WorldCard[], conversationId?: string, sessionId?: string): WorldCard[] {
-  const byId = new Map(cards.map(card => [card.id, card]));
+  const byId = cardIndex(cards);
   const visible = new Map<string, boolean>();
   const visit = (card: WorldCard): boolean => {
     if (visible.has(card.id)) return visible.get(card.id)!;

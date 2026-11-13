@@ -21,11 +21,6 @@ export const STYLE_KITS: Record<StyleKit, { name: string; description: string; b
   industrial: { name: 'Industrial', description: '冷静金属', background: '#e0e4e5', surface: '#edf0ef', text: '#343f45', muted: '#606c73', border: '#c5cdcf', accent: '#647e8c', response: 1 },
   playful: { name: 'Playful', description: '轻快色彩', background: '#eee2df', surface: '#f8eeea', text: '#51403f', muted: '#7c6362', border: '#ddc9c5', accent: '#a66e69', response: .8 },
 };
-export const MATERIALS: { id: MaterialType; name: string; description: string }[] = [
-  { id: 'none', name: 'None', description: '原生卡纸' }, { id: 'matte', name: 'Matte', description: '柔和哑光' },
-  { id: 'foil', name: 'Foil', description: '细腻银箔' }, { id: 'holo', name: 'Holo', description: '切面全息' },
-  { id: 'starlight', name: 'Starlight', description: '微光晶点' }, { id: 'iridescent', name: 'Iridescent', description: '珠光变色' },
-];
 export const MATERIAL_FINISH: Record<MaterialType, CardFinish> = { none: 'normal', matte: 'normal', foil: 'foil', holo: 'rainbow', starlight: 'starlight', iridescent: 'laser' };
 export const SEMANTIC_SLOTS: { kind: FaceElement['kind']; label: string; hint: string }[] = [
   { kind: 'icon', label: '图标', hint: '一个容易识别的符号' }, { kind: 'title', label: '标题', hint: '卡牌的名称' },

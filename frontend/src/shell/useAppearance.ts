@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect } from 'react';
 import { resolveBackground, resolvePalette, useSkinCatalog } from '../appearance/registry';
+import { useLocale } from '../i18n';
 import { TEXT_SIZE_STEP, useAppearance } from '../state/appearance';
 import { useWorldStore } from '../state/worldStore';
 
 export function useApplicationAppearance() {
+  const locale = useLocale(state => state.locale);
   const textSize = useAppearance(state => state.textSize);
   const paletteId = useAppearance(state => state.paletteId);
   const backgroundId = useAppearance(state => state.backgroundId);
@@ -11,6 +13,11 @@ export function useApplicationAppearance() {
   const { palettes, backgrounds } = useSkinCatalog();
   const palette = resolvePalette(paletteId, palettes);
   const background = resolveBackground(backgroundId, backgrounds);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.documentElement.dataset.theme = theme;
+  }, [locale, theme]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;

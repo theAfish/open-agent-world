@@ -17,7 +17,6 @@ import { ToastStack } from "./shell/ToastStack";
 import { TopBar } from "./shell/TopBar";
 import { CardLibrary } from "./shell/CardLibrary";
 import { useWorldStore } from "./state/worldStore";
-import { useLocale } from "./i18n";
 import './shell/motion.css';
 import { isHosted } from './auth/hostedSession';
 import { useApplicationAppearance } from './shell/useAppearance';
@@ -26,18 +25,11 @@ const DevelopmentPanel = import.meta.env.DEV ? lazy(() => import("./debug/Develo
 
 export function App() {
   useApplicationAppearance();
-  const locale = useLocale(state => state.locale);
-  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const initialize = useWorldStore((state) => state.initialize);
-  const theme = useWorldStore((state) => state.theme);
 
   useEffect(() => {
     void initialize();
   }, [initialize]);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
 
   return (
     <ReactFlowProvider>

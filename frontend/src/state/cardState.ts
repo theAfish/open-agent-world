@@ -1,5 +1,6 @@
 import { useWorldStore } from './worldStore';
 import { useConversationView } from './conversationView';
+import { cardIndex } from './cardIndex';
 import type { WorldCard, WorldEdge, NodeTypeCatalogItem, PluginCatalog } from '../types/world';
 import { getConnectionOptions, getRelationshipOptions } from './relationships';
 
@@ -16,7 +17,7 @@ export function resolveCardStateSession(id: string, cards: WorldCard[], catalog:
 function resolveDocumentSession(id: string, cards: WorldCard[], types: NodeTypeCatalogItem[], view: ConversationView): string | undefined {
   const card = cards.find(item => item.id === id);
   if (!card) return undefined;
-  const byId = new Map(cards.map(item => [item.id, item]));
+  const byId = cardIndex(cards);
   const parents = (node: WorldCard): string[] => {
     const result: string[] = [];
     let owner = node.equipment?.owner_id ?? node.parent_id;
@@ -41,7 +42,7 @@ function resolveDocumentSession(id: string, cards: WorldCard[], types: NodeTypeC
 export function resolveViewingSession(id: string, cards: WorldCard[], catalog: PluginCatalog, view: ConversationView, edges: WorldEdge[] = []): string | undefined {
   const card = cards.find(item => item.id === id);
   if (!card) return undefined;
-  const byId = new Map(cards.map(item => [item.id, item]));
+  const byId = cardIndex(cards);
   const hasTrait = (node: WorldCard | undefined, trait: string) => !!node && !!catalog.node_types.find(type => type.id === node.type)?.traits.includes(trait);
   const links = [...edges.filter(edge => !edge.missing_plugin), ...cards.flatMap(node => {
     const owner = node.equipment && byId.get(node.equipment.owner_id);

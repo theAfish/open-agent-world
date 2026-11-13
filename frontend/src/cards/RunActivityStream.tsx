@@ -2,7 +2,7 @@ import { memo, useState } from "react";
 import { LoaderCircle, Square } from "lucide-react";
 import { t, useLocale } from "../i18n";
 import type { ConversationRunSummary, SavedInvocation } from "../types/world";
-import { toolFailed, withoutFinalReply, withSavedThinking, withSavedTools, type RunActivityItem, type RunActivityState } from "../state/runActivity";
+import { withoutFinalReply, withSavedThinking, withSavedTools, type RunActivityItem, type RunActivityState } from "../state/runActivity";
 import { useSavedThinking } from "../state/useSavedThinking";
 import { useSavedInvocations } from "../state/useSavedInvocations";
 import { useInvocationDetail } from "../state/useInvocationDetail";

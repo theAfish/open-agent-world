@@ -332,6 +332,10 @@ describe("authoritative world synchronization", () => {
   });
 
   it("initializes created and remotely ingested surfaces once and retains them across refresh", async () => {
+    const catalog: typeof TEST_CATALOG = { ...TEST_CATALOG, node_types: TEST_CATALOG.node_types.map(definition =>
+      definition.id === "conversation" ? { ...definition, surfaces: { ...definition.surfaces, preview: true },
+        presentation: { states: ["preview", "workspace"], initial: "workspace", open: "workspace" } } : definition) };
+    useWorldStore.setState({ catalog });
     const room = card("room", "conversation");
     vi.spyOn(worldApi, "createNode").mockResolvedValue(room);
     await useWorldStore.getState().createCard("conversation");
@@ -342,7 +346,7 @@ describe("authoritative world synchronization", () => {
     expect(useNodeSurfaceStore.getState().surfaceLevels).toMatchObject({ room: "preview", lab: "workspace" });
     // Snapshot replacement and temporary chunk unloading do not reapply initial.
     useWorldStore.setState({ cards: [sandbox] });
-    useWorldStore.setState({ cards: [{ ...room }, { ...sandbox }], catalog: { ...TEST_CATALOG } });
+    useWorldStore.setState({ cards: [{ ...room }, { ...sandbox }], catalog: { ...catalog } });
     expect(useNodeSurfaceStore.getState().surfaceLevels).toMatchObject({ room: "preview", lab: "workspace" });
   });
 
@@ -976,6 +980,26 @@ describe("authoritative world synchronization", () => {
     await useWorldStore.getState().deleteCard(agent.id);
     await useWorldStore.getState().undo();
     expect(restore).toHaveBeenCalledWith(agent.id, slots);
+  });
+
+  it("rolls back a partially restored card when its equipment defaults cannot be restored", async () => {
+    const agent = card("owner", "agent");
+    const snapshot = { ...agent, restoreCardState: { namespaces: [] },
+      restorePluginDefaults: { equipment: { skills: { node_id: null } } } };
+    useWorldStore.setState({ undoStack: [{ id: 1, label: "Delete Agent", kind: "cards-deleted", cards: [snapshot], edges: [] }] });
+    vi.spyOn(worldApi, "restoreNode").mockResolvedValue(agent);
+    const restoreState = vi.spyOn(worldApi, "restoreCardStateSnapshot").mockResolvedValue();
+    vi.spyOn(worldApi, "restoreNodeDefaults").mockRejectedValue(new Error("Equipment defaults unavailable"));
+    const remove = vi.spyOn(worldApi, "deleteNode").mockResolvedValue();
+
+    await useWorldStore.getState().undo();
+
+    expect(restoreState).toHaveBeenCalledWith(agent.id, snapshot.restoreCardState);
+    expect(remove).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith(agent.id);
+    expect(useWorldStore.getState().cards).toEqual([]);
+    expect(useWorldStore.getState().undoStack).toHaveLength(1);
+    expect(useWorldStore.getState().toasts.at(-1)).toMatchObject({ title: "Undo could not be completed", detail: "Equipment defaults unavailable" });
   });
 
   it("deletes an Agent and its equipment atomically and restores the whole ownership tree", async () => {

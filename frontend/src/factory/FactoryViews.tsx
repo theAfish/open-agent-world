@@ -15,7 +15,8 @@ import { surfaceDraftKey, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { PackSurface } from '../shell/PackSurface';
 import { PACK_DESIGNS, PACK_PACKAGING } from '../shell/packDesign';
 import { exportedPackFile, MarketplacePublish, PACK_ID_PATTERN, PackIdGuidance } from '../shell/PackPublishing';
-import { FacePreview, FieldInput, FunctionForm } from './PrintedCardView';
+import { FacePreview, FunctionForm } from './PrintedCardView';
+import { FaceFieldInput } from './FaceFunctionElements';
 import type { PluginViewProps } from '../plugins/sdk';
 import type { LegionSummary, WorldCard } from '../types/world';
 import type { BasketItem, FaceDesign, FactoryContext, FactoryInspection, FunctionDesign, InputField, PackDesign, PackerConfig, Scalar } from './types';
@@ -49,7 +50,7 @@ function useEditor<T extends object>({ card, host }: PluginViewProps) {
 }
 
 function Frame({ title, children, task, level }: {
-  title: string; step: string; children: ReactNode; task: ReturnType<typeof useTask>; level: string;
+  title: string; children: ReactNode; task: ReturnType<typeof useTask>; level: string;
 }) {
   return <section className="factory nodrag nowheel" data-level={level} aria-label={title}>
     <fieldset disabled={task.busy}>{children}</fieldset>
@@ -84,7 +85,7 @@ function LegacyPackDesigner(props: PluginViewProps & { onOpenIDE: () => void }) 
   const [opened, setOpened] = useState(false);
   const metadata = (key: keyof PackDesign['creator'], value: string) => change({ creator: { ...draft.creator, [key]: value } });
   if (props.level === 'preview') return <ToolPreview id={props.card.id}><strong>{draft.name}</strong><small>{draft.version} · {PACK_DESIGNS[draft.creator.packaging ?? 'standard'].label}</small><p>包装、发布信息与使用说明</p></ToolPreview>;
-  return <Frame title="卡包设计器" step="01 / 包装" task={task} level={props.level}>
+  return <Frame title="卡包设计器" task={task} level={props.level}>
     <div className="factory-design-grid"><div className="factory-controls">
       <label>卡包名称<input maxLength={120} value={draft.name} onChange={event => change({ name: event.target.value })} /></label>
       <div className="factory-row"><label>Pack ID<input required maxLength={100} pattern={PACK_ID_PATTERN} value={draft.id} onChange={event => change({ id: event.target.value })} /></label>
@@ -126,7 +127,7 @@ export function FunctionDesigner(props: PluginViewProps) {
   const linkedFace = inputs.context?.inputs.face?.config as FaceDesign | undefined;
   const buttons = linkedFace ? faceButtonTargets(linkedFace) : [];
   if (props.level === 'preview') return <ToolPreview id={props.card.id}><strong>{draft.fields.length} 个输入字段</strong><small>{draft.fields.map(field => field.label).join(' / ')}</small><p>{({ template: '文本模板', sum: '数值求和', multiply: '数值乘积', join: '内容拼接' })[draft.operation]}</p></ToolPreview>;
-  return <Frame title="功能设计器" step="03 / 功能" task={task} level={props.level}>
+  return <Frame title="功能设计器" task={task} level={props.level}>
     <p className="factory-hint">添加表单字段，再选择运行方式。模板使用 {'{{字段标识}}'} 插入内容。</p>
     <section className="factory-button-bindings" aria-label="卡面按钮">
       <h4>卡面按钮</h4><Inputs {...inputs} />
@@ -168,7 +169,7 @@ function Inputs({ context, error }: ReturnType<typeof useInputs>) {
 export function Printer(props: PluginViewProps) {
   const task = useTask(), inputs = useInputs(props.card.id), [printed, setPrinted] = useState<WorldCard>();
   if (props.level === 'preview') return <ToolPreview id={props.card.id}><strong>{inputs.context && !inputs.context.issues.length ? '已就绪，可以印刷' : '等待设计连线'}</strong><small>卡面 + 功能 → 预设卡牌</small></ToolPreview>;
-  return <Frame title="卡牌印刷器" step="04 / 印刷" task={task} level={props.level}>
+  return <Frame title="卡牌印刷器" task={task} level={props.level}>
     <Inputs {...inputs} />
     {inputs.context?.inputs.face && <FacePreview face={inputs.context.inputs.face.config as FaceDesign} />}
     {inputs.context?.inputs.face && <CoreButtonWarnings face={inputs.context.inputs.face.config as FaceDesign} />}
@@ -230,7 +231,7 @@ export function Packer(props: PluginViewProps) {
   };
   if (props.level === 'preview') return <ToolPreview id={props.card.id}><div className="factory-dropzone" data-factory-packer={props.card.id}>
     <Package size={18} /><strong>拖入卡牌 / Legion</strong><small>{config.items.length} 份素材</small></div></ToolPreview>;
-  return <Frame title="打包器" step="05 / 发布" task={task} level={props.level}>
+  return <Frame title="打包器" task={task} level={props.level}>
     <Inputs {...inputs} />
     <div className="factory-dropzone" data-factory-packer={props.card.id}><Package size={25} /><strong>将卡牌或 Legion 拖到这里</strong>
       <small>保留原件；导出时复制当前配置。</small>
@@ -250,7 +251,7 @@ export function Packer(props: PluginViewProps) {
       {params.map((param, index) => <div key={index} className="factory-row"><label>参数标识<input maxLength={40} value={param.key} onChange={event => setParams(current => current.map((p, i) => i === index ? { ...p, key: event.target.value } : p))} /></label>
         <label>类型<select value={param.type} onChange={event => setParams(current => current.map((p, i) => i === index ? { ...p, type: event.target.value as InputField['type'], value: event.target.value === 'number' ? 0 : event.target.value === 'boolean' ? false : '' } : p))}>
           <option value="text">文本</option><option value="number">数值</option><option value="boolean">开关</option></select></label>
-        <FieldInput field={{ key: param.key, label: '参数值', type: param.type, default: param.value, required: false }} value={param.value}
+        <FaceFieldInput field={{ key: param.key, label: '参数值', type: param.type, default: param.value, required: false }} value={param.value}
           onChange={value => setParams(current => current.map((p, i) => i === index ? { ...p, value } : p))} />
         <button type="button" aria-label={`删除参数 ${index + 1}`} onClick={() => setParams(current => current.filter((_, i) => i !== index))}><Trash2 size={14} /></button></div>)}
       <button type="button" disabled={params.length >= 30} onClick={() => setParams(current => [...current, { key: '', value: '', type: 'text' }])}><Plus size={14} />添加参数</button>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TEST_CATALOG } from "../state/catalog.fixture";
-import { defaultDecks, normalizeDecks } from "./ComponentPalette";
+import { defaultDecks, normalizeDecks } from "./legacyDecks";
 
 describe("component palette creation policy", () => {
   it("moves Paper to Objects and removes the retired Library deck", () => {

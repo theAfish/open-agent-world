@@ -33,18 +33,19 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
   const sandbox = useWorldStore(s => s.sandboxInfo[card.id]);
   const sandboxError = useWorldStore(s => s.sandboxErrors[card.id]);
   const catalog = useWorldStore((state) => state.catalog);
+  const definition = catalog.node_types.find(item => item.id === card.type);
   if (card.type === "core.execution-graph") return <div data-material-layer="top-print" style={{height: "100%"}}><ExecutionGraphCard card={card} /></div>;
   if (card.type === 'core.jobs') return <div data-material-layer="top-print" style={{ height: '100%' }}><JobsCard card={card} /></div>;
   if (card.type === MINISTER_ROLE_CARD) return <div data-material-layer="top-print"><MinisterRoleCardPreview /></div>;
 
 
-  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1")) return <div data-material-layer="top-print"><SkillToolboxPreview card={card} /></div>;
-  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1")) return <div data-material-layer="top-print"><TaskBoardPreview card={card} /></div>;
+  if (definition?.traits.includes("ui.skill-package.v1")) return <div data-material-layer="top-print"><SkillToolboxPreview card={card} /></div>;
+  if (definition?.traits.includes("ui.task-board.v1")) return <div data-material-layer="top-print"><TaskBoardPreview card={card} /></div>;
 
-  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1")) return <div data-material-layer="top-print"><SkillToolboxPreview card={card} single /></div>;
+  if (definition?.traits.includes("ui.skill.v1")) return <div data-material-layer="top-print"><SkillToolboxPreview card={card} single /></div>;
 
 
-  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent")) return <AgentPreview card={card} />;
+  if (definition?.traits.includes("core.agent")) return <AgentPreview card={card} />;
 
   if (card.type === "conversation") {
     return (
@@ -99,7 +100,6 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
     </div>
   );
 
-  const definition = catalog.node_types.find((item) => item.id === card.type);
   return (
     <div className="node-preview-summary">
       <p data-material-layer="top-print">{compactText(card.config.summary ?? card.config.description, definition?.description ?? t("Plugin-defined world object."))}</p>

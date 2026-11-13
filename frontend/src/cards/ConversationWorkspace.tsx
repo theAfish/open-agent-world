@@ -27,7 +27,6 @@ import { useWorldStore } from "../state/worldStore";
 import { useConversationView } from "../state/conversationView";
 import { surfaceDraftKey, useSurfaceDraft, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { useHydrationLease } from '../canvas/useCardRendering';
-import { useOpenFiles } from "../state/openFiles";
 import type { ContextStatus, ConversationAgent, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
 import { WorkspaceSection, useWorkspaceSections } from '../workspace/WorkspaceSection';
 import { WorkspaceEmptyState } from '../workspace/WorkspacePrimitives';

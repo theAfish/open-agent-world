@@ -16,7 +16,7 @@ import { observeInteractions, type WorldInteraction } from '../state/interaction
 import { positionSurfaceAtNodeCenter } from '../canvas/nodeDisplacement';
 import { getConnectionOptions } from '../state/relationships';
 import { STEPS, stepComplete, type Baseline, type Demonstration, type Observation, type Role, type Target } from './steps';
-import type { LegionSummary, WorldCard, WorldSnapshot, WorldPosition } from '../types/world';
+import type { LegionSummary, WorldSnapshot, WorldPosition } from '../types/world';
 
 const TYPES: Record<Role, string> = { demo: 'text', practice: 'text', agent: 'agent', conversation: 'conversation', sandbox: 'sandbox', glueA: 'text', glueB: 'text', ministerRole: 'core.minister-role', minister: 'agent', legion: 'legion' };
 export interface DemoRecord { id: string; name: string; created_at?: string; contentRevision?: number }

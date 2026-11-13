@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { LockKeyhole, LogOut } from 'lucide-react';
-import { t, useLocale } from '../i18n';
+import { t } from '../i18n';
 import { configureWorkspaceApi, normalizeCard, normalizeEdge } from '../api/client';
 import { WorkspaceWindow } from '../legions/LegionWorkspace';
 import { WorkspaceAccess, type PluginDeploymentAccess } from '../workspace/WorkspaceAccess';
@@ -24,16 +24,13 @@ type PublishedWorkspace = {
 /** Authentication and scoped data bootstrap; all workspace rendering stays shared. */
 export function RuntimeApp({ name }: { name: string }) {
   useApplicationAppearance();
-  const locale = useLocale(state => state.locale);
-  const theme = useWorldStore(state => state.theme);
   const [app, setApp] = useState<PublishedWorkspace>();
   const [activeId, setActiveId] = useState<string>();
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
-  useEffect(() => { document.documentElement.lang = locale; document.title = name; }, [locale, name]);
-  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => { document.title = name; }, [name]);
   const clear = () => {
     setApp(undefined);
     useWorldStore.setState({ cards: [], edges: [], events: [], toasts: [], sandboxInfo: {}, sandboxErrors: {} });

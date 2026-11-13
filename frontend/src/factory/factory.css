@@ -7,10 +7,6 @@
 .factory-art-element { position: absolute; box-sizing: border-box; line-height: 1.45; white-space: pre-wrap; overflow: hidden; overflow-wrap: anywhere; }
 .factory-art-element strong { font: inherit; font-weight: 650; }.factory-art-element svg { display: inline-block; }
 .factory-art-element[data-kind=icon] { display: flex; align-items: center; justify-content: center; }
-.factory-sample-fields { display: grid; gap: 8px; }.factory-sample-fields[data-layout=columns] { grid-template-columns: 1fr 1fr; }
-.factory-sample-fields span { display: block; border: 1px solid currentColor; opacity: .5; border-radius: 7px; padding: 10px; font-size: 0.75rem; }
-.factory-sample-action { display: flex; align-items: center; justify-content: center; height: 100%; border-radius: 8px; color: white; }
-.factory-sample-result { display: block; padding: 10px; border: 1px dashed currentColor; opacity: .5; height: 100%; }
 .world-card.node-surface.factory-custom-surface { background: transparent; border: 0; box-shadow: none; border-radius: 0 !important; }
 .world-card.node-surface.factory-custom-surface::before, .world-card.node-surface.factory-custom-surface::after { display: none; }
 .factory-custom-surface .factory-artwork { filter: drop-shadow(0 8px 12px #00000024); }

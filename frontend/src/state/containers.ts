@@ -14,7 +14,7 @@ export function containerShowsWorkspace(card: WorldCard, catalog: PluginCatalog,
 
 /** Resolve once per world update, including members outside the current chunks. */
 export function containerDisplayOwners(cards: WorldCard[], catalog: PluginCatalog, levels: Readonly<Record<string, NodeSurfaceLevel>>) {
-  const byId = new Map(cards.map(card => [card.id, card]));
+  const byId = cardIndex(cards);
   const resolved = new Map<string, string | undefined>();
   const visit = (card: WorldCard): string | undefined => {
     if (resolved.has(card.id)) return resolved.get(card.id);

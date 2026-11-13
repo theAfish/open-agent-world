@@ -31,7 +31,7 @@ export function elementStyle(element: FaceElement, surface: SurfaceDesign): CSSP
 }
 
 export function FaceArtwork({ face, surface, level, functionDesign, render, thumbnail = false, interactive = true, children, proof = 'composite' }: {
-  face: FaceDesign; surface: SurfaceDesign; level?: NodeSurfaceLevel; functionDesign?: FunctionDesign; render?: (element: FaceElement) => ReactNode | undefined; sample?: boolean; thumbnail?: boolean; interactive?: boolean; children?: ReactNode; proof?: PrintProof;
+  face: FaceDesign; surface: SurfaceDesign; level?: NodeSurfaceLevel; functionDesign?: FunctionDesign; render?: (element: FaceElement) => ReactNode | undefined; thumbnail?: boolean; interactive?: boolean; children?: ReactNode; proof?: PrintProof;
 }) {
   const id = `face-${useId().replaceAll(':', '')}`;
   const png = surface.background_png, alpha = png && surface.image_shape;
@@ -75,7 +75,7 @@ export function FaceArtwork({ face, surface, level, functionDesign, render, thum
         <div className="factory-ink-source" data-ink-source aria-hidden="true">{shapes(surface.shapes.slice(1), true)}{background(true)}{elements(surface.elements, true)}</div>
         {layers.map((layer, index) => {
           if (layer.kind !== 'ink' || !layer.content) return null;
-          const ids = printContentIds(layer, layers, [...surface.elements, ...surface.shapes.slice(1)].map(item => item.id));
+          const ids = printContentIds(layer, layers, contentIds);
           return <InkPrintLayer key={layer.id} layer={layer} order={index} hidden={proof === 'finishing' || proof === 'laminate'}>
             {shapes(surface.shapes.slice(1).filter(shape => ids.includes(shape.id)))}
             {layer.pattern ? <div className="factory-layer-pattern" style={{ '--print-density': layer.pattern.density, '--face-accent': layer.color } as CSSProperties}><WorldCardPrint motif={layer.pattern.motif} fullBleed /></div> : layer.content.source === 'all' && background()}

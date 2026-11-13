@@ -36,7 +36,7 @@ import { filterCardsToChunks, getViewportChunkKeys, sameViewportChunks, viewport
 import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { summarizeLegionSelection } from "./legions";
-import { ancestors, containerContentBounds, containerDefinition, descendants, ownedDescendants, ownedCardIds, isContainer, parentFirst, resizeContainerLayout } from "./containers";
+import { ancestors, containerContentBounds, containerDefinition, ownedDescendants, ownedCardIds, isContainer, parentFirst, resizeContainerLayout } from "./containers";
 import { surfaceLevelForNode, useNodeSurfaceStore } from "./nodeSurfaces";
 import { isEquipmentConnection } from "./equipment";
 import { validateConnection, type RelationshipOption } from "./relationships";
@@ -155,24 +155,23 @@ function restoreCardInput(card: RestorableCard): CardCreateInput {
 
 async function restoreCard(card: RestorableCard): Promise<WorldCard> {
   const restored = await worldApi.restoreNode(restoreCardInput(card));
-  if (card.restoreCardState) {
-    try { await worldApi.restoreCardStateSnapshot(restored.id, card.restoreCardState); }
-    catch (error) { await worldApi.deleteNode(restored.id); throw error; }
-  }
-  if (card.restoreDocument) {
-    try {
+  try {
+    if (card.restoreCardState) {
+      await worldApi.restoreCardStateSnapshot(restored.id, card.restoreCardState);
+    }
+    if (card.restoreDocument) {
       const current = await worldApi.getNodeDocument(restored.id);
       await worldApi.nodeDocumentAction(restored.id, "replace", card.restoreDocument, current.revision);
     }
-    catch (error) { await worldApi.deleteNode(restored.id); throw error; }
-  }
-  if (card.type === "legion" && card.restoreLegionState) {
-    try { await worldApi.saveLegionState(restored.id, card.restoreLegionState, 0); }
-    catch (error) { await worldApi.deleteNode(restored.id); throw error; }
-  }
-  if (card.restorePluginDefaults && Object.keys(card.restorePluginDefaults).length) {
-    try { await worldApi.restoreNodeDefaults(restored.id, card.restorePluginDefaults); }
-    catch (error) { await worldApi.deleteNode(restored.id); throw error; }
+    if (card.type === "legion" && card.restoreLegionState) {
+      await worldApi.saveLegionState(restored.id, card.restoreLegionState, 0);
+    }
+    if (card.restorePluginDefaults && Object.keys(card.restorePluginDefaults).length) {
+      await worldApi.restoreNodeDefaults(restored.id, card.restorePluginDefaults);
+    }
+  } catch (error) {
+    await worldApi.deleteNode(restored.id);
+    throw error;
   }
   return restored;
 }
