@@ -8,7 +8,7 @@ import { reportInteraction } from './interactions';
 
 export interface GlueBox { x: number; y: number; width: number; height: number; level: NodeSurfaceLevel; sizes?: Partial<Record<NodeSurfaceLevel, SurfaceSize>> }
 export interface GlueBond { a: string; b: string; side: 'right' | 'left' | 'top' | 'bottom' }
-export interface GlueCandidate extends GlueBond { dx: number; dy: number }
+export interface GlueCandidate { dx: number; dy: number; bonds: GlueBond[]; alignment?: { a: string; b: string; edge: GlueBond['side'] } }
 /** Change the surface size, then reposition its bonded neighbours in the same coordinate space. */
 export function reflowGlueSurfaces(boxes: Record<string, GlueBox>, bonds: GlueBond[], levels: ReadonlyMap<string, NodeSurfaceLevel>, surfaceSizes: SurfaceSizes) {
   const changed = Object.keys(boxes).filter(id => {
@@ -62,28 +62,86 @@ export function glueGroup(id: string, bonds: GlueBond[]): Set<string> {
   return ids;
 }
 export function findGlue(moving: Record<string, GlueBox>, targets: Record<string, GlueBox>, threshold: number): GlueCandidate | undefined {
-  let best: GlueCandidate | undefined;
-  let distance = threshold;
+  const pairs: Array<{ a: string; b: string; box: GlueBox; other: GlueBox }> = [];
+  const xs = new Set([0]), ys = new Set([0]);
   for (const [a, box] of Object.entries(moving)) for (const [b, other] of Object.entries(targets)) {
     if (a === b) continue;
+    pairs.push({ a, b, box, other });
     const overlapX = Math.min(box.x + box.width, other.x + other.width) - Math.max(box.x, other.x);
     const overlapY = Math.min(box.y + box.height, other.y + other.height) - Math.max(box.y, other.y);
-    const candidates: Array<[GlueBond['side'], number, number, boolean]> = [
-      ['right', other.x - box.x - box.width, 0, overlapY >= 24],
-      ['left', other.x + other.width - box.x, 0, overlapY >= 24],
-      ['bottom', 0, other.y - box.y - box.height, overlapX >= 24],
-      ['top', 0, other.y + other.height - box.y, overlapX >= 24],
-    ];
-    for (const [side, dx, dy, valid] of candidates) if (valid && Math.abs(dx + dy) < distance) {
-      distance = Math.abs(dx + dy); best = { a, b, side, dx, dy };
+    // A second-axis correction can turn a short overlap into a usable seam.
+    if (overlapY >= 24 - threshold) for (const dx of [other.x - box.x - box.width, other.x + other.width - box.x]) {
+      if (Math.abs(dx) > threshold) continue;
+      xs.add(dx);
+      for (const dy of [other.y - box.y, other.y + other.height - box.y - box.height]) {
+        if (Math.abs(dy) <= threshold) ys.add(dy);
+      }
+    }
+    if (overlapX >= 24 - threshold) for (const dy of [other.y - box.y - box.height, other.y + other.height - box.y]) {
+      if (Math.abs(dy) > threshold) continue;
+      ys.add(dy);
+      for (const dx of [other.x - box.x, other.x + other.width - box.x - box.width]) {
+        if (Math.abs(dx) <= threshold) xs.add(dx);
+      }
+    }
+  }
+  const offsets = [...xs].flatMap(dx => [...ys].map(dy => ({ dx, dy })));
+  offsets.sort((a, b) => Math.hypot(a.dx, a.dy) - Math.hypot(b.dx, b.dy));
+  let best: GlueCandidate | undefined;
+  let bestRank = -1;
+  for (const { dx, dy } of offsets) {
+    const bonds: GlueBond[] = [];
+    let blocked = false;
+    for (const { a, b, box, other } of pairs) {
+      const x = box.x + dx, y = box.y + dy;
+      const overlapX = Math.min(x + box.width, other.x + other.width) - Math.max(x, other.x);
+      const overlapY = Math.min(y + box.height, other.y + other.height) - Math.max(y, other.y);
+      if (overlapX > .01 && overlapY > .01) { blocked = true; break; }
+      if (overlapY >= 24) {
+        if (Math.abs(x + box.width - other.x) < .01) bonds.push({ a, b, side: 'right' });
+        else if (Math.abs(x - other.x - other.width) < .01) bonds.push({ a, b, side: 'left' });
+      }
+      if (overlapX >= 24) {
+        if (Math.abs(y + box.height - other.y) < .01) bonds.push({ a, b, side: 'bottom' });
+        else if (Math.abs(y - other.y - other.height) < .01) bonds.push({ a, b, side: 'top' });
+      }
+    }
+    if (blocked || !bonds.length) continue;
+    const candidate = { dx, dy, bonds };
+    const vertical = bonds.some(bond => bond.side === 'left' || bond.side === 'right');
+    const horizontal = bonds.some(bond => bond.side === 'top' || bond.side === 'bottom');
+    if (vertical && horizontal) return candidate;
+    // Prefer flush ends on a real seam. An inside corner still has priority.
+    let alignment: GlueCandidate['alignment'];
+    for (const { a, b, side } of bonds) {
+      const box = moving[a], other = targets[b];
+      const upright = side === 'left' || side === 'right';
+      const start = upright ? box.y + dy - other.y : box.x + dx - other.x;
+      const end = start + (upright ? box.height - other.height : box.width - other.width);
+      if (Math.abs(start) < .01) alignment = { a, b, edge: upright ? 'top' : 'left' };
+      else if (Math.abs(end) < .01) alignment = { a, b, edge: upright ? 'bottom' : 'right' };
+      if (alignment) break;
+    }
+    const rank = alignment ? 1 : 0;
+    if (rank > bestRank) {
+      best = alignment ? { ...candidate, alignment } : candidate;
+      bestRank = rank;
     }
   }
   return best;
 }
-interface GlueState { activeEdits: number; boxes: Record<string, GlueBox>; bonds: GlueBond[]; setLayout: (boxes: Record<string, GlueBox>, bond?: GlueBond) => void; detach: (id: string) => void }
+interface GlueState { activeEdits: number; boxes: Record<string, GlueBox>; bonds: GlueBond[]; setLayout: (boxes: Record<string, GlueBox>, bonds?: GlueBond[]) => void; detach: (id: string) => void }
 export const useGlueStore = create<GlueState>()(persist((set) => ({
   activeEdits: 0, boxes: {}, bonds: [],
-  setLayout: (boxes, bond) => set(state => ({ boxes: { ...state.boxes, ...Object.fromEntries(Object.entries(boxes).map(([id, box]) => [id, { ...state.boxes[id], ...box }])) }, bonds: bond && !state.bonds.some(b => b.a === bond.a && b.b === bond.b || b.a === bond.b && b.b === bond.a) ? [...state.bonds, { a: bond.a, b: bond.b, side: bond.side }] : state.bonds })),
+  setLayout: (boxes, added = []) => set(state => {
+    const bonds = added.length ? [...state.bonds] : state.bonds;
+    for (const bond of added) if (!bonds.some(b => b.a === bond.a && b.b === bond.b || b.a === bond.b && b.b === bond.a)) {
+      bonds.push({ a: bond.a, b: bond.b, side: bond.side });
+    }
+    const ids = new Set(bonds.flatMap(bond => [bond.a, bond.b]));
+    const merged = { ...state.boxes, ...Object.fromEntries(Object.entries(boxes).map(([id, box]) => [id, { ...state.boxes[id], ...box }])) };
+    return { bonds, boxes: Object.fromEntries(Object.entries(merged).filter(([id]) => ids.has(id))) };
+  }),
   detach: id => set(state => {
     const bonds = state.bonds.filter(b => b.a !== id && b.b !== id);
     const ids = new Set(bonds.flatMap(b => [b.a, b.b]));

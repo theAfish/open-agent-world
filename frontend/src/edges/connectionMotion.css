@@ -1,0 +1,45 @@
+/* A connection becomes solid as its endpoint locks onto a valid card. */
+.world-canvas .semantic-connection-path {
+  stroke: var(--canvas-selection, var(--accent));
+  stroke-linecap: round;
+  transition: stroke 140ms ease, opacity 140ms ease;
+}
+.world-canvas .semantic-connection.is-valid .semantic-connection-path { stroke-dasharray: none; }
+.world-canvas .semantic-connection .semantic-connection-dot {
+  fill: var(--surface-raised);
+  stroke: var(--canvas-selection, var(--accent));
+  stroke-width: 1.5;
+}
+.world-canvas .semantic-connection .semantic-connection-lock {
+  fill: none;
+  stroke: var(--canvas-selection, var(--accent));
+  stroke-width: 1;
+  opacity: .5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: connection-lock 180ms ease-out both;
+}
+.world-canvas .semantic-connection.is-invalid .semantic-connection-dot { stroke: var(--danger); }
+.world-canvas .react-flow__handle.connection-drop-surface.valid {
+  box-shadow: inset 0 0 0 calc(1.5px * var(--canvas-ui-scale, 1)) var(--canvas-selection, var(--accent));
+  animation: connection-target-in 180ms ease-out both;
+}
+.world-canvas .connection-hover-hint {
+  width: calc(12px * var(--canvas-ui-scale, 1));
+  height: calc(12px * var(--canvas-ui-scale, 1));
+}
+.world-canvas :is(.world-card, .container-frame)[data-connection-hot="true"] .connection-hover-hint { opacity: .85; }
+
+@keyframes connection-lock {
+  from { opacity: 0; scale: 1.65; }
+  to { opacity: .5; scale: 1; }
+}
+@keyframes connection-target-in {
+  from { opacity: .25; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .world-canvas :is(.semantic-connection-path, .semantic-edge-path, .semantic-edge-endpoint) { transition: none; }
+  .world-canvas .semantic-connection .semantic-connection-lock,
+  .world-canvas .react-flow__handle.connection-drop-surface.valid { animation: none; }
+}

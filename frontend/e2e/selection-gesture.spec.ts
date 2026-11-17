@@ -43,7 +43,14 @@ test('live card updates preserve an active marquee and the completed selection',
     for (const card of cards) {
       await expect(card).toHaveClass(/is-selected/);
       await expect(card).toHaveCSS('outline-style', 'solid');
-      await expect(card).toHaveCSS('outline-width', '2px');
+      await expect(card).toHaveCSS('outline-offset', '0px');
+      const lineWidth = await card.evaluate(element => {
+        const style = getComputedStyle(element);
+        return parseFloat(style.outlineWidth) / Number(style.getPropertyValue('--canvas-ui-scale'));
+      });
+      expect(lineWidth).toBeGreaterThan(0);
+      expect(lineWidth).toBeLessThanOrEqual(1.5);
+      await expect(card).not.toHaveCSS('outline-color', 'rgba(0, 0, 0, 0)');
     }
     await expect(selection).toBeVisible();
     await expect.poll(async () => (await cards[0].boundingBox())!.x - before.x).toBeGreaterThan(40);

@@ -6,7 +6,7 @@ import type { CanvasNode } from '../cards/types';
 import { containerDefinition, containerShowsWorkspace } from '../state/containers';
 import { useEquipmentPanel } from '../state/equipment';
 import { beginGlueEdit, glueGroup, persistGlue, refreshGlue, useGlueStore, type GlueBox } from '../state/glue';
-import { useNodeSurfaceStore } from '../state/nodeSurfaces';
+import { NODE_SURFACE_RADIUS, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { minimumSurfaceSize } from '../state/surfaceGeometry';
 import { isShadow } from '../state/shadowCollection';
 import { useWorldStore } from '../state/worldStore';
@@ -185,9 +185,14 @@ export function ResizeLayer({ nodes, setNodes }: { nodes: CanvasNode[]; setNodes
       if (active?.node.id === node.id && !corners.includes(active.corner)) corners.push(active.corner);
       return corners.map(corner => {
         const box = live[node.id];
-        return <button key={`${node.id}-${corner}`} type="button" className={`surface-resize-arc nodrag nopan ${corner}`} data-resize-node={node.id} data-resize-corner={corner}
+        // Anchor to the rounded boundary; CSS adds a fixed screen-space gap.
+        // Drag deltas still resize the full, unchanged rectangle.
+        const radius = node.type === 'container' ? 24 : NODE_SURFACE_RADIUS[box.level];
+        const inset = Math.min(radius, box.width / 2, box.height / 2) * (1 - Math.SQRT1_2);
+        return <button key={`${node.id}-${corner}`} type="button" className={`surface-resize-handle nodrag nopan ${corner}`} data-resize-node={node.id} data-resize-corner={corner}
+          data-active={active?.node.id === node.id && active.corner === corner || undefined}
           aria-label={t('缩放 {v0} {v1}', { v0: node.data.card.name, v1: corner })}
-          style={{ left: box.x + (corner.endsWith('right') ? box.width : 0), top: box.y + (corner.startsWith('bottom') ? box.height : 0) }}
+          style={{ left: box.x + (corner.endsWith('right') ? box.width - inset : inset), top: box.y + (corner.startsWith('bottom') ? box.height - inset : inset) }}
           onPointerDown={event => start(event, node, corner)} onPointerMove={move} onPointerUp={() => { void finish(); }}
           onPointerCancel={() => { void finish(true); }} onLostPointerCapture={() => { void finish(true); }}
           onClick={event => event.stopPropagation()} />;

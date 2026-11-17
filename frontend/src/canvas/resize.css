@@ -1,30 +1,44 @@
-.surface-resize-arc {
+.surface-resize-handle {
+  --resize-offset-x: -8px;
+  --resize-offset-y: -8px;
   position: absolute;
   z-index: 40;
   pointer-events: auto;
-  width: 26px;
-  height: 26px;
-  transform: translate(-50%, -50%);
+  width: 30px;
+  height: 30px;
+  /* Keep the control outside the silhouette by the same distance at every zoom. */
+  transform: translate(-50%, -50%) scale(var(--canvas-ui-scale, 1)) translate(var(--resize-offset-x), var(--resize-offset-y));
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: 50%;
   background: transparent;
   touch-action: none;
   cursor: nwse-resize;
 }
-.surface-resize-arc::after {
+.surface-resize-handle.top-right, .surface-resize-handle.bottom-right { --resize-offset-x: 8px; }
+.surface-resize-handle.bottom-left, .surface-resize-handle.bottom-right { --resize-offset-y: 8px; }
+.surface-resize-handle::after {
   content: '';
   position: absolute;
-  inset: 5px;
-  border-right: 2px solid #4f957d;
-  border-bottom: 2px solid #4f957d;
-  border-radius: 0 0 9px;
-  opacity: .75;
+  inset: 11px;
+  border: 1.5px solid var(--canvas-selection);
+  border-radius: 2.5px;
+  background: var(--surface-raised);
+  box-shadow: 0 1px 3px var(--shadow);
   pointer-events: none;
+  transition: background var(--motion-fast) ease, box-shadow var(--motion-fast) ease, scale var(--motion-fast) var(--motion-ease);
+  animation: resize-handle-enter var(--motion-normal) var(--motion-ease);
 }
-.surface-resize-arc.top-left::after { transform: rotate(180deg); }
-.surface-resize-arc.top-right::after { transform: rotate(-90deg); }
-.surface-resize-arc.bottom-left::after { transform: rotate(90deg); }
-.surface-resize-arc.top-right, .surface-resize-arc.bottom-left { cursor: nesw-resize; }
-.surface-resize-arc:hover::after, .surface-resize-arc:active::after, .surface-resize-arc:focus-visible::after { opacity: 1; }
-.surface-resize-arc:focus-visible { outline: 1px dashed var(--accent); outline-offset: 1px; }
+.surface-resize-handle.top-right, .surface-resize-handle.bottom-left { cursor: nesw-resize; }
+.surface-resize-handle:is(:hover, :focus-visible)::after {
+  scale: 1.25;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--canvas-selection) 12%, transparent);
+}
+.surface-resize-handle:is(:active, [data-active])::after {
+  background: var(--canvas-selection);
+  scale: 1.1;
+}
+.surface-resize-handle:focus-visible { outline: 1px solid var(--canvas-selection); outline-offset: -3px; }
+@keyframes resize-handle-enter { from { opacity: 0; scale: .75; } to { opacity: 1; scale: 1; } }
+@media (pointer: coarse) { .surface-resize-handle { width: 44px; height: 44px; } .surface-resize-handle::after { inset: 18px; } }
+@media (prefers-reduced-motion: reduce) { .surface-resize-handle::after { animation: none; transition: none; } }

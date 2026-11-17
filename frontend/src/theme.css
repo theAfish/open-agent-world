@@ -201,6 +201,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 
 .world-shell { background: var(--canvas); isolation: isolate; overflow: clip; }
 
+.world-canvas {
+  --canvas-selection: color-mix(in srgb, var(--accent) 82%, var(--ink-soft));
+}
+
 .world-canvas .react-flow {
   background: transparent;
   touch-action: none;
@@ -215,6 +219,16 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 
 .world-canvas .react-flow__pane { cursor: grab; }
 .world-canvas .react-flow__pane:active { cursor: grabbing; }
+.world-canvas .react-flow__selection {
+  border: 1px solid var(--canvas-selection);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.world-canvas .react-flow__nodesselection-rect {
+  border: 1px dashed color-mix(in srgb, var(--canvas-selection) 45%, transparent);
+  border-radius: 12px;
+  background: transparent;
+}
 
 /* Canvas backgrounds never intercept interaction with cards or the pane. */
 .canvas-background,
@@ -409,14 +423,23 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   background: linear-gradient(155deg, var(--card-surface), var(--card-soft));
   box-shadow: 0 12px 22px var(--shadow), 0 3px 7px color-mix(in srgb, var(--shadow) 65%, transparent), inset 0 1px 0 var(--highlight);
   overflow: visible;
-  transition: width 180ms ease, min-height 180ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition: width 180ms ease, min-height 180ms ease, border-color 160ms ease, outline-color var(--motion-fast) ease, box-shadow 160ms ease, transform 160ms ease;
 }
 .world-card--agent { --card-kind: var(--agent); }
 .world-card--text { --card-kind: var(--text); }
 .world-card--image { --card-kind: var(--image); }
 .world-card--sandbox { --card-kind: var(--sandbox); }
 .world-card.is-expanded { min-height: 510px; padding: 14px 15px 11px; box-shadow: 0 18px 34px var(--shadow-deep), 0 4px 10px var(--shadow), inset 0 1px 0 var(--highlight); }
-.world-card.is-selected { border-color: color-mix(in srgb, var(--accent) 62%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft), 0 18px 32px var(--shadow-deep), 0 4px 10px var(--shadow), inset 0 1px 0 var(--highlight); }
+/* Selection follows the surface's own silhouette without replacing its material
+   or elevation. Keep the line readable at overview and detail zoom levels. */
+.world-canvas :is(.world-card, .container-frame) {
+  outline: calc(1.5px * var(--canvas-ui-scale, 1)) solid transparent;
+  outline-offset: 0;
+}
+.world-canvas :is(.world-card, .container-frame).is-selected {
+  outline-color: var(--canvas-selection);
+}
+.world-canvas .container-frame:not(.world-card) { transition: outline-color var(--motion-fast) ease; }
 .world-card.is-running { border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); }
 .world-card.is-error { border-color: color-mix(in srgb, var(--danger) 58%, var(--line)); }
 .world-card.is-ephemeral { opacity: 0.82; box-shadow: 0 7px 15px var(--shadow), inset 0 1px 0 var(--highlight); }
@@ -1017,6 +1040,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   transition:
     border-radius 360ms cubic-bezier(0.2, 0.82, 0.2, 1),
     border-color 180ms ease,
+    outline-color var(--motion-fast) ease,
     box-shadow 280ms ease;
 }
 
@@ -1043,11 +1067,6 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .world-card.node-surface.is-inspector { border-radius: 24px; cursor: default; box-shadow: 0 22px 45px var(--shadow-deep), 0 5px 12px var(--shadow), inset 0 1px 0 var(--highlight); }
 .world-card.node-surface.is-workspace { border-radius: 20px; cursor: grab; box-shadow: 24px 30px 80px rgba(30, 28, 24, 0.3), inset 0 1px 0 var(--highlight); }
 .world-card.node-surface.is-workspace:active { cursor: grabbing; }
-.world-card.node-surface.is-selected {
-  /* Surface shadows vary by level; selection must remain visible independently. */
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
 .world-card.node-surface.is-ephemeral { min-height: 0; }
 
 .node-surface-header {
@@ -1177,10 +1196,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .workspace-content { min-width: 0; min-height: 0; font: var(--font-size-body)/var(--line-height-body) var(--font-ui); }
 
 /* Membership preview only; no overlay can intercept the existing drag gesture. */
-.container-frame[data-member-drop] { --drop-color:#7edbc1; outline:1px solid color-mix(in srgb,var(--drop-color) 65%,transparent); outline-offset:2px; box-shadow:0 0 12px color-mix(in srgb,var(--drop-color) 28%,transparent),0 0 36px color-mix(in srgb,var(--drop-color) 15%,transparent),inset 0 0 20px color-mix(in srgb,var(--drop-color) 8%,transparent); }
-.container-frame[data-member-drop="enter"] { --drop-color:#79baff; }
-.container-frame[data-member-drop="leave"] { --drop-color:#efb17f; }
-.container-frame[data-member-drop]::after { content:"";position:absolute;inset:-2px;border:3px solid transparent;border-radius:inherit;pointer-events:none;z-index:2;filter:drop-shadow(0 0 5px var(--drop-color)) drop-shadow(0 0 12px color-mix(in srgb,var(--drop-color) 45%,transparent)); }
+.container-frame[data-member-drop] { --drop-color:var(--canvas-selection); outline:1px solid color-mix(in srgb,var(--drop-color) 60%,transparent); outline-offset:0; box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--drop-color) 8%,transparent); }
+.container-frame[data-member-drop="leave"] { --drop-color:var(--ink-soft); }
+.container-frame[data-member-drop]::after { content:"";position:absolute;inset:0;border:2px solid transparent;border-radius:inherit;pointer-events:none;z-index:2;transition:border-color var(--motion-fast) ease; }
 .container-frame[data-member-drop-side="top"]::after { border-top-color:var(--drop-color); }
 .container-frame[data-member-drop-side="right"]::after { border-right-color:var(--drop-color); }
 .container-frame[data-member-drop-side="bottom"]::after { border-bottom-color:var(--drop-color); }
@@ -1728,7 +1746,6 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .legion-container > .legion-controls { pointer-events: auto; }
 /* Labels sit above container backgrounds (0), below member card surfaces (12+). */
 .world-canvas > .react-flow .react-flow__edgelabel-renderer { z-index: 1; }
-.legion-container.is-selected { outline: 2px solid #698b7d; outline-offset: 4px; }
 .legion-controls { overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
 .legion-settings-sidebar { width: min(380px, calc(100vw - 32px)); height: min(720px, calc(100dvh - 240px)); box-sizing: border-box; display: flex; flex-direction: column; pointer-events: auto; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 16px; box-shadow: var(--panel-shadow); cursor: default; }
 .legion-settings-sidebar > .legion-controls { min-height: 0; flex: 1; overscroll-behavior: contain; }
@@ -1911,9 +1928,7 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .skill-binary-preview { display: grid; justify-items: start; gap: 9px; font-size: 0.625rem; color: var(--ink-soft); }
 .skill-binary-preview img { max-width: 100%; max-height: 160px; object-fit: contain; border-radius: 6px; }
 .skill-container { position: relative; width: 100%; height: 100%; box-sizing: border-box; border: 2px solid #ac8b5780; border-radius: 24px; background: color-mix(in srgb, var(--surface) 45%, transparent); }
-.skill-container.is-selected { outline: 2px solid #ac8b57; outline-offset: 3px; }
 .container-frame.virtual-workspace { border: 2px dashed #697c7899; background: color-mix(in srgb, var(--surface) 18%, transparent); }
-.container-frame.virtual-workspace.is-selected { outline-color: #697c78; }
 .semantic-edge-path.is-generated { stroke-dasharray: 8 6; }
 .skill-container-hint { margin: 12px 24px; font-size: 0.6875rem; color: var(--ink-soft); pointer-events: none; }
 .skill-container-editor { position: fixed; inset: 8vh max(24px, calc((100vw - 1020px) / 2)); background: var(--surface-solid); border: 1px solid var(--line); border-radius: 16px; z-index: 100; box-shadow: var(--panel-shadow); }

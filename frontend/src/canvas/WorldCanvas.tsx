@@ -16,6 +16,8 @@ import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, beginGlueEdit, ca
 import { MapAtlas } from "./MapAtlas";
 import { CanvasBackground } from './CanvasBackground';
 import { CanvasCardLayers } from './CanvasCardLayers';
+import { CanvasMotionLayer } from './CanvasMotionLayer';
+import { canvasMotionReduced } from './canvasMotion';
 import { LegionDeploymentLayer } from './LegionDeploymentLayer';
 import { stableNode, stableNodeList } from './stableNodes';
 import { cardIndex } from '../state/cardIndex';
@@ -54,6 +56,7 @@ import { WorldCardNode } from "../cards/CardFrame";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
 import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine";
+import { ConnectionMotionLayer } from '../edges/ConnectionMotionLayer';
 import { SemanticEdge, type CanvasEdge } from "../edges/SemanticEdge";
 import { getNodeType } from "../state/catalog";
 import { buildCardDraft } from "../state/helpers";
@@ -147,7 +150,10 @@ export function WorldCanvas() {
   const glueEvent = useWorldStore(s => s.events.find(event => event.type.startsWith('state_') || event.type.startsWith('card_'))?.id);
   const activeGlueEdits = useGlueStore(s => s.activeEdits);
   const glueSocket = useWorldStore(s => s.socketState);
-  const glueDrag = useRef<{ origin: { x: number; y: number }; boxes: Record<string, GlueBox>; latest: Record<string, GlueBox>; candidate?: GlueCandidate }>();
+  const glueDrag = useRef<{
+    origin: { x: number; y: number }; boxes: Record<string, GlueBox>; latest: Record<string, GlueBox>; candidate?: GlueCandidate;
+    offset: { x: number; y: number }; motion?: { from: { x: number; y: number }; started: number };
+  }>();
   const [importStatus,setImportStatus]=useState("");
   const [importProgress,setImportProgress]=useState<PdfImportProgress>();
   const importingPdf=useRef(false);
@@ -313,6 +319,7 @@ export function WorldCanvas() {
   }, [renderingModel, connectingNodeId]);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
+  const glueAnimation = useRef<number>();
   const activeDragIds = useRef(new Set<string>());
   const cancelledDrag=useRef(false);
   const appliedSelectionRevision = useRef(selectionRevision);
@@ -322,6 +329,30 @@ export function WorldCanvas() {
     cancelAnimationFrame(positionAnimation.current);
     positionAnimation.current = undefined;
   }, []);
+
+  const cancelGlueAnimation = useCallback(() => {
+    if (glueAnimation.current === undefined) return;
+    cancelAnimationFrame(glueAnimation.current);
+    glueAnimation.current = undefined;
+  }, []);
+  useEffect(() => cancelGlueAnimation, [cancelGlueAnimation]);
+
+  const presentGlueDrag = useCallback(() => {
+    cancelGlueAnimation();
+    const gluing = glueDrag.current;
+    if (!gluing) return;
+    const target = { x: gluing.candidate?.dx ?? 0, y: gluing.candidate?.dy ?? 0 };
+    const progress = gluing.motion ? Math.min(1, (performance.now() - gluing.motion.started) / 140) : 1;
+    const eased = 1 - (1 - progress) ** 3;
+    const from = gluing.motion?.from ?? target;
+    gluing.offset = { x: from.x + (target.x - from.x) * eased, y: from.y + (target.y - from.y) * eased };
+    if (progress === 1) gluing.motion = undefined;
+    // The pointer remains immediate; only the magnetic correction eases.
+    // Keep displayed geometry in nodes so seams, handles and edges follow it.
+    const { latest, offset } = gluing;
+    setNodes(current => current.map(n => latest[n.id] ? { ...n, position: { x: latest[n.id].x + offset.x, y: latest[n.id].y + offset.y } } : n));
+    if (progress < 1) glueAnimation.current = requestAnimationFrame(presentGlueDrag);
+  }, [cancelGlueAnimation, setNodes]);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -601,13 +632,14 @@ export function WorldCanvas() {
   const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelledDrag.current=false;
     cancelPositionAnimation();
-    if ((glueBoxes[node.id] || glueActive && node.data.card.type !== MINISTER_ROLE_CARD) && node.type === 'worldCard' && !node.parentId && !node.data.card.ephemeral && !node.data.equipmentDetail) {
+    cancelGlueAnimation();
+    if ((glueBoxes[node.id] || draggedNodes.some(n => glueBoxes[n.id]) || glueActive && node.data.card.type !== MINISTER_ROLE_CARD) && node.type === 'worldCard' && !node.parentId && !node.data.card.ephemeral && !node.data.equipmentDetail) {
       cancelGlueRefresh();
       const ids = glueGroup(node.id, glueBonds);
       draggedNodes.forEach(n => glueGroup(n.id, glueBonds).forEach(id => ids.add(id)));
       const boxes = Object.fromEntries(nodesRef.current.filter(n => ids.has(n.id) && n.type === 'worldCard' && !n.parentId).map(n => [n.id,
         { x: n.position.x, y: n.position.y, width: Number(n.style?.width), height: Number(n.style?.height), level: n.data.surfaceLevel }]));
-      glueDrag.current = { origin: { x: boxes[node.id].x, y: boxes[node.id].y }, boxes, latest: boxes };
+      glueDrag.current = { origin: { x: boxes[node.id].x, y: boxes[node.id].y }, boxes, latest: boxes, offset: { x: 0, y: 0 } };
       useEquipmentDrag.getState().set();
       setDragging(true);
       activeDragIds.current = ids;
@@ -618,7 +650,7 @@ export function WorldCanvas() {
     activeDragIds.current.clear();
     activeDragIds.current.add(node.id);
     draggedNodes.forEach((draggedNode) => activeDragIds.current.add(draggedNode.id));
-  }, [cancelPositionAnimation, setDragging, glueActive, glueBoxes, glueBonds]);
+  }, [cancelPositionAnimation, cancelGlueAnimation, setDragging, glueActive, glueBoxes, glueBonds]);
 
   const equipmentDropOwner = useCallback((resource: CanvasNodeData["card"], x: number, y: number) => {
     // Only open, eligible panels have hit areas. Avoid scanning every world card
@@ -667,13 +699,14 @@ export function WorldCanvas() {
   const cancelNodeDrag = useCallback(() => {
       useCollectionDrag.getState().set();
       clearContainerDropHint();
+      cancelGlueAnimation();
       if(!activeDragIds.current.size)return;
       glueDrag.current = undefined;
       setGluePreview(undefined);
       useEquipmentDrag.getState().set();
       clearTransformationHints();
       cancelledDrag.current=true;activeDragIds.current.clear();setDragging(false);setNodes(mappedNodes);
-  }, [clearContainerDropHint, mappedNodes, setNodes, setDragging]);
+  }, [clearContainerDropHint, cancelGlueAnimation, mappedNodes, setNodes, setDragging]);
   useEffect(() => {
     const cancel = () => cancelNodeDrag();
     const escape=(event:KeyboardEvent)=>{if(event.key==="Escape"&&activeDragIds.current.size){event.preventDefault();cancel();}};
@@ -699,9 +732,13 @@ export function WorldCanvas() {
       const targets = Object.fromEntries(nodesRef.current.filter(n => !gluing.boxes[n.id] && tutorialAllowsCanvasTarget(n.id, 'glue') && n.type === 'worldCard' && !n.parentId && !n.hidden && !n.data.card.ephemeral && !n.data.equipmentDetail).map(n => [n.id,
         { x: n.position.x, y: n.position.y, width: Number(n.style?.width), height: Number(n.style?.height), level: n.data.surfaceLevel }]));
       gluing.latest = moved;
-      gluing.candidate = glueActive ? findGlue(moved, targets, 16 / getViewport().zoom) : undefined;
+      const candidate = glueActive ? findGlue(moved, targets, 16 / getViewport().zoom) : undefined;
+      if (JSON.stringify([candidate?.bonds, candidate?.alignment]) !== JSON.stringify([gluing.candidate?.bonds, gluing.candidate?.alignment])) {
+        gluing.motion = canvasMotionReduced() ? undefined : { from: gluing.offset, started: performance.now() };
+      }
+      gluing.candidate = candidate;
       setGluePreview(gluing.candidate);
-      setNodes(current => current.map(n => moved[n.id] ? { ...n, position: { x: moved[n.id].x, y: moved[n.id].y } } : n));
+      presentGlueDrag();
       return;
     }
     const transformation = transformationTarget(event, node);
@@ -736,9 +773,10 @@ export function WorldCanvas() {
     }
     if (resource?.id !== node.id || !("clientX" in event)) return;
     useEquipmentDrag.getState().set(resource, owner?.id);
-  }, [equipmentDropOwner, clearContainerDropHint, cards, catalog, transformationTarget, glueActive, getViewport, setNodes, surfaceLevels, surfaceSizes]);
+  }, [equipmentDropOwner, clearContainerDropHint, cards, catalog, transformationTarget, glueActive, getViewport, presentGlueDrag, surfaceLevels, surfaceSizes]);
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
+    cancelGlueAnimation();
     if(cancelledDrag.current){activeDragIds.current.clear();setDragging(false);setNodes(mappedNodes);return;}
     clearContainerDropHint();
     cancelPositionAnimation();
@@ -757,14 +795,27 @@ export function WorldCanvas() {
       const candidate = gluing.candidate;
       const layout = Object.fromEntries(Object.entries(gluing.latest).map(([id, b]) => [id, { ...b, x: b.x + (candidate?.dx ?? 0), y: b.y + (candidate?.dy ?? 0) }]));
       if (candidate) {
-        const target = nodesRef.current.find(n => n.id === candidate.b)!;
-        layout[target.id] = { x: target.position.x, y: target.position.y, width: Number(target.style?.width), height: Number(target.style?.height), level: target.data.surfaceLevel };
+        const targetIds = new Set(candidate.bonds.flatMap(bond => [...glueGroup(bond.b, glueBonds)]));
+        for (const target of nodesRef.current.filter(n => targetIds.has(n.id))) {
+          layout[target.id] = { x: target.position.x, y: target.position.y, width: Number(target.style?.width), height: Number(target.style?.height), level: target.data.surfaceLevel };
+        }
       }
-      if (candidate || Object.keys(layout).some(id => glueBoxes[id])) useGlueStore.getState().setLayout(layout, candidate);
+      const original = useGlueStore.getState();
+      if (candidate || Object.keys(layout).some(id => glueBoxes[id])) useGlueStore.getState().setLayout(layout, candidate?.bonds);
+      setNodes(current => current.map(n => layout[n.id] ? { ...n, position: { x: layout[n.id].x, y: layout[n.id].y } } : n));
       glueDrag.current = undefined;
       setGluePreview(undefined);
-      void updateCardPositions(Object.entries(layout).map(([id, b]) => ({ id, position: nodePositionFromSurfacePosition(b, b.level) })))
-        .then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: t("Glue layout needs a retry"), detail: apiErrorMessage(reason) })).finally(() => {
+      const updates = Object.entries(layout).map(([id, b]) => ({ id, position: nodePositionFromSurfacePosition(b, b.level) }));
+      void updateCardPositions(updates).then(async () => {
+        // Position writes report errors through the world store and resolve.
+        // Do not save a glue layout over positions that failed to commit.
+        const saved = new Map(useWorldStore.getState().cards.map(card => [card.id, card.position]));
+        if (updates.some(({ id, position }) => !saved.has(id) || Math.abs(saved.get(id)!.x - position.x) > .01 || Math.abs(saved.get(id)!.y - position.y) > .01)) {
+          useGlueStore.setState({ boxes: original.boxes, bonds: original.bonds });
+          return;
+        }
+        await persistGlue();
+      }).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: t("Glue layout needs a retry"), detail: apiErrorMessage(reason) })).finally(() => {
         activeDragIds.current.clear(); setDragging(false);
       });
       return;
@@ -839,7 +890,7 @@ export function WorldCanvas() {
       activeDragIds.current.clear();
       setDragging(false);
     });
-  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog, clearContainerDropHint, transformationTarget, glueBoxes, surfaceLevels, surfaceSizes]);
+  }, [cancelPositionAnimation, cancelGlueAnimation, cards, setDragging, updateCardPositions, updateCard, catalog, clearContainerDropHint, transformationTarget, glueBoxes, glueBonds, surfaceLevels, surfaceSizes, setNodes]);
 
   const pickedCard = useRef<{ source: CanvasNode; nodes: CanvasNode[]; anchor: { x: number; y: number }; moved: boolean }>();
   const cardPointerEvent = (point: TouchPoint) => new PointerEvent('pointermove', {
@@ -1113,6 +1164,8 @@ export function WorldCanvas() {
         <GlueLayer nodes={nodes} preview={gluePreview} />
         <ResizeLayer nodes={nodes} setNodes={setNodes} />
         <GenerationLayer />
+        <CanvasMotionLayer />
+        <ConnectionMotionLayer />
         <LegionDeploymentLayer />
         {nodes.filter((node) => node.data.equipmentDetail && !node.hidden).map((node) =>
           <SurfaceBridge key={node.id} sourceId={equipmentOriginId(node.id)} targetId={node.id} />)}

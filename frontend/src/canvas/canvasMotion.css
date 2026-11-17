@@ -1,0 +1,14 @@
+.canvas-motion-layer { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
+.canvas-card-exit { position: absolute; pointer-events: none; transform-origin: center; }
+.canvas-card-exit > :is(.world-card, .container-frame) { width: 100% !important; height: 100% !important; min-height: 0; margin: 0; }
+.canvas-card-exit, .canvas-card-exit * { pointer-events: none !important; animation: none !important; transition: none !important; }
+
+/* Lift the surface, leaving React Flow's positions and connection anchors exact. */
+#oaw-world-map .react-flow__node.dragging > .card-render-boundary {
+  filter: drop-shadow(0 6px 7px var(--shadow));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-motion-layer { display: none; }
+  #oaw-world-map .react-flow__node.dragging > .card-render-boundary { filter: none; }
+}

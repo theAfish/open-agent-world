@@ -268,7 +268,7 @@ async function demonstrate(action: Demonstration, signal: AbortSignal) {
         const boxes = Object.fromEntries([requireCard('glueA'), requireCard('glueB')].map(card => [card.id, {
           ...positionSurfaceAtNodeCenter(card.position, 'preview'), ...NODE_SURFACE_SIZE.preview, level: 'preview',
         }])) as Record<string, GlueBox>;
-        useGlueStore.getState().setLayout(boxes, { a: a.id, b: b.id, side: 'right' });
+        useGlueStore.getState().setLayout(boxes, [{ a: a.id, b: b.id, side: 'right' }]);
         await persistGlue();
         // The same authoritative positions and glue layout used by a canvas drag.
         await visuals?.move(a.id, { x: a.position.x + 35, y: a.position.y - 55 }, signal);

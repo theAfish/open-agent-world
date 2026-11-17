@@ -1,7 +1,16 @@
 import { expect, test } from "@playwright/test";
+import { resetTutorialProfile } from './tutorial-profile';
 
 test("generated copies fly from their template and reusable activity effects follow runtime events", async ({ page, request }) => {
   await page.setViewportSize({ width: 2300, height: 1200 });
+  await resetTutorialProfile(request);
+  const profile = await (await request.get('/api/application')).json();
+  expect((await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation, changes: {
+      'oaw-canvas-viewport-v1': JSON.stringify({ state: { viewport: { x: 0, y: 0, zoom: 1, width: 2300, height: 1200 } }, version: 0 }),
+      'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }),
+    },
+  } })).ok()).toBe(true);
   const box = await (await request.post('/api/nodes', { data: { type: 'oaw.barracks', position: { x: 0, y: 0 } } })).json();
   const template = await (await request.post('/api/nodes', { data: {
     type: 'agent', name: 'Researcher', parent_id: box.id, position: { x: 160, y: 160 },
@@ -49,11 +58,17 @@ test("generated copies fly from their template and reusable activity effects fol
   await page.screenshot({ path: test.info().outputPath('node-effects-running.png') });
   await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
   await page.screenshot({ path: test.info().outputPath('node-effects-running-dark.png') });
+  // Container members start as nodes; explicitly enter preview before testing collapse.
+  await expect(target).toHaveAttribute('data-surface-level', 'node');
+  await target.hover();
+  await target.getByRole('button', { name: 'Expand Researcher card' }).click();
+  await expect(target).toHaveAttribute('data-surface-level', 'preview');
   await target.getByRole('button', { name: 'Collapse Researcher card' }).click();
   await expect(target).toHaveAttribute('data-surface-level', 'node');
   await expect(target).toHaveCSS('width', '96px');
   await expect(target).toHaveCSS('border-top-left-radius', '48px');
   await page.screenshot({ path: test.info().outputPath('node-effects-running-node.png') });
+  await target.hover();
   await target.getByRole('button', { name: 'Expand Researcher card' }).click();
   await target.click({ position: { x: 140, y: 75 } });
   await expect(target).toHaveAttribute('data-surface-level', 'inspector');

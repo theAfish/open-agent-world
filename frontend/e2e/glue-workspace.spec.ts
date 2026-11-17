@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { resetTutorialProfile } from './tutorial-profile';
 
 test('repairs a flattened glued workspace and enforces its resize minimum', async ({ page, request }) => {
+  await resetTutorialProfile(request);
   const a = `workspace-glue-${Date.now()}`, b = `${a}-peer`;
   for (const [id, type, x] of [[a, 'conversation', 100], [b, 'text', 1120]] as const) {
     expect((await request.post('/api/nodes', { data: { id, type, name: id, position: { x, y: 150 } } })).ok()).toBeTruthy();
@@ -12,16 +14,17 @@ test('repairs a flattened glued workspace and enforces its resize minimum', asyn
         [b]: { x: 1120, y: 150, width: 286, height: 156, level: 'preview' } },
       bonds: [{ a, b, side: 'right' }],
     } })).ok()).toBeTruthy();
-    await page.addInitScript(id => {
-      localStorage.setItem('oaw-node-surfaces-v1', JSON.stringify({ state: { surfaceLevels: { [id]: 'workspace' } }, version: 3 }));
-      localStorage.setItem('oaw-canvas-viewport-v1', JSON.stringify({ state: { viewport: { x: 0, y: 0, zoom: 0.7, width: 1280, height: 800 } }, version: 0 }));
-    }, a);
+    const profile = await (await request.get('/api/application')).json();
+    expect((await request.patch('/api/application/preferences', { data: { profile_id: profile.profile_id, generation: profile.generation, changes: {
+      'oaw-node-surfaces-v1': JSON.stringify({ state: { surfaceLevels: { [a]: 'workspace' } }, version: 3 }),
+      'oaw-canvas-viewport-v1': JSON.stringify({ state: { viewport: { x: 0, y: 0, zoom: 0.7, width: 1280, height: 800 } }, version: 0 }),
+    } } })).ok()).toBe(true);
     await page.goto('/');
     const card = page.locator(`.react-flow__node[data-id="${a}"]`);
     await expect(card).toHaveClass(/is-glued/);
     await expect.poll(async () => (await (await request.get('/api/canvas/glue')).json()).boxes[a].height).toBe(420);
     await card.click({ modifiers: ['Shift'], position: { x: 40, y: 15 } });
-    const grip = page.locator('.surface-resize-arc.bottom-left');
+    const grip = page.locator('.surface-resize-handle.bottom-left');
     await expect(grip).toBeVisible();
     // An unrelated card event used to refresh persisted geometry mid-gesture.
     const start = (await grip.boundingBox())!;

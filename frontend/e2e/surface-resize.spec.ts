@@ -27,7 +27,7 @@ test.beforeEach(async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
 });
 
-test('details use all four arcs and retain position and size after collapse and reload', async ({ page, request }) => {
+test('details use all four handles and retain position and size after collapse and reload', async ({ page, request }) => {
   const card = await (await request.post('/api/nodes', { data: { type: 'text', name: 'Resize details', position: { x: 700, y: 500 } } })).json();
   try {
     await presentation(request, { [card.id]: 'inspector' }, .8);
@@ -46,11 +46,11 @@ test('details use all four arcs and retain position and size after collapse and 
       expect(top ? after.y + after.height : after.y).toBeCloseTo(top ? before.y + before.height : before.y, 0);
     }
     const resized = (await surface.boundingBox())!;
-    await page.screenshot({ path: 'test-results/details-resize-arcs.png' });
+    await page.screenshot({ path: 'test-results/details-resize-handles.png' });
     await surface.getByRole('button', { name: 'Close Resize details inspector' }).click();
     await expect(surface).toHaveAttribute('data-surface-level', 'preview');
     await expect(page.locator(`[data-resize-node="${card.id}"]`)).toHaveCount(0);
-    await surface.locator('.card-eyebrow').click();
+    await surface.click({ position: { x: 35, y: 25 } });
     await expect.poll(async () => (await surface.boundingBox())!.width).toBeCloseTo(resized.width, 0);
     await expect.poll(async () => {
       const profile = await (await request.get('/api/application')).json();
@@ -215,7 +215,7 @@ test('plugin workspace containers share the corner controller and persist their 
     await presentation(request, {});
     await page.goto('/');
     const frame = page.locator(`.container-frame[data-card-id="${card.id}"]`);
-    await frame.locator('.container-header strong').click();
+    await frame.locator('.container-header').click({ position: { x: 100, y: 20 } });
     await expect(page.locator(`[data-resize-node="${card.id}"]`)).toHaveCount(4);
     const before = (await frame.boundingBox())!;
     await dragCorner(page, card.id, 'top-left', -60, -40);

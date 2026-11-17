@@ -63,7 +63,7 @@ function GenerationFlight({ generation }: { generation: NodeGeneration }) {
       const tick = (now: number) => {
         const destination = getInternalNode(generation.targetId);
         if (!destination || !target?.isConnected || document.hidden || !clone) { settle(); return; }
-        const progress = Math.min(1, Math.max(0, (now - began - 120) / 650));
+        const progress = Math.min(1, Math.max(0, (now - began) / 520));
         const point = flightPosition(from, destination.internals.positionAbsolute, progress);
         const eased = 1 - (1 - progress) ** 3;
         const sx = 1 + (((destination.measured.width ?? width) / width) - 1) * eased;

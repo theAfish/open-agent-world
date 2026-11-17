@@ -44,7 +44,7 @@ describe('glue geometry', () => {
     const candidate = findGlue({ a: boxes.a }, { b: boxes.b }, 16)!;
     try {
       useGlueStore.setState({ boxes: {}, bonds: [] });
-      useGlueStore.getState().setLayout(boxes, candidate);
+      useGlueStore.getState().setLayout(boxes, candidate.bonds);
       expect(useGlueStore.getState().bonds).toEqual([{ a: 'a', b: 'b', side: 'right' }]);
     } finally { useGlueStore.setState({ boxes: {}, bonds: [] }); }
   });
@@ -78,12 +78,56 @@ describe('glue geometry', () => {
     expect(workspace.b.x).toBe(1200);
   });
   it('attaches opposite edges and rejects corner-only contact and distant cards', () => {
-    expect(findGlue({ a: box(0, 0) }, { b: box(210, 30) }, 16)).toMatchObject({ side: 'right', dx: 10, dy: 0 });
-    expect(findGlue({ a: box(0, 0) }, { b: box(0, 170) }, 16)).toMatchObject({ side: 'bottom', dy: 10 });
-    expect(findGlue({ a: box(0, 0) }, { b: box(-210, 0) }, 16)?.side).toBe('left');
-    expect(findGlue({ a: box(0, 0) }, { b: box(0, -170) }, 16)?.side).toBe('top');
+    expect(findGlue({ a: box(0, 0) }, { b: box(210, 30) }, 16)).toEqual({ bonds: [{ a: 'a', b: 'b', side: 'right' }], dx: 10, dy: 0 });
+    expect(findGlue({ a: box(0, 0) }, { b: box(0, 170) }, 16)).toMatchObject({ bonds: [{ side: 'bottom' }], dy: 10 });
+    expect(findGlue({ a: box(0, 0) }, { b: box(-210, 0) }, 16)?.bonds[0].side).toBe('left');
+    expect(findGlue({ a: box(0, 0) }, { b: box(0, -170) }, 16)?.bonds[0].side).toBe('top');
     expect(findGlue({ a: box(0, 0) }, { b: box(210, 159) }, 16)).toBeUndefined();
     expect(findGlue({ a: box(0, 0) }, { b: box(230, 0) }, 16)).toBeUndefined();
+  });
+  it('snaps both sides of an inside corner and records every touching seam', () => {
+    const candidate = findGlue({ c: box(207, 169) }, { a: box(0, 0, 200, 320), b: box(200, 0) }, 16)!;
+    expect(candidate).toEqual({ dx: -7, dy: -9, bonds: [
+      { a: 'c', b: 'a', side: 'left' }, { a: 'c', b: 'b', side: 'top' },
+    ] });
+  });
+  it.each([
+    ['right', 'top', box(210, 9, 240, 210), 10, 9],
+    ['right', 'bottom', box(210, -50, 240, 220), 10, 10],
+    ['left', 'top', box(-250, 9, 240, 210), -10, 9],
+    ['left', 'bottom', box(-250, -50, 240, 220), -10, 10],
+    ['bottom', 'left', box(9, 170, 240, 210), 9, 10],
+    ['bottom', 'right', box(-50, 170, 260, 210), 10, 10],
+    ['top', 'left', box(9, -220, 240, 210), 9, -10],
+    ['top', 'right', box(-50, -220, 260, 210), 10, -10],
+  ] as const)('aligns the %s seam at its %s end with unequal surfaces', (side, edge, target, dx, dy) => {
+    expect(findGlue({ a: box(0, 0) }, { b: target }, 16)).toEqual({ dx, dy,
+      bonds: [{ a: 'a', b: 'b', side }], alignment: { a: 'a', b: 'b', edge } });
+  });
+  it('leaves distant ends free and rejects end alignment that would overlap another surface', () => {
+    expect(findGlue({ a: box(0, 0) }, { b: box(210, 18, 240, 210) }, 16)).toEqual({ dx: 10, dy: 0,
+      bonds: [{ a: 'a', b: 'b', side: 'right' }] });
+    expect(findGlue({ a: box(0, 0) }, { b: box(210, 10, 240, 220), c: box(10, 165, 195, 100) }, 16))
+      .toMatchObject({ dx: 10, dy: 5, bonds: [{ a: 'a', b: 'b', side: 'right' }, { a: 'a', b: 'c', side: 'bottom' }] });
+  });
+  it('rejects snaps that would overlap another card, including another member of the moving group', () => {
+    expect(findGlue({ a: box(0, 0) }, { b: box(210, 0), blocker: box(-10, 20) }, 16)).toBeUndefined();
+    expect(findGlue({ a: box(0, 0), c: box(0, 160) }, { b: box(210, 0), blocker: box(205, 160) }, 16))
+      .toMatchObject({ dx: 5, bonds: [{ a: 'c', b: 'blocker', side: 'right' }] });
+  });
+  it('records parallel seams and leaves unrelated selected cards unglued', () => {
+    const moving = { a: box(0, 0), c: box(0, 160), loose: box(-500, 600) };
+    const targets = { b: box(208, 0, 200, 320) };
+    const candidate = findGlue(moving, targets, 16)!;
+    expect(candidate.bonds).toEqual([{ a: 'a', b: 'b', side: 'right' }, { a: 'c', b: 'b', side: 'right' }]);
+    try {
+      useGlueStore.setState({ boxes: {}, bonds: [] });
+      useGlueStore.getState().setLayout({ ...moving, ...targets }, [...candidate.bonds, ...candidate.bonds]);
+      expect(Object.keys(useGlueStore.getState().boxes).sort()).toEqual(['a', 'b', 'c']);
+      expect(useGlueStore.getState().bonds).toHaveLength(2);
+      useGlueStore.getState().detach('b');
+      expect(useGlueStore.getState().boxes).toEqual({});
+    } finally { useGlueStore.setState({ boxes: {}, bonds: [] }); }
   });
   it('moves transitive groups and hides corners occupied by seams', () => {
     const bonds = [{ a: 'a', b: 'b', side: 'right' as const }, { a: 'b', b: 'c', side: 'bottom' as const }];

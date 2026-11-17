@@ -54,7 +54,7 @@
 .generation-copy {
   position: absolute !important; left: 0; top: 0; margin: 0; pointer-events: none !important;
   transform-origin: top left; will-change: transform, opacity; overflow: hidden;
-  box-shadow: 0 0 24px var(--accent-soft), -14px 8px 22px color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  box-shadow: 0 12px 28px var(--shadow-deep), 0 2px 6px var(--shadow) !important;
   transition: none !important;
 }
 .generation-copy * { pointer-events: none !important; animation: none !important; }
@@ -64,8 +64,8 @@
 @keyframes activity-particle { 15% { opacity: 0.65; } 100% { opacity: 0; transform: translate(3px, -10px) scale(0.5); } }
 @keyframes activity-finish { 0%, 30% { opacity: 0.95; } 100% { opacity: 0; } }
 @keyframes region-materialize { from { opacity: 0; clip-path: inset(0 100% 0 0 round 24px); } to { opacity: 1; clip-path: inset(0 0 0 0 round 24px); } }
-@keyframes generation-land { from { opacity: 0.2; filter: drop-shadow(0 0 16px var(--accent)); } to { opacity: 1; filter: none; } }
-@keyframes generation-source { 20% { filter: drop-shadow(0 0 6px var(--accent)); } 100% { filter: none; } }
+@keyframes generation-land { from { opacity: 0.4; scale: .985; } to { opacity: 1; scale: 1; } }
+@keyframes generation-source { 20% { filter: brightness(1.06); } 100% { filter: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   .activity-glow::before, .activity-glow::after, .activity-glow i { animation: none !important; }

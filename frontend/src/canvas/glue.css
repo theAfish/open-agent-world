@@ -1,15 +1,29 @@
 .glue-seam { position: absolute; z-index: 30; pointer-events: none; background: transparent; display: flex; }
 .glue-seam.horizontal { flex-direction: column; }
-.glue-seam.is-preview { background: color-mix(in srgb, var(--accent) 65%, transparent); filter: blur(1px); animation: glue-pulse .8s ease-in-out infinite alternate; }
-.glue-stitch { position: relative; pointer-events: auto; flex: 1; min-width: 8px; min-height: 8px; border: 0; padding: 0; cursor: pointer; background: transparent; color: var(--ink-faint); }
-.glue-stitch:hover, .glue-stitch.is-selected { color: var(--ink); background: transparent; }
+.glue-seam::before, .glue-seam::after { content: ''; position: absolute; pointer-events: none; opacity: 0; }
+.glue-seam::before { border-radius: 999px; background: var(--canvas-selection, var(--accent)); }
+.glue-seam.vertical::before { top: 0; bottom: 0; left: 50%; width: calc(1.5px * var(--canvas-ui-scale, 1)); transform: translateX(-50%); }
+.glue-seam.horizontal::before { left: 0; right: 0; top: 50%; height: calc(1.5px * var(--canvas-ui-scale, 1)); transform: translateY(-50%); }
+.glue-seam::after { left: 50%; top: 50%; width: calc(6px * var(--canvas-ui-scale, 1)); height: calc(6px * var(--canvas-ui-scale, 1)); border: calc(1px * var(--canvas-ui-scale, 1)) solid var(--canvas-selection, var(--accent)); border-radius: 50%; background: var(--surface-raised); transform: translate(-50%, -50%); }
+.glue-seam.is-preview::before { opacity: .7; animation: glue-preview-in 160ms ease-out both; }
+.glue-seam.is-preview::after { opacity: 1; animation: glue-marker-in 180ms ease-out both; }
+.glue-seam.is-settling::before, .glue-seam.is-settling::after { animation: glue-settle 320ms ease-out both; }
+.glue-stitch { position: relative; pointer-events: auto; flex: 1; min-width: 8px; min-height: 8px; border: 0; padding: 0; cursor: pointer; background: transparent; color: var(--ink-faint); transition: color 140ms ease; }
+.glue-stitch:hover, .glue-stitch.is-selected { color: var(--canvas-selection, var(--accent)); background: transparent; }
 .glue-stitch:focus-visible { outline: 1px dashed var(--ink-faint); outline-offset: 2px; }
 .glue-stitch-marks { position: absolute; left: 50%; top: 50%; width: 12px; height: 56px; max-height: 70%; transform: translate(-50%, -50%); pointer-events: none; overflow: visible; }
 .horizontal .glue-stitch-marks { width: 56px; height: 12px; max-height: none; max-width: 70%; }
 .glue-stitch-marks path { fill: none; stroke: currentColor; stroke-width: 1; stroke-linecap: round; }
 .glue-stitch-marks circle { fill: currentColor; }
 .glue-detach { white-space: nowrap; position: absolute; z-index: 40; pointer-events: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome); color: var(--text); padding: 3px 9px; cursor: pointer; }
-.react-flow__node.is-glued .world-card { box-shadow: none; width: 100%; height: 100%; }
+.glue-shadow { position: absolute; z-index: -1; pointer-events: none; overflow: visible; }
+.react-flow__node.is-glued .world-card.node-surface { width: 100%; height: 100%; box-shadow: inset 0 1px 0 var(--highlight); transition-property: border-radius, border-color, outline-color; }
+#oaw-world-map .react-flow__node.is-glued.dragging > .card-render-boundary { filter: none; }
 .glue-tool-hint { max-width: 260px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--chrome); color: var(--text); font-size: 0.75rem; line-height: 1.7; }
-@keyframes glue-pulse { to { box-shadow: 0 0 18px var(--accent); opacity: .65; } }
-@media (prefers-reduced-motion: reduce) { .glue-seam.is-preview { animation: none; } }
+@keyframes glue-preview-in { from { opacity: 0; } to { opacity: .7; } }
+@keyframes glue-marker-in { from { opacity: 0; scale: 1.6; } to { opacity: 1; scale: 1; } }
+@keyframes glue-settle { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .glue-seam::before, .glue-seam::after { animation: none !important; }
+  .glue-stitch { transition: none; }
+}
