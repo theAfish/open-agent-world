@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import ExitStack
 from dataclasses import replace
 import json
 import logging
@@ -17,8 +18,10 @@ import webbrowser
 
 import uvicorn
 
+from backend import __version__
 from backend.config import Settings
 from backend.main import create_app
+from open_agent_world.instances import registered_instance
 
 
 def bind_local_port(preferred: int, attempts: int = 100) -> socket.socket:
@@ -38,7 +41,7 @@ def bind_local_port(preferred: int, attempts: int = 100) -> socket.socket:
     raise RuntimeError(f"No free loopback port near {preferred}")
 
 
-def configure_logs(settings: Settings):
+def configure_logs(settings: Settings, *, quiet=False):
     # Keep active log writes outside a relocatable store: storage migration copies
     # and verifies that store before services start, while logging its progress.
     directory = settings.data_root.with_name(settings.data_root.name + ".logs") if settings.storage_config_path else settings.data_root / "logs"
@@ -46,7 +49,8 @@ def configure_logs(settings: Settings):
     log_path = directory / "launcher.log"
     handler = RotatingFileHandler(log_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
-    logging.basicConfig(level=logging.INFO, handlers=[handler, logging.StreamHandler(sys.stderr)], force=True)
+    handlers = [handler] if quiet else [handler, logging.StreamHandler(sys.stderr)]
+    logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         logger = logging.getLogger(name)
         logger.handlers.clear()
@@ -57,7 +61,7 @@ def configure_logs(settings: Settings):
 RESTART_EXIT_CODE = 75
 
 
-async def serve(settings, listener, *, frontend=None, desktop=False, open_browser=False):
+async def serve(settings, listener, *, frontend=None, desktop=False, open_browser=False, profile=None):
     parent_closed = threading.Event()
     restart = threading.Event()
     if desktop:
@@ -77,11 +81,19 @@ async def serve(settings, listener, *, frontend=None, desktop=False, open_browse
         app = create_app(settings, development=development, frontend_directory=frontend, restart=restart.set)
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", log_config=None,
                                                proxy_headers=False, timeout_graceful_shutdown=30))
+        registration = ExitStack()
         async def monitor():
             nonlocal opened
             announced = False
             while not server.should_exit:
                 if server.started and not announced:
+                    try:
+                        app.state.local_instance = registration.enter_context(registered_instance(
+                            url=url, mode=settings.application_mode, profile=profile,
+                            version=__version__, data_root=app.state.services.settings.data_root,
+                        ))
+                    except OSError as error:
+                        logging.getLogger(__name__).warning("Local CLI discovery is unavailable: %s", error)
                     print(json.dumps({"event": "ready", "url": url, "mode": settings.application_mode}), flush=True)
                     announced = True
                     if open_browser and not opened:
@@ -99,6 +111,7 @@ async def serve(settings, listener, *, frontend=None, desktop=False, open_browse
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)
             connection.close()
+            registration.close()
         if not development or not development.pending or parent_closed.is_set():
             if not server.started and not parent_closed.is_set():
                 raise RuntimeError("Backend startup failed. See launcher.log.")
@@ -115,7 +128,7 @@ async def serve(settings, listener, *, frontend=None, desktop=False, open_browse
         listener = bind_local_port(port, 1)
 
 
-def supervise(*, desktop: bool, open_browser: bool) -> int:
+def supervise(*, desktop: bool, open_browser: bool, quiet: bool = False) -> int:
     """Keep the owner and address stable while restarting the Python interpreter."""
     stopped = threading.Event()
     if desktop:
@@ -146,8 +159,12 @@ def supervise(*, desktop: bool, open_browser: bool) -> int:
                         if open_browser and not opened:
                             webbrowser.open(event["url"])
                             opened = True
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
+                        if quiet:
+                            print(f"OAW is running at {event['url']}", flush=True)
+                            print("Keep this terminal open. Use oaw in another terminal.", flush=True)
+                    if not quiet:
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
             output = threading.Thread(target=forward_output)
             output.start()
             try:
@@ -178,13 +195,16 @@ def main():
     parser.add_argument("--frontend", type=Path)
     parser.add_argument("--desktop", action="store_true")
     parser.add_argument("--open", action="store_true")
+    parser.add_argument("--quiet", action="store_true", help="Keep application logs in launcher.log")
     parser.add_argument("--no-sandbox", action="store_true", help="Disable execution environments for UI-only acceptance tests")
     parser.add_argument("--server-worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("Port must be between 1 and 65535")
     if not args.server_worker:
-        raise SystemExit(supervise(desktop=args.desktop, open_browser=args.open))
+        if args.quiet:
+            print("Starting OAW...", flush=True)
+        raise SystemExit(supervise(desktop=args.desktop, open_browser=args.open, quiet=args.quiet))
     settings = replace(Settings.from_environment(), application_mode=args.mode)
     if args.no_sandbox:
         settings = replace(settings, sandbox_runtime=None)
@@ -199,11 +219,12 @@ def main():
     if args.frontend and not (args.frontend / "index.html").is_file():
         parser.error("Frontend build is missing. Run npm --prefix frontend run build first.")
     # prepare_profile must run before logging creates files inside a new dev root.
-    log_path = configure_logs(settings)
+    log_path = configure_logs(settings, quiet=args.quiet)
     print(json.dumps({"event": "starting", "log": str(log_path), "mode": args.mode}), flush=True)
     listener = bind_local_port(args.port, 1 if args.strict_port else 100)
     try:
-        restarting = asyncio.run(serve(settings, listener, frontend=args.frontend, desktop=args.desktop))
+        restarting = asyncio.run(serve(settings, listener, frontend=args.frontend, desktop=args.desktop,
+                                      profile=args.profile if args.mode != "production" else None))
     finally:
         listener.close()
     if restarting:

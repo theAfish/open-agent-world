@@ -20,6 +20,11 @@ from backend.sandbox.models import SandboxValidationError
 
 router = APIRouter(tags=["runtime"])
 
+
+@router.get("/instance")
+async def local_instance(request: Request):
+    return getattr(request.app.state, "local_instance", None)
+
 from backend.security.model_connections import CatalogEdit, ModelCatalog, ModelConnectionStore
 
 
@@ -229,6 +234,14 @@ async def get_run(
     services: ApplicationServices = Depends(get_services),
 ) -> RunRecord:
     return services._require_run_manager().store.get(run_id, summary=summary)
+
+
+@router.get("/runs/{run_id}/result")
+async def run_result(run_id: str, services: ApplicationServices = Depends(get_services)):
+    manager = services._require_run_manager()
+    record = manager.get_run(run_id)
+    return {"run_id": record.run_id, "agent_id": record.agent_id, "status": record.status,
+            "text": manager.final_text(run_id), "error": record.error}
 
 
 @router.get("/runs/{run_id}/activity")

@@ -8,6 +8,7 @@ in a downloaded release.
 | What you want to do | Start here |
 | --- | --- |
 | Use OAW without programming | [User Guide](user-guide/index.md): install, connect a model, let an Agent read a brief |
+| Use a terminal or external agent | [OAW CLI](cli.md): inspect cards, connect resources and run Agents |
 | Build your own Card App | [Card / Pack Developer Guide](developers/index.md): Python behavior, graph permissions, React UI, packaging and installation |
 | Look up an exact contract | [Technical Reference](reference/index.md): API, schemas, persistence and execution boundaries |
 | Change or operate OAW itself | [Contributor / Maintainer Guide](contributing/index.md): source setup, tests, CI, releases and deployment |

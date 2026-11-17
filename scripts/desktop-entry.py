@@ -41,7 +41,10 @@ def prepare_self_test(data_root: Path) -> None:
         services.close()
 
 
-if "--backup-preflight" in sys.argv or "--backup-for-update" in sys.argv:
+if len(sys.argv) > 1 and sys.argv[1] == "--cli":
+    from open_agent_world.cli import main
+    raise SystemExit(main(sys.argv[2:]))
+elif "--backup-preflight" in sys.argv or "--backup-for-update" in sys.argv:
     from backend.config import Settings
     from backend.desktop_backup import backup_preflight, backup_for_update
     import json

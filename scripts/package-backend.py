@@ -139,7 +139,7 @@ def main():
         # Honor repository ignores, including local .env files, caches and user data.
         # New implementation files are included even before a developer commits them.
         source_files = subprocess.check_output(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard",
-                                                "--", "backend", "open_agent_world", "plugins"], cwd=root).decode("utf-8").split("\0")
+                                                "--", "backend", "open_agent_world", "plugins", "examples/packs/notes"], cwd=root).decode("utf-8").split("\0")
         for name in set(source_files) - {""}:
             relative = Path(name)
             if not runtime_source(relative):
@@ -157,9 +157,18 @@ def main():
         (stage / "tools").mkdir()
         shutil.copy2(uv, stage / ("tools/uv.exe" if os.name == "nt" else "tools/uv"))
         shutil.copy2(root / "scripts/desktop-entry.py", stage / "launch.py")
+        (stage / "scripts").mkdir(exist_ok=True)
+        shutil.copy2(root / "scripts/oaw.py", stage / "scripts/oaw.py")
+        for name in ("install-cli.py", "install-cli.ps1", "install-cli.sh"):
+            shutil.copy2(root / "scripts" / name, stage / "scripts" / name)
+        shutil.copy2(root / "oaw.cmd", stage / "oaw.cmd")
+        shutil.copy2(root / "oaw.ps1", stage / "oaw.ps1")
+        shutil.copy2(root / "oaw", stage / "oaw")
+        (stage / "oaw").chmod(0o755)
         (stage / "build-info.json").write_text(json.dumps({"built_at": datetime.now(UTC).isoformat(),
             "python": source_info["version"], "platform": "windows-x64" if os.name == "nt" else f"macos-{platform.machine()}", "backend_dependencies": "requirements.txt"}, indent=2), encoding="utf-8")
         env["PATH"] = str(stage / "tools") + os.pathsep + env.get("PATH", "")
+        run([python, "-I", "-B", stage / "launch.py", "--cli", "--version"], root=stage, env=env)
         run([python, "-I", "-B", stage / "launch.py", "--self-test"], root=stage, env=env)
     destination = build_root / "desktop-payload"
     print(f"Desktop payload ready: {destination}", flush=True)
