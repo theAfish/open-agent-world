@@ -30,13 +30,19 @@ def _password():
     return first
 
 
-def initialize(directory: Path, origin: str, allow_local_http=False):
+def initialize(directory: Path, origin: str, allow_local_http=False, *, enable_registration=False):
     public_origin(origin, allow_local_http)
     config = directory / "control/hosting.json"
     if config.exists():
         raise ValueError("Installation already exists; initialization never overwrites accounts or routes")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     write_private_json(config, {"version": 1, "public_origin": origin, "allow_local_http": allow_local_http, "profiles": []})
+    if enable_registration:
+        write_private_json(config.parent / "verification.json", {
+            "email_mode": "log",
+            "sms_mode": "log",
+            "log_path": "dev-codes.jsonl",
+        })
     AccountStore(config.parent / "accounts.sqlite3")
     return config
 
@@ -134,6 +140,8 @@ def main(argv=None):
     init.add_argument("--directory", type=Path, required=True)
     init.add_argument("--origin", required=True)
     init.add_argument("--allow-local-http", action="store_true")
+    init.add_argument("--enable-registration", action="store_true",
+                      help="Create control/verification.json for email + SMS registration and verification login")
     for name in ("shared-models-enable", "shared-environment-enable"):
         shared = commands.add_parser(name)
         shared.add_argument("--directory", type=Path, required=True)
@@ -193,7 +201,8 @@ def main(argv=None):
             print(f"Installed; start with: systemctl enable --now {args.name}.target")
         return
     if args.command == "init":
-        print(initialize(args.directory.resolve(), args.origin, args.allow_local_http))
+        print(initialize(args.directory.resolve(), args.origin, args.allow_local_http,
+                         enable_registration=args.enable_registration))
         return
     if args.command == "shared-models-enable":
         enable_shared_models(args.directory.resolve(), args.origin)
@@ -229,7 +238,13 @@ def main(argv=None):
             if oidc_path.is_file():
                 from .oidc import OidcSettings
                 oidc = OidcSettings(**json.loads(oidc_path.read_text(encoding="utf-8")))
-            app = create_gateway(read_gateway_settings(config), args.frontend, oidc_settings=oidc, settings_path=config)
+            verification_path = config.parent / "verification.json"
+            verification = None
+            if verification_path.is_file():
+                from .verification import VerificationDispatcher, read_verification_settings
+                verification = VerificationDispatcher(read_verification_settings(verification_path))
+            app = create_gateway(read_gateway_settings(config), args.frontend,
+                                 oidc_settings=oidc, verification=verification, settings_path=config)
         else:
             from .worker import create_worker_app
             value = json.loads(args.config.read_text(encoding="utf-8"))

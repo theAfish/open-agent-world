@@ -1,10 +1,23 @@
 import { fetchWithRetry } from '../api/fetchWithRetry';
 
+export interface HostedSessionUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role?: 'user' | 'admin';
+  email?: string | null;
+  phone_masked?: string | null;
+  session_persistent?: boolean;
+  session_expires_at?: number | null;
+}
+
 export interface HostedSession {
   hosted: true;
   authenticated: boolean;
-  user: { id: string; username: string; display_name: string; role?: 'user' | 'admin' } | null;
-  login_methods: ('password' | 'oidc')[];
+  user: HostedSessionUser | null;
+  login_methods: ('password' | 'code' | 'oidc')[];
+  registration_enabled?: boolean;
+  provisioning?: boolean;
   instance: { id: string; application_id: string; name: string; mode: 'builder' | 'runtime'; pack_management?: boolean } | null;
 }
 
@@ -28,6 +41,12 @@ export const hostedConnectionState = () => connectionState;
 export function subscribeHostedConnection(listener: () => void) {
   connectionListeners.add(listener);
   return () => { connectionListeners.delete(listener); };
+}
+
+export function updateHostedSessionUser(patch: Partial<HostedSessionUser>) {
+  if (!session?.user) return;
+  session = { ...session, user: { ...session.user, ...patch } };
+  connectionListeners.forEach(listener => listener());
 }
 
 function setConnectionState(value: typeof connectionState) {

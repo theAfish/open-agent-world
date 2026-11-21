@@ -26,10 +26,12 @@ _RESPONSE_HEADERS = {"cache-control", "set-cookie", "server", "x-powered-by"}
 
 
 class Gateway:
-    def __init__(self, settings: GatewaySettings, auth: HostedAuth, frontend_directory: Path, *, transport=None, settings_path=None):
+    def __init__(self, settings: GatewaySettings, auth: HostedAuth, frontend_directory: Path, *,
+                 transport=None, settings_path=None, auto_provision=None):
         self.settings, self.auth = settings, auth
         self.frontend_directory = frontend_directory
         self.settings_path, self.transport = settings_path, transport
+        self.auto_provision = auto_provision
         self.settings_stamp = None
         from .deployments import DeploymentStore
         self.deployments = DeploymentStore(settings.accounts_path.parent / "deployments.sqlite3")
@@ -81,15 +83,80 @@ class Gateway:
         return JSONResponse({"error": {"code": code, "message": message}}, status_code=status,
                             headers={"X-OAW-Instance": profile.profile_id} if profile else {})
 
+    async def auto_provision_user(self, user: dict, *, actor_id: str | None = None):
+        import inspect
+        import json
+        from uuid import UUID, uuid5
+        await self.refresh()
+        if user.get("role") == "admin" or user["id"] in self.profiles:
+            return
+        if self.auto_provision is not None:
+            result = self.auto_provision(user)
+            if inspect.isawaitable(result):
+                await result
+            await self.refresh()
+            return
+        if self.settings_path is None:
+            return
+        template_path = self.settings_path.parent / "default-template.json"
+        if not template_path.is_file() or template_path.is_symlink():
+            return
+        admin_id = actor_id or next(
+            (u["id"] for u in self.auth.store.list_users(enabled=True) if u["role"] == "admin"), None
+        )
+        if admin_id is None:
+            return
+        try:
+            from .deployments import DeployRequest
+            from .templates import validate_template
+            template = json.loads(template_path.read_text(encoding="utf-8"))
+            validate_template(template)
+            req = DeployRequest(
+                request_id=uuid5(UUID(user["id"]), "oaw-auto-provision"),
+                release_id=UUID(template["source_release_id"]),
+                user_ids=[UUID(user["id"])],
+                mode="runtime",
+            )
+            self.deployments.enqueue(req, admin_id, template)
+        except Exception:
+            import logging
+            logging.exception("Automatic workspace queueing skipped for user %s", user["id"])
+
     async def me(self, request: Request):
         await self.refresh()
-        user = await self.auth.user_from_scope(request.scope)
+        user = await self.auth.user_from_scope(request.scope, touch=True)
         profile = self.profiles.get(user["id"]) if user else None
-        return JSONResponse({"hosted": True, "authenticated": user is not None,
-                             "user": {key: user[key] for key in ("id", "username", "display_name", "role")} if user else None,
-                             "login_methods": self.auth.login_methods,
-                             "shared_models": self.settings.shared_models_origin is not None,
-                             "instance": profile.public() if profile else None})
+        pending = False
+        user_payload = None
+        if user is not None:
+            user_payload = {key: user[key] for key in ("id", "username", "display_name", "role")}
+            if user.get("email") is not None:
+                user_payload["email"] = user["email"]
+            if user.get("phone_masked") is not None:
+                user_payload["phone_masked"] = user["phone_masked"]
+            user_payload["session_persistent"] = bool(user.get("session_persistent"))
+            user_payload["session_expires_at"] = user.get("session_expires_at")
+            if profile is None:
+                pending = any(
+                    job.get("user_id") == user["id"]
+                    and job.get("status") in {"queued", "preparing", "preparing_resources", "waiting_resources"}
+                    for job in self.deployments.jobs()
+                )
+        payload = {
+            "hosted": True,
+            "authenticated": user is not None,
+            "user": user_payload,
+            "login_methods": self.auth.login_methods,
+            "shared_models": self.settings.shared_models_origin is not None,
+            "instance": profile.public() if profile else None,
+        }
+        if self.auth.registration_enabled:
+            payload["registration_enabled"] = True
+        if pending:
+            payload["provisioning"] = True
+        response = JSONResponse(payload)
+        self.auth.apply_renewed_cookie(request, response, user)
+        return response
 
     async def shell(self, request: Request):
         entry = self.frontend_directory / "index.html"
@@ -339,18 +406,23 @@ class GatewayHeaders:
         await self.app(scope, receive, protected_send)
 
 
-def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_settings=None, transport=None,
+def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_settings=None,
+                   verification=None, auto_provision=None, transport=None,
                    auth_transport=None, store=None, settings_path=None):
     store = store or AccountStore(settings.accounts_path)
     auth = HostedAuth(store, settings.public_origin, allow_local_http=settings.allow_local_http,
-                      oidc_settings=oidc_settings, transport=auth_transport)
-    gateway = Gateway(settings, auth, Path(frontend_directory), transport=transport, settings_path=settings_path)
+                      oidc_settings=oidc_settings, verification=verification, transport=auth_transport)
+    gateway = Gateway(settings, auth, Path(frontend_directory), transport=transport,
+                      settings_path=settings_path, auto_provision=auto_provision)
+    auth.on_user_registered = gateway.auto_provision_user
     from .shared_models import SharedModelAdmin
     admin = SharedModelAdmin(gateway)
     from .deployments import DeploymentAdmin
     deployments = DeploymentAdmin(gateway, admin.authorize)
     from .shared_environment import SharedEnvironmentAdmin
     environment = SharedEnvironmentAdmin(gateway, admin.authorize)
+    from .user_admin import UserAdmin
+    users_admin = UserAdmin(gateway, admin.authorize)
 
     @asynccontextmanager
     async def lifespan(_):
@@ -373,6 +445,8 @@ def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_
                    Route("/hosting/admin/deployments", deployments.catalog, methods=["GET"]),
                    Route("/hosting/admin/deployments", deployments.deploy, methods=["POST"]),
                    Route("/hosting/admin/entry", deployments.assign, methods=["PUT"]),
+                   Route("/hosting/admin/users", users_admin.collection, methods=["GET", "POST"]),
+                   Route("/hosting/admin/users/{user_id}", users_admin.item, methods=["PATCH"]),
                    Route("/hosting/admin/models/discover", admin.discover, methods=["POST"]),
                    Route("/hosting/admin/status", admin.status),
                    Route("/hosting/internal/models/{profile_id}", admin.worker_catalog),
